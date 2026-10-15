@@ -1,12 +1,13 @@
 #!/usr/bin/env node
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// rapidtool-cli.mjs — thin argv wrapper over src/lib/headless.ts.
+// rapidtool-cli.mjs â€” thin argv wrapper over src/lib/headless.ts.
 //
-// Drive a RapidTool project with NO browser, NO server, NO Vite — just files.
+// Drive a RapidTool project with NO browser, NO server, NO Vite â€” just files.
 // Every subcommand prints a single JSON object to stdout (parseable by an AI
-// agent) and exits with a machine-readable exit code (E-25 taxonomy — see
+// agent) and exits with a machine-readable exit code (E-25 taxonomy â€” see
 // scripts/README-cli.md "Exit codes"). Failure envelopes additionally carry
-// `code` — a stable RT_E_* id produced by classifyError (src/lib/errors.ts,
+// `code` â€” a stable RT_E_* id produced by classifyError (src/lib/errors.ts,
 // see scripts/README-cli.md "Error codes (RT_E_*)").
 //
 // Run (Node 22, requires --experimental-strip-types to import the .ts driver):
@@ -17,7 +18,7 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs run     --project build.json [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs gate    --project build.json [--autopilot] [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs resume    --project build.json [--autopilot] [--live]   # T-107.7: re-enter from the per-phase checkpoint (prints the snapshot age; never a silent resume)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs unattended --project build.json                         # W-47: scheduler-facing drive — resumes from a checkpoint when present, else starts from the file; autopilot + live; a stock HITL gate whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`), so only a forceHuman gate (or any red DoD gate) still parks (exit 2)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs unattended --project build.json                         # W-47: scheduler-facing drive â€” resumes from a checkpoint when present, else starts from the file; autopilot + live; a stock HITL gate whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`), so only a forceHuman gate (or any red DoD gate) still parks (exit 2)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs approve --project build.json (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed (314 F5 / K2)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs reject  --project build.json --note "..."
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs retry   --project build.json                  # unlock a rejected/blocked phase
@@ -25,10 +26,10 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs packet  --project build.json [--out packet.md]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs export  --project build.json [--out out.json]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs vault   --project build.json [--out <dir>]      # default: <home>/RapidTool Software/<slug>/vault
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs emit    --project build.json [--out <dir>] [--check] [--run] [--require-verified]   # default: <home>/RapidTool Software/<slug>/; --check = per-file compile verdicts; --run = compile + tests + entry smoke (TreeRunOutcome); a green tree whose declared typecheck/build never ran still exits 0 and echoes `unverified` — --require-verified makes that state exit 5
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir <dir> [--project build.json] [--require-verified]                  # fixes/149 P0-1: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits, never clobbers (exit 1 on red with the first not-ok tail; --require-verified makes a green-but-unverified toolchain exit 5); --project adds the hash-checked dirDirty divergence report
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs repair  --dir <dir> --project build.json [--budget N]        # fixes/149 P0-1: hash-checked dir→ledger re-import + bounded repair cycle against the dir (treeRun → red tail → synthesis w/ deps.treeFailure → apply → re-import → treeRun); green → tested-mint + converged (exit 0); budget exhausted → honest failed (exit 1, RT_E_REPAIR_FAILED)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs edit    --dir <dir> --file <relpath> --find "<old>" --replace "<new>" [--write] [--project build.json]   # 216s (108-T1): in-place str_replace on ONE emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, NOTHING is written); --write (requires --project) applies atomically only after evaluatePolicy("repair.apply", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs emit    --project build.json [--out <dir>] [--check] [--run] [--require-verified]   # default: <home>/RapidTool Software/<slug>/; --check = per-file compile verdicts; --run = compile + tests + entry smoke (TreeRunOutcome); a green tree whose declared typecheck/build never ran still exits 0 and echoes `unverified` â€” --require-verified makes that state exit 5
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir <dir> [--project build.json] [--require-verified]                  # fixes/149 P0-1: compile-check treeRun over an EXISTING emitted dir â€” read-only, never re-emits, never clobbers (exit 1 on red with the first not-ok tail; --require-verified makes a green-but-unverified toolchain exit 5); --project adds the hash-checked dirDirty divergence report
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs repair  --dir <dir> --project build.json [--budget N]        # fixes/149 P0-1: hash-checked dirâ†’ledger re-import + bounded repair cycle against the dir (treeRun â†’ red tail â†’ synthesis w/ deps.treeFailure â†’ apply â†’ re-import â†’ treeRun); green â†’ tested-mint + converged (exit 0); budget exhausted â†’ honest failed (exit 1, RT_E_REPAIR_FAILED)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs edit    --dir <dir> --file <relpath> --find "<old>" --replace "<new>" [--write] [--project build.json]   # 216s (108-T1): in-place str_replace on ONE emitted tree file â€” DRY-RUN by default (the diff + would-be hashes are returned, NOTHING is written); --write (requires --project) applies atomically only after evaluatePolicy("repair.apply", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs search  --project build.json --query "..." [--limit N]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs crew    --project build.json [--max-steps N]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs verify  --project build.json [--apply]
@@ -41,21 +42,21 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs prompt  --project build.json [--policies a,b]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs bench   --project build.json
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs mine    --dir src/lib [--limit 200]
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs knowledge --store patterns.json --save '{"project":"p","kind":"pattern","title":"…","tags":["a"],"body":"…"}'
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs knowledge --store patterns.json --save '{"project":"p","kind":"pattern","title":"â€¦","tags":["a"],"body":"â€¦"}'
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs knowledge --store patterns.json --find "auth refresh" [--limit 5]
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs wild    --project build.json [--start|--pause|--resume|--stop] [--steps 24] [--agent-seal]  # --start enables + begins a run; default steps an active run; --agent-seal = the sealed unattended policy (the ONLY verb that accepts it — approve/gate/run/resume/unattended REFUSE it, RT_E_VALIDATION)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs wild    --project build.json [--start|--pause|--resume|--stop] [--steps 24] [--agent-seal]  # --start enables + begins a run; default steps an active run; --agent-seal = the sealed unattended policy (the ONLY verb that accepts it â€” approve/gate/run/resume/unattended REFUSE it, RT_E_VALIDATION)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs chat    --project build.json --ask "..." [--history '[{"role":"user","text":"..."}]']   # grounded copilot turn (needs DEEPSEEK_API_KEY)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs deepen  --project build.json [--phase 7]     # re-run live research over a completed research phase (0/7/11)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --list --project build.json [--brief "…"] [--limit N]     # read-only: the project's lesson rows (kind/class/phase/score/evidence); --brief ranks via topLessonRows (fusionRank), else score-desc
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --propose --brief "raw evidence…" [--project NAME] [--kind fix|pattern|note] [--tags a,b] [--title "…"]   # bounded flash DRAFT (never writes; keyed: one DeepSeek turn; keyless: labeled deterministic draft)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --accept --project build.json --out lessons.json [--actor NAME] [--limit N]  # THE human-gated cross-project lesson write (top FusionRank rows → knowledge store)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --supersede --knowledge-file lessons.json --id K1a2b3c4d [--evidence "…"]  # append-only supersede (new row + markSuperseded)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --refute --knowledge-file lessons.json --id K1a2b3c4d [--evidence "…"]   # counter-evidence bump (decay/retire)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --advise (--project build.json | --knowledge-file lessons.json) [--brief "…"] [--phase N] [--limit N]   # 216s (112 T5): read-only pre-flight — ranked FAIL-class lesson rows (fusionRank vs --brief, else score-desc) with the live telemetry the rows actually carry (reproducedCount / counterEvidence)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --verify (--knowledge-file lessons.json | --project build.json) --anchor <path> [--mark-stale] [--limit N]   # 216s (112 T5): re-hash the anchor's current bytes against each row's recorded evidenceHash= token → ok | stale | anchor-missing; READ-ONLY unless --mark-stale (store counterEvidence telemetry only, never content)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --effect --project build.json   # F3 (221 §F3): read-only cross-run learning MEASUREMENT — recurrence census of the project's lesson rows (reproduced/unreproduced, per-class rates, per-row evidence with the lesson.reproduced ledger rows that accrued it); recurrence ≠ causation label + census window + n≥2 "baseline only" floor ride inside the JSON
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --list --project build.json [--brief "â€¦"] [--limit N]     # read-only: the project's lesson rows (kind/class/phase/score/evidence); --brief ranks via topLessonRows (fusionRank), else score-desc
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --propose --brief "raw evidenceâ€¦" [--project NAME] [--kind fix|pattern|note] [--tags a,b] [--title "â€¦"]   # bounded flash DRAFT (never writes; keyed: one DeepSeek turn; keyless: labeled deterministic draft)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --accept --project build.json --out lessons.json [--actor NAME] [--limit N]  # THE human-gated cross-project lesson write (top FusionRank rows â†’ knowledge store)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --supersede --knowledge-file lessons.json --id K1a2b3c4d [--evidence "â€¦"]  # append-only supersede (new row + markSuperseded)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --refute --knowledge-file lessons.json --id K1a2b3c4d [--evidence "â€¦"]   # counter-evidence bump (decay/retire)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --advise (--project build.json | --knowledge-file lessons.json) [--brief "â€¦"] [--phase N] [--limit N]   # 216s (112 T5): read-only pre-flight â€” ranked FAIL-class lesson rows (fusionRank vs --brief, else score-desc) with the live telemetry the rows actually carry (reproducedCount / counterEvidence)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --verify (--knowledge-file lessons.json | --project build.json) --anchor <path> [--mark-stale] [--limit N]   # 216s (112 T5): re-hash the anchor's current bytes against each row's recorded evidenceHash= token â†’ ok | stale | anchor-missing; READ-ONLY unless --mark-stale (store counterEvidence telemetry only, never content)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --effect --project build.json   # F3 (221 Â§F3): read-only cross-run learning MEASUREMENT â€” recurrence census of the project's lesson rows (reproduced/unreproduced, per-class rates, per-row evidence with the lesson.reproduced ledger rows that accrued it); recurrence â‰  causation label + census window + nâ‰¥2 "baseline only" floor ride inside the JSON
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs packet  --project build.json [--knowledge lessons.json]        # tier-1: seed Ranked memory with accepted cross-project lessons
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs eval    [--dir research/eval-out] [--slug <slug>]              # T5.3 (262 LANE 5): read-only M1-M9 eval scorecard + history deltas from the eval-out documents — no keyed calls, no writes
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs eval    [--dir research/eval-out] [--slug <slug>]              # T5.3 (262 LANE 5): read-only M1-M9 eval scorecard + history deltas from the eval-out documents â€” no keyed calls, no writes
 // ---------------------------------------------------------------------------
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
@@ -63,7 +64,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import readline from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 // R11-f07: the ONE shared physical-containment helper (scripts/path-safety.mjs)
-// — used by the `edit` verb below so a symlinked parent cannot escape --dir.
+// â€” used by the `edit` verb below so a symlinked parent cannot escape --dir.
 import { physicalInside } from "./path-safety.mjs";
 
 // E-25: every result object carries schema_version + cmd + exit_code.
@@ -73,7 +74,7 @@ let CMD = null;
 // binds ONE process, so a multi-invocation campaign could never be bounded.
 // When `--token-ledger <file>` / `RAPIDTOOL_LEDGER_FILE` is set, every opted-in
 // invocation accumulates its measured session spend into that persistent file
-// and refuses once the campaign bound is reached. Absent ⇒ both stay null and
+// and refuses once the campaign bound is reached. Absent â‡’ both stay null and
 // every envelope/byte is exactly as before.
 let CAMPAIGN_LEDGER = null;
 let H_DRIVER = null;
@@ -125,10 +126,10 @@ function flag(args, key) {
   return args[key] === true || args[key] === "true" || args[key] === "1";
 }
 
-// W44 A5 (bug-hunter · scripts box): R5-f10 refused a VALUELESS path flag
+// W44 A5 (bug-hunter Â· scripts box): R5-f10 refused a VALUELESS path flag
 // (`--out` stored as `true`); the EMPTY-VALUE spelling (`--out=`, `--out ""`)
 // still melted through the `typeof args.out === "string"` reads into
-// `resolve("")` — the CWD. Reproduced keyless (C:/Users/mnril/a5_scratch/p1):
+// `resolve("")` â€” the CWD. Reproduced keyless (C:/Users/mnril/a5_scratch/p1):
 // `emit --out=` exited 0 with 15 files silently emitted INTO the cwd;
 // `vault --out=` exited 0 with 17 vault files in the cwd; `packet --out=`
 // exited 4 opening the cwd as a file (EISDIR); `create --out=` exited 4
@@ -145,29 +146,29 @@ function pathFlagRefusalError(cmd, key, v) {
 }
 
 // 316 H3 (315 V2 finding #4): the agent seal (`--agent-seal`) is a WILD-RUN
-// concept — it lives in the wild step's options and only the `wild` verb
+// concept â€” it lives in the wild step's options and only the `wild` verb
 // threads it into effect. parseArgs absorbs ANY `--flag`, so the drive verbs
 // used to swallow it silently (a governance flag a caller could believe had
 // applied, when it never could). ONE coded pointer refusal, reused by every
-// arm whose driver can never carry the seal — name the flag, the code, and
+// arm whose driver can never carry the seal â€” name the flag, the code, and
 // the ONE door that does carry it.
 function refuseAgentSeal(cmdName) {
   return respond(
     {
       ok: false,
-      error: `${cmdName}: --agent-seal does not apply here — the agent seal is a WILD-RUN concept (it opts the wild loop's classifier-as-approver policy into effect; coded [seat agent-seal] rows) and this verb's driver can never carry it.`,
+      error: `${cmdName}: --agent-seal does not apply here â€” the agent seal is a WILD-RUN concept (it opts the wild loop's classifier-as-approver policy into effect; coded [seat agent-seal] rows) and this verb's driver can never carry it.`,
       code: "RT_E_VALIDATION",
       remedy:
-        "The seal is a wild-run concept: use `wild --start --agent-seal` (or `wild --resume --agent-seal` for an active run) — the only verb that threads it into the wild loop; drop the flag here.",
+        "The seal is a wild-run concept: use `wild --start --agent-seal` (or `wild --resume --agent-seal` for an active run) â€” the only verb that threads it into the wild loop; drop the flag here.",
     },
     1,
   );
 }
 
-// S3 (W46 · 332-4): the value-taking flags whose valueless spelling was still
+// S3 (W46 Â· 332-4): the value-taking flags whose valueless spelling was still
 // silently absorbed. parseArgs turns `--x` with no value into `true`; every flag
 // here was then dropped by a `typeof args.x === "string"` read that fell back to
-// a default (--limit 5, --phase null, --steps the seed, …) or by a raw read.
+// a default (--limit 5, --phase null, --steps the seed, â€¦) or by a raw read.
 // The 330/331 waves fixed --knowledge/--agent-seal one at a time; this ONE
 // pre-dispatch refusal covers the rest, so a value flag is never silently
 // ignored. Boolean flags are deliberately absent (--live/--apply/--force/...);
@@ -198,14 +199,14 @@ const VALUELESS_VALUE_FLAGS = [
 
 /** Refuse a value flag parsed valueless or with an empty value, before ANY
  *  verb dispatch. `--x=` sets the key to "" (not `true`); both spellings melt
- *  through a `typeof args.x === "string"` read and are silently ignored — the
+ *  through a `typeof args.x === "string"` read and are silently ignored â€” the
  *  C1-10 `--token-ledger=` repro silently disabled the cross-process cap. */
 function refuseValuelessFlag(cmdName, key, value) {
   const how = value === true ? "it parsed as a flag with no value" : "it parsed with an empty value";
   return respond(
     {
       ok: false,
-      error: `${cmdName}: --${key} needs a value — ${how}, so it would have been silently ignored.`,
+      error: `${cmdName}: --${key} needs a value â€” ${how}, so it would have been silently ignored.`,
       code: "RT_E_VALIDATION",
       remedy: `Pass the value (--${key} <value> or --${key}=<value>), or drop the flag if you did not mean to set it.`,
     },
@@ -213,7 +214,7 @@ function refuseValuelessFlag(cmdName, key, value) {
   );
 }
 
-// W49 · 335-4 (Switchboard) closed the valueless/numeric value-flag classes; a
+// W49 Â· 335-4 (Switchboard) closed the valueless/numeric value-flag classes; a
 // flag name the CLI does not know at all still rode parseArgs through to every
 // arm as an inert key (a typo like `emit --gti` read as a successful emit, and
 // a per-verb flag misplaced on another verb was silently dropped). The
@@ -241,7 +242,7 @@ function refuseUnknownFlag(cmdName, key) {
   return respond(
     {
       ok: false,
-      error: `${cmdName}: unknown flag --${key} — it is not a flag this CLI accepts, so it would have been silently ignored.`,
+      error: `${cmdName}: unknown flag --${key} â€” it is not a flag this CLI accepts, so it would have been silently ignored.`,
       code: "RT_E_VALIDATION",
       remedy: `Run \`--help ${cmdName}\` for the verb's accepted flags, then fix the spelling or drop it.`,
     },
@@ -250,8 +251,8 @@ function refuseUnknownFlag(cmdName, key) {
 }
 
 // B1-F2 (P1): KNOWN_FLAGS above is ONE global set, so a flag that belongs to
-// another verb was still silently accepted (`doctor --start` → ok:true;
-// `mine --dir . --git --limit 1` → ok:true) — contradicting the documented
+// another verb was still silently accepted (`doctor --start` â†’ ok:true;
+// `mine --dir . --git --limit 1` â†’ ok:true) â€” contradicting the documented
 // contract that `--help <verb>` lists THE flags that verb accepts. The accepted
 // set is DERIVED from the verb's own synopsis (`USAGE.commands[verb]`), so the
 // doc IS the contract and a flag cannot ship without appearing in the verb line
@@ -277,7 +278,7 @@ function refuseVerbFlag(cmdName, key) {
   return respond(
     {
       ok: false,
-      error: `${cmdName}: --${key} is not a flag \`${cmdName}\` accepts — it is documented for a different verb, so it would have been silently ignored.`,
+      error: `${cmdName}: --${key} is not a flag \`${cmdName}\` accepts â€” it is documented for a different verb, so it would have been silently ignored.`,
       code: "RT_E_VALIDATION",
       remedy: `\`--help ${cmdName}\` lists the flags \`${cmdName}\` accepts; run the flag's own verb instead, or drop it.`,
     },
@@ -286,7 +287,7 @@ function refuseVerbFlag(cmdName, key) {
 }
 
 // B1-F4 (P2): the headless lifecycle verbs (`deepen` / `wild`) return a typed
-// `{ ok:false, reason }` for their DOCUMENTED state refusals — and nothing else.
+// `{ ok:false, reason }` for their DOCUMENTED state refusals â€” and nothing else.
 // The arms used to relabel EVERY `ok:false` as RT_E_PHASE_ILLEGAL/exit 1, so an
 // internal/backend failure returned as a result would have read as a usage
 // error, contradicting the documented "exit 4 = backend or internal runtime
@@ -310,14 +311,14 @@ function refuseLifecycle(verb, res) {
       1,
     );
   }
-  throw new Error(`${verb}: unexpected refusal (${String(res.reason)}) — ${String(res.error)}`);
+  throw new Error(`${verb}: unexpected refusal (${String(res.reason)}) â€” ${String(res.error)}`);
 }
 
-// W49 · 335-4 (Switchboard): the documented NUMERIC flags, whose non-numeric
+// W49 Â· 335-4 (Switchboard): the documented NUMERIC flags, whose non-numeric
 // value was still silently DROPPED (the class the valueless guard above leaves
 // open). Probed live before the fix: `search --limit abc` exited 0 with the
 // default limit, and `deepen --phase abc` fell back to the LIVE phase, so the
-// refusal that came back read "P0 is not complete" — the caller's actual
+// refusal that came back read "P0 is not complete" â€” the caller's actual
 // mistake (a non-numeric --phase) was never named. Refused pre-dispatch, like
 // the valueless spelling.
 const NUMERIC_VALUE_FLAGS = ["limit", "phase", "steps", "max-steps", "budget"];
@@ -335,14 +336,14 @@ function refuseNonNumericFlag(cmdName, key, value) {
   );
 }
 
-// W49 · 335-4 (Switchboard): an agent driving the CLI blind branches on
+// W49 Â· 335-4 (Switchboard): an agent driving the CLI blind branches on
 // `remedy`, so a self-inflicted USAGE error must carry the concrete fix. The
 // registry's RT_E_VALIDATION agentAction is written for the ENGINE validating
-// model output ("Reject the payload … ask for corrected input"), the wrong
+// model output ("Reject the payload â€¦ ask for corrected input"), the wrong
 // voice for a mistyped flag. Every shape below is constructed by THIS file's
-// own argument guards, so the translation is deterministic — non-usage
+// own argument guards, so the translation is deterministic â€” non-usage
 // validation prose returns null and keeps the registry action. The flag-naming
-// fallback covers the per-verb value guards (--red-tree / --kind / --tree / …)
+// fallback covers the per-verb value guards (--red-tree / --kind / --tree / â€¦)
 // whose `error` already states the accepted values.
 function usageRemedy(error) {
   if (typeof error !== "string") return null;
@@ -355,7 +356,7 @@ function usageRemedy(error) {
   m = /^([\w-]+) --([\w-]+) requires a path /.exec(error);
   if (m) return `Pass a non-empty path: --${m[2]} <path> (an empty value would resolve to the CWD).`;
   m = /^Unknown subcommand: (.+)$/.exec(error);
-  if (m) return `"${m[1]}" is not a verb — run \`--help\` for the 39-verb synopsis, then check the spelling.`;
+  if (m) return `"${m[1]}" is not a verb â€” run \`--help\` for the 39-verb synopsis, then check the spelling.`;
   if (/^Missing subcommand\./.test(error)) {
     return "Pass a verb, e.g. `create --brief <text> --out build.json`; run `--help` for the full synopsis or `--help <verb>` for one verb.";
   }
@@ -371,17 +372,17 @@ function usageRemedy(error) {
 }
 
 // ---------------------------------------------------------------------------
-// C1-10 (KD-8) — the opt-in cross-process campaign ledger.
+// C1-10 (KD-8) â€” the opt-in cross-process campaign ledger.
 //
 // The problem: `RAPIDTOOL_TOKEN_CAP` is read ONCE per process (token-ledger.ts
-// §session budget), so a campaign driven as N separate CLI invocations is not
-// bounded at all — N × cap. This ledger is the minimum cross-process mechanism:
+// Â§session budget), so a campaign driven as N separate CLI invocations is not
+// bounded at all â€” N Ã— cap. This ledger is the minimum cross-process mechanism:
 // a persistent JSON file the caller names (`--token-ledger <file>` or
 // `RAPIDTOOL_LEDGER_FILE`); each opted-in invocation PREFLIGHT-loads it and
 // refuses coded once `spent >= cap`, and POST-appends its measured session
 // spend (headless.sessionSpendTotal). The campaign bound comes from
 // `RAPIDTOOL_CAMPAIGN_TOKEN_CAP` (an integer) or the file's own `cap` field.
-// The ledger is never read, written or surfaced when neither is set — every
+// The ledger is never read, written or surfaced when neither is set â€” every
 // code path and envelope byte stays exactly as before (byte-identical opt-out).
 // ---------------------------------------------------------------------------
 
@@ -395,7 +396,7 @@ function campaignLedgerPath(args) {
 }
 
 /** The campaign cap from `RAPIDTOOL_CAMPAIGN_TOKEN_CAP`: undefined (not set),
- *  null (set but invalid → refuse), or a non-negative integer. */
+ *  null (set but invalid â†’ refuse), or a non-negative integer. */
 function campaignCapFromEnv() {
   const raw = typeof process.env.RAPIDTOOL_CAMPAIGN_TOKEN_CAP === "string" ? process.env.RAPIDTOOL_CAMPAIGN_TOKEN_CAP.trim() : "";
   if (raw === "") return undefined;
@@ -404,7 +405,7 @@ function campaignCapFromEnv() {
 }
 
 /** Read a campaign ledger. A missing file starts a fresh one; a foreign/corrupt
- *  file THROWS (the caller refuses — never silently resets an operator's bound). */
+ *  file THROWS (the caller refuses â€” never silently resets an operator's bound). */
 function readCampaignLedger(path) {
   if (!existsSync(path)) return { schema_version: 1, cap: null, spent: 0, calls: 0, entries: [] };
   const doc = JSON.parse(readFileSync(path, "utf8"));
@@ -431,8 +432,8 @@ function writeCampaignLedger(path, ledger) {
 
 // E-25: single JSON object on stdout + the machine exit code. Every result
 // gains schema_version/cmd/exit_code; the legacy `ok` field is kept. Every
-// {ok:false} envelope additionally gains `code` — a stable RT_E_* id from
-// classifyError (src/lib/errors.ts) — additive, exit-code taxonomy unchanged.
+// {ok:false} envelope additionally gains `code` â€” a stable RT_E_* id from
+// classifyError (src/lib/errors.ts) â€” additive, exit-code taxonomy unchanged.
 // Sites that already set their own `code` pass through untouched.
 //
 // fixes/217e (G1): SYNCHRONOUS by construction. The NDJSON stamp below runs
@@ -440,8 +441,8 @@ function writeCampaignLedger(path, ledger) {
 // the same tick as the stdout write. The former `await cliLogEvent(...)`
 // deferred the exit behind a resumed event-loop turn, so a guard-position
 // `return respond(...)` still fell through to the verb's success path and
-// crashed with a TypeError (observed 3/3 in 216y §2.3 G1). No caller awaits
-// respond — the synchronous exit is behaviour-identical on the success path,
+// crashed with a TypeError (observed 3/3 in 216y Â§2.3 G1). No caller awaits
+// respond â€” the synchronous exit is behaviour-identical on the success path,
 // and it is what makes a handled refusal actually END the verb.
 /** @returns {never} the in-tick process.exit below never returns (fixes/217e G1). */
 function respond(result, exitCode) {
@@ -459,14 +460,14 @@ function respond(result, exitCode) {
             ? out.reason
             : "";
       const code = classify(text);
-      if (code) out.code = code; // else omit (errors.ts absent — resilience)
+      if (code) out.code = code; // else omit (errors.ts absent â€” resilience)
     }
   }
-  // fixes/312_c6_ux (U3 · K5/K6): a coded refusal self-explains — attach the
+  // fixes/312_c6_ux (U3 Â· K5/K6): a coded refusal self-explains â€” attach the
   // registry's own agentAction as `remedy` (a call site's own remedy passes
   // through untouched). Omitted exactly when `code` is (doc absent / unknown).
   if (out.ok === false && typeof out.remedy === "undefined") {
-    // W49 · 335-4: a CLI usage refusal gets the CLI's own fix, not the
+    // W49 Â· 335-4: a CLI usage refusal gets the CLI's own fix, not the
     // registry's engine-voiced RT_E_VALIDATION action; every other code keeps
     // the registry action (usageRemedy returns null for non-usage prose).
     const remedy = (out.code === "RT_E_VALIDATION" ? usageRemedy(out.error) : null) ?? remedyFor(out.code);
@@ -511,28 +512,28 @@ function respond(result, exitCode) {
   }
   out.exit_code = exitCode;
   // G/E: stamp every CLI exit into the headless NDJSON event log (best-effort
-  // — the appender itself must never break the exit path). NOT awaited
+  // â€” the appender itself must never break the exit path). NOT awaited
   // (fixes/217e G1): the append is fs-sync, and an await here deferred the
-  // exit one event-loop turn — the fall-through the audit reproduced.
+  // exit one event-loop turn â€” the fall-through the audit reproduced.
   try {
     if (typeof cliLogEvent === "function") {
       cliLogEvent({
-        // fixes/323 FIX-2c (window #4 item 3 · F-3): exit 2 is the taxonomy's
-        // PARK (awaiting_hitl / blocked) — the honest outcome, never a failure
-        // (README-cli §Agent contract). It logs at `warn` with an explicit
+        // fixes/323 FIX-2c (window #4 item 3 Â· F-3): exit 2 is the taxonomy's
+        // PARK (awaiting_hitl / blocked) â€” the honest outcome, never a failure
+        // (README-cli Â§Agent contract). It logs at `warn` with an explicit
         // `parked` payload tag; only true failures (exit 1/3/4) log `error`.
         // No RT_E code rides a clean park: codes are for surfaced FAILURES
         // (AGENTS.md honesty contract #4), and the envelope deliberately omits
-        // `code` on a clean park — the tag is the park marker, not a fake code.
+        // `code` on a clean park â€” the tag is the park marker, not a fake code.
         level: exitCode === 0 ? "info" : exitCode === 2 ? "warn" : "error",
         scope: "cli-command",
         // OPS-4 (K13, W40 N5): emit the CATALOGUED name. The old free-form
         // `cli.<cmd>.ok|exit` strings are in no registry (RT_EVENT_NAMES has
         // only cli.invocation/cli.error on this scope) and the catalogued
-        // cli.invocation was never emitted — the verb + outcome now ride the
+        // cli.invocation was never emitted â€” the verb + outcome now ride the
         // payload instead of an invented event name.
         event: "cli.invocation",
-        // fixes/348 (W1): RtEventSeed.capture is REQUIRED (rt-events.ts:110) —
+        // fixes/348 (W1): RtEventSeed.capture is REQUIRED (rt-events.ts:110) â€”
         // the exit rows used to omit it entirely. Point it at this emit site
         // (the `cliLogEvent({` call above; scripts/diagnose-audit.test.mjs pins
         // that this line number really is that call site).
@@ -551,11 +552,11 @@ function respond(result, exitCode) {
   } catch {
     /* never break the exit path */
   }
-  // fixes/297 R1 (Q2 row-4 of the §A2 walk): piped stdout on Windows is an
-  // ASYNC libuv write (Node docs — "Pipes: asynchronous on Windows"), and the
+  // fixes/297 R1 (Q2 row-4 of the Â§A2 walk): piped stdout on Windows is an
+  // ASYNC libuv write (Node docs â€” "Pipes: asynchronous on Windows"), and the
   // in-tick process.exit() below can cut a large envelope before the pipe
   // consumed it. Drain synchronously to fd 1 FIRST so nothing is left buffered
-  // when the exit runs; the exit itself stays in-tick (fixes/217e G1 — the
+  // when the exit runs; the exit itself stays in-tick (fixes/217e G1 â€” the
   // guard-position call sites depend on respond ENDING the verb, so deferring
   // the exit through the event loop would re-open that fall-through).
   const payload = JSON.stringify(out, null, 2) + "\n";
@@ -563,7 +564,7 @@ function respond(result, exitCode) {
     writeSync(1, payload);
   } catch {
     // fd 1 unusable (closed/EBADF/EAGAIN): keep the async write as last
-    // resort — identical to the pre-fix path, worst case unchanged.
+    // resort â€” identical to the pre-fix path, worst case unchanged.
     process.stdout.write(payload);
   }
   process.exit(exitCode);
@@ -571,17 +572,17 @@ function respond(result, exitCode) {
 
 // ---------------------------------------------------------------------------
 // Error-code classifier (optional sibling: src/lib/errors.ts). Lazy, memoized,
-// never-throw — same pathToFileURL mechanics as DRIVER_PATH below. If the
+// never-throw â€” same pathToFileURL mechanics as DRIVER_PATH below. If the
 // module is absent every command still works; failures simply omit `code`.
 // Two entry points: `classify(text)` for prose envelopes (respond()'s
 // fallback) and `classifyErr(err, fallback)` for the ERROR OBJECT at catch
-// sites — name/errno/.code matching only fires on the object, never on prose.
+// sites â€” name/errno/.code matching only fires on the object, never on prose.
 // ---------------------------------------------------------------------------
 /** @type {(text: string) => string | null} */
-let classify = () => null; // prose classifier — omit `code` when module absent
+let classify = () => null; // prose classifier â€” omit `code` when module absent
 /** @type {(err: unknown, fallback?: string) => string | null} */
 let classifyErr = () => null; // object classifier (same module)
-// fixes/312_c6_ux (U3 · K5/K6): ERROR_CODE_DOC once errors.ts loads — the
+// fixes/312_c6_ux (U3 Â· K5/K6): ERROR_CODE_DOC once errors.ts loads â€” the
 // module-level handle respond() (SYNC by construction, fixes/217e G1) reads
 // its coded remedies from. Null until ensureErrorCodes() resolves; a remedy
 // simply omits then, mirroring `code`'s best-effort contract.
@@ -598,9 +599,9 @@ async function ensureErrorCodes() {
     );
     if (typeof mod.classifyError === "function") {
       const fn = mod.classifyError;
-      // OPS-13 (W42 · L4/G8): when the errors module ships its own registry
+      // OPS-13 (W42 Â· L4/G8): when the errors module ships its own registry
       // (ERROR_CODE_DOC), a shape-valid code that is NOT in the registry must
-      // not ride an envelope — `code in doc` is the contract. Doc-absent
+      // not ride an envelope â€” `code in doc` is the contract. Doc-absent
       // (module absent / older errors.ts) keeps the legacy shape-only rule.
       const doc =
         mod.ERROR_CODE_DOC && typeof mod.ERROR_CODE_DOC === "object" ? mod.ERROR_CODE_DOC : null;
@@ -627,36 +628,36 @@ async function ensureErrorCodes() {
       };
     }
   } catch {
-    // errors.ts absent — respond() omits `code`; the CLI stays fully functional.
+    // errors.ts absent â€” respond() omits `code`; the CLI stays fully functional.
   }
 }
 
 // Spread-helper: `{ code }` when the object classifier produced one, `{}`
-// when it didn't — so respond()'s prose fallback still applies (and, when
+// when it didn't â€” so respond()'s prose fallback still applies (and, when
 // errors.ts is absent, the `code` key is omitted entirely as before).
 function errCode(err, fallback) {
   const c = classifyErr(err, fallback);
   return c ? { code: c } : {};
 }
 
-// U3 (fixes/312_c6_ux · 311_sd_product K5/K6): the coded remedy seam — the
+// U3 (fixes/312_c6_ux Â· 311_sd_product K5/K6): the coded remedy seam â€” the
 // registry's OWN `agentAction` line, shipped as `remedy` on coded refusals so
 // an agent's next step is IN the envelope instead of behind a docs hop
 // (`diagnose` already surfaces these; the CLI never shipped them). Same
-// best-effort contract as `code`: doc absent / unknown code / empty text →
+// best-effort contract as `code`: doc absent / unknown code / empty text â†’
 // the key is omitted and the envelope stays byte-identical to before.
 function remedyFor(code) {
   if (typeof code !== "string" || code.length === 0) return null;
-  // W45·331-1 (Keywright): a rejected credential's remedy NAMES the source the
-  // key came from (repo .env path or process env) by tail only — the static
+  // W45Â·331-1 (Keywright): a rejected credential's remedy NAMES the source the
+  // key came from (repo .env path or process env) by tail only â€” the static
   // registry action line cannot carry that provenance.
   if (code === "RT_E_LLM_KEY_REJECTED" && KEY_SOURCE) {
     const where = KEY_SOURCE.kind === "repo-env-file" ? KEY_SOURCE.path : "the process environment";
     const also = KEY_SOURCE.conflict
-      ? ` A conflicting process-environment key (tail …${KEY_SOURCE.conflict.processEnvTail}) was ignored: the repo .env key wins by documented precedence.`
+      ? ` A conflicting process-environment key (tail â€¦${KEY_SOURCE.conflict.processEnvTail}) was ignored: the repo .env key wins by documented precedence.`
       : "";
     return (
-      `The provider rejected the key from ${where} (tail …${KEY_SOURCE.tail}). Replace/refresh that key, ` +
+      `The provider rejected the key from ${where} (tail â€¦${KEY_SOURCE.tail}). Replace/refresh that key, ` +
       `confirm the source precedence (scripts/README-cli.md "API key resolution"), and never paste the full key into logs.${also}`
     );
   }
@@ -667,14 +668,14 @@ function remedyFor(code) {
 }
 
 // ---------------------------------------------------------------------------
-// Load the headless driver (dynamic import of the .ts — needs strip-types).
+// Load the headless driver (dynamic import of the .ts â€” needs strip-types).
 // Path is resolved against this script's own location (cwd-independent).
 // ---------------------------------------------------------------------------
 const DRIVER_PATH = pathToFileURL(
   join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "headless.ts"),
 ).href;
 
-// PR-16 (B5/C-11): the RapidTool repo root this CLI belongs to — the base the
+// PR-16 (B5/C-11): the RapidTool repo root this CLI belongs to â€” the base the
 // in-run RUNLOCK guard scans for `src/**`/`scripts/**` edits during a run.
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -685,7 +686,7 @@ async function driver() {
 }
 
 // ---------------------------------------------------------------------------
-// 342-5: the doctor surface (src/lib/doctor.ts) — its `doctorMcp` reports the
+// 342-5: the doctor surface (src/lib/doctor.ts) â€” its `doctorMcp` reports the
 // owner-gated MCP client honestly. Same lazy .ts import mechanics as the driver.
 // ---------------------------------------------------------------------------
 const DOCTOR_PATH = pathToFileURL(
@@ -700,7 +701,7 @@ async function doctorDriver() {
 
 // ---------------------------------------------------------------------------
 // Load the compile-check seam (src/lib/compile-check.server.ts, same lazy
-// .ts import mechanics as the driver — fixes/132 C2 `check` verb + emit
+// .ts import mechanics as the driver â€” fixes/132 C2 `check` verb + emit
 // `--check`).
 // ---------------------------------------------------------------------------
 const CHECK_PATH = pathToFileURL(
@@ -714,13 +715,13 @@ async function checkDriver() {
 }
 
 // ---------------------------------------------------------------------------
-// R11-f08 (W42 · L4/E4): the forced-emit quarantine-move seam
+// R11-f08 (W42 Â· L4/E4): the forced-emit quarantine-move seam
 // (src/lib/quarantine.ts, same lazy .ts import mechanics as the driver). The
-// `emit` arm calls this AFTER an ok emit that returned `survivors` — the
+// `emit` arm calls this AFTER an ok emit that returned `survivors` â€” the
 // foreign files are MOVED ASIDE (recoverable, never a delete) instead of
 // being left in place, so a later tree-run never judges bytes the factory
 // never authored. The full lift INTO emitProject stays deferred (headless.ts
-// is its own window); the CLI-side seam is the safe placement (fixes/272 §[2]).
+// is its own window); the CLI-side seam is the safe placement (fixes/272 Â§[2]).
 // ---------------------------------------------------------------------------
 const QUARANTINE_PATH = pathToFileURL(
   join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "quarantine.ts"),
@@ -734,17 +735,17 @@ async function quarantineDriver() {
 
 // ---------------------------------------------------------------------------
 // T-107.7 (W33 lane L2): the run-checkpoint seam (src/lib/checkpoint.server.ts)
-// — the read/admission side of the per-phase commit checkpoint that
+// â€” the read/admission side of the per-phase commit checkpoint that
 // `headless.runUntilGate` writes beside `.rapidtool/`.
 // W36 N2: the `resume`/`unattended` verbs consume the headless seam instead
-// (headless.loadResumableCheckpoint = read→admit→hydrate in ONE place, so the
+// (headless.loadResumableCheckpoint = readâ†’admitâ†’hydrate in ONE place, so the
 // read-side law is not re-derived here).
 // W39 Z1: the direct lazy loader (CHECKPOINT_PATH / checkpointServer /
-// checkpointDriver) was REMOVED here — it never gained a consumer after N2
+// checkpointDriver) was REMOVED here â€” it never gained a consumer after N2
 // rerouted resume through the headless seam, and the 0-warning gate forbids
 // dead code. Reintroduce it (same lazy .ts mechanics as the scorecard driver
 // below) if a read-only CLI use lands, e.g. a `resume --list`.
-// W40 N5 (K7 item 9): the predicted read-only consumer landed — `diagnose`
+// W40 N5 (K7 item 9): the predicted read-only consumer landed â€” `diagnose`
 // surfaces `checkpoint: {present, path, savedAt}` through this loader. Read
 // ONLY: never admits, never hydrates, never writes.
 // ---------------------------------------------------------------------------
@@ -759,8 +760,8 @@ async function checkpointDriver() {
 }
 
 // ---------------------------------------------------------------------------
-// T5.3 (fixes/262 LANE 5 · W23): the eval scorecard reader
-// (src/lib/scorecard.ts — PURE: it parses the eval-out documents and builds the
+// T5.3 (fixes/262 LANE 5 Â· W23): the eval scorecard reader
+// (src/lib/scorecard.ts â€” PURE: it parses the eval-out documents and builds the
 // printable scorecard; THIS verb owns the fs reads, so the module stays
 // client-safe per AGENTS.md's "never import node:fs into client-safe modules").
 // Same lazy .ts mechanics as the driver. `eval` also honors $EVAL_OUT_DIR
@@ -781,7 +782,7 @@ async function scorecardDriver() {
 
 // ---------------------------------------------------------------------------
 // Load the cross-project knowledge store (src/lib/knowledge.ts, same lazy .ts
-// mechanics — server-side only: the module statically imports node:fs) and the
+// mechanics â€” server-side only: the module statically imports node:fs) and the
 // packet compiler (src/lib/packet.ts, pure) for the tier-1 `packet
 // --knowledge` seam (fixes/144 M5-3/4). Neither is imported unless a lesson
 // action or --knowledge runs, so the CLI's plain paths stay untouched.
@@ -805,7 +806,7 @@ async function packetDriver() {
 }
 
 // ---------------------------------------------------------------------------
-// W45·331-1 (Keywright): `.env` API-key resolution.
+// W45Â·331-1 (Keywright): `.env` API-key resolution.
 //
 // The CLI used to read the process environment only, so a stale Windows
 // User-scope DEEPSEEK_API_KEY silently shadowed the funded key in the repo
@@ -813,14 +814,14 @@ async function packetDriver() {
 // Precedence (documented in scripts/README-cli.md "API key resolution"):
 //
 //   <cwd>/.env  >  the process environment   (a conflicting ambient key is
-//   LOUD, coded (RT_E_LLM_KEY_SHADOWED) and tail-only — never a silent win).
+//   LOUD, coded (RT_E_LLM_KEY_SHADOWED) and tail-only â€” never a silent win).
 //   A process DEEPSEEK_API_KEY that is present but BLANK/whitespace is an
 //   intentional DISABLE: `.env` is NOT consulted and the run stays keyless
 //   (the repo's keyless-forcing convention, e.g. headless.test's runCli).
 //
 // Resolved from the WORKING DIRECTORY (standard dotenv semantics): the
 // documented invocations run from the repo root, so `<cwd>/.env` IS
-// `<repo>/.env` — and a child spawned with a different cwd (the CLI test
+// `<repo>/.env` â€” and a child spawned with a different cwd (the CLI test
 // harnesses) keeps its own keyless environment untouched.
 //
 // The physical read lives here (this file already owns node:fs); the pure
@@ -849,31 +850,31 @@ let KEY_SOURCE = null; // { kind, path, tail, conflict }
  *  loud, coded, tail-only conflict signal. The research layer reads
  *  `process.env.TAVILY_API_KEY` directly (`tavily.server.ts`), so without this
  *  hop a configured `.env` Tavily key never reached P0/P7/P11 research on the
- *  bare-Node path. Never prints a key — tails only. */
+ *  bare-Node path. Never prints a key â€” tails only. */
 async function installRepoEnvKey() {
   let text = "";
   try {
     text = readFileSync(DOTENV_PATH, "utf8");
   } catch {
-    text = ""; // no .env → the process environment is the only source
+    text = ""; // no .env â†’ the process environment is the only source
   }
   let mod;
   try {
     mod = await keyResolutionDriver();
   } catch {
-    return; // resolution module absent → legacy process-env read, unchanged
+    return; // resolution module absent â†’ legacy process-env read, unchanged
   }
   // Declare the file for THIS process so the provider's own key read
-  // (resolveProcessKey via key-source.server.ts) resolves identically — e.g. a
+  // (resolveProcessKey via key-source.server.ts) resolves identically â€” e.g. a
   // 401 then names `<cwd>/.env` rather than "the process environment".
   process.env.RAPIDTOOL_LLM_ENV_FILE = DOTENV_PATH;
   const parsed = mod.parseEnvFile(text);
-  // Loud, coded, tail-only. stderr only — stdout stays exactly one JSON object.
+  // Loud, coded, tail-only. stderr only â€” stdout stays exactly one JSON object.
   const warnConflict = (name, conflict) => {
     try {
       process.stderr.write(mod.formatShadowWarning(name, DOTENV_PATH, conflict) + "\n");
     } catch {
-      /* stderr unusable — the conflict is still resolved, never silently */
+      /* stderr unusable â€” the conflict is still resolved, never silently */
     }
   };
   // DeepSeek: install + record the active source (the provider's 401 provenance).
@@ -897,7 +898,7 @@ async function installRepoEnvKey() {
     KEY_SOURCE = null;
   }
   if (resolution.conflict) warnConflict("DEEPSEEK_API_KEY", resolution.conflict);
-  // Tavily (research): the SAME precedence. No active-source record — the
+  // Tavily (research): the SAME precedence. No active-source record â€” the
   // Tavily provider reads process.env at call time and names the wire itself.
   const tavily = mod.resolveApiKey({
     name: "TAVILY_API_KEY",
@@ -924,7 +925,7 @@ const RT_DIAG_PATH = pathToFileURL(
 const RT_REVIEW_PATH = pathToFileURL(
   join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "pipeline-review.ts"),
 ).href;
-// W40 N5 (OPS-10): the budget constants' single authority — `diagnose.ts`
+// W40 N5 (OPS-10): the budget constants' single authority â€” `diagnose.ts`
 // itself imports WILD_STEP_BUDGET_MS / CHAT_STEP_BUDGET_MS from here, so the
 // CLI reads them too instead of duplicating their values as literals.
 const RT_EVENTS_PATH = pathToFileURL(
@@ -947,11 +948,11 @@ async function ensureRtAppender() {
   try {
     rtServer = await import(RT_PATH);
   } catch {
-    rtServer = null; // module absent → no event log; everything still works
+    rtServer = null; // module absent â†’ no event log; everything still works
   }
 }
 
-// fixes/217e (G1): synchronous (no awaits inside — makeCliRow + appendRtLine
+// fixes/217e (G1): synchronous (no awaits inside â€” makeCliRow + appendRtLine
 // are fs-sync), so respond() can stamp the exit log and process.exit in the
 // same tick instead of yielding to the event loop first.
 function cliLogEvent(seed) {
@@ -980,25 +981,25 @@ async function readReportSource(value) {
 }
 
 // ---------------------------------------------------------------------------
-// S2 / AW45-c07 (W46 · 332-4): `create --brief <path>` used to feed the raw
-// PATH to the pipeline as prose — inferName named the project after the path
+// S2 / AW45-c07 (W46 Â· 332-4): `create --brief <path>` used to feed the raw
+// PATH to the pipeline as prose â€” inferName named the project after the path
 // and the lattice extracted nouns from the filename. The fix: a path is read as
-// a FILE, never fed as prose. Two spellings are accepted (C1-09, campaign #1 —
+// a FILE, never fed as prose. Two spellings are accepted (C1-09, campaign #1 â€”
 // the bare-path refusal made the documented command form `--brief <file>` fail):
-//   · `--brief <path>`   — a plain path that names an existing readable file
+//   Â· `--brief <path>`   â€” a plain path that names an existing readable file
 //     is read (the `cp`/`cat`-style spelling an operator reaches for first).
-//   · `--brief @<path>`  — the ingest `--report @file.json` convention, kept
+//   Â· `--brief @<path>`  â€” the ingest `--report @file.json` convention, kept
 //     for backwards-compat and disambiguation from a one-word prose brief.
 //   A YAML-front-matter corpus fixture (research/eval-corpus/*) carries the real
 //   prose in its `brief:` scalar; extract that instead of feeding the front
 //   matter to the lattice. A value that is NOT an existing file is prose.
 // ---------------------------------------------------------------------------
-/** True when `p` resolves to an existing regular file (unstattable ⇒ false). */
+/** True when `p` resolves to an existing regular file (unstattable â‡’ false). */
 function isReadableFile(p) {
   try {
     return statSync(p).isFile();
   } catch {
-    /* not a path we can stat — treat as a non-file value, never a crash */
+    /* not a path we can stat â€” treat as a non-file value, never a crash */
     return false;
   }
 }
@@ -1034,7 +1035,7 @@ function readBriefFile(path, label) {
   try {
     text = readFileSync(path, "utf8");
   } catch (err) {
-    return { error: `create: --brief ${label} could not be read — ${err instanceof Error ? err.message : String(err)}` };
+    return { error: `create: --brief ${label} could not be read â€” ${err instanceof Error ? err.message : String(err)}` };
   }
   const fm = briefFromFrontmatter(text);
   return { value: fm ?? text };
@@ -1063,7 +1064,7 @@ function readBriefSource(raw) {
 // G4/fixes/144 (M1): findable output defaults.
 // ---------------------------------------------------------------------------
 // Software deliverables (`emit`) and knowledge vaults (`vault`) default to a
-// NAMED, per-project folder under the user's home — never a CWD-relative
+// NAMED, per-project folder under the user's home â€” never a CWD-relative
 // ./emit|vault buried in whatever directory the shell happened to be in:
 //
 //   emit:   <os.homedir()>/RapidTool Software/<slug>/
@@ -1071,12 +1072,12 @@ function readBriefSource(raw) {
 //
 // `--out` always overrides. <slug> is io.ts slugName (headless re-exports it
 // as h.filename): lowercase, spaces/non-alphanumerics -> "-", trimmed, and ""
-// -> "project" — the SAME slug the packet/JSON downloads use (io.ts:340), so a
+// -> "project" â€” the SAME slug the packet/JSON downloads use (io.ts:340), so a
 // project named "HVAC Dispatch" always lands in .../hvac-dispatch/ no matter
 // which verb wrote it. mkdirSync(recursive) is attempted up front; when the
 // home location cannot be created (server/CI, unwritable profile dir) the
 // default FALLS BACK to a per-project folder in the CWD so an emit never
-// silently dies on a bad homedir. Never hardcode a Windows path here —
+// silently dies on a bad homedir. Never hardcode a Windows path here â€”
 // homedir() + path.join keep this portable (fixes/143 g4 F1).
 function defaultOutputDir(h, project, ...sub) {
   const slug = h.filename(project.name);
@@ -1098,7 +1099,7 @@ function defaultOutputDir(h, project, ...sub) {
 // ---------------------------------------------------------------------------
 // T-107.7 (W33 lane L2): resolve a `resume --project` value to the checkpoint
 // home + the optional project file. A DIRECTORY is its own checkpoint home
-// (`<dir>/.rapidtool/checkpoint.json` — where run/gate wrote it); a file
+// (`<dir>/.rapidtool/checkpoint.json` â€” where run/gate wrote it); a file
 // resolves to its containing dir and names the file to save back to.
 // W36 N2 consumes it from the real `resume`/`unattended` arms below.
 // ---------------------------------------------------------------------------
@@ -1107,16 +1108,16 @@ function resolveCheckpointTarget(value) {
   try {
     if (statSync(abs).isDirectory()) return { dir: abs, file: null };
   } catch {
-    /* not on disk (yet) — treat as a project file path */
+    /* not on disk (yet) â€” treat as a project file path */
   }
   return { dir: dirname(abs), file: abs };
 }
 
 // ---------------------------------------------------------------------------
-// T-107.7/W-47 (W36 lane N2): ONE outcome→envelope mapper for the two drive
+// T-107.7/W-47 (W36 lane N2): ONE outcomeâ†’envelope mapper for the two drive
 // verbs this lane adds (`resume`, `unattended`). Mirrors the run/gate arm's
-// contract — parked → 2, hard-DoD block → 1 RT_E_GATE_PENDING, a complete seal
-// with failed gates is never a clean 0 → 1 RT_E_GATES_FAILED — and carries the
+// contract â€” parked â†’ 2, hard-DoD block â†’ 1 RT_E_GATE_PENDING, a complete seal
+// with failed gates is never a clean 0 â†’ 1 RT_E_GATES_FAILED â€” and carries the
 // resume provenance (`checkpoint`) + `unattended: true` markers in `extras`.
 // The run/gate arm predates this helper and is intentionally untouched, but
 // this mapper MUST NOT be a weaker door: before PR-16/B5's parity fix it had no
@@ -1134,7 +1135,7 @@ function respondDriveOutcome(
   },
 ) {
   const sealed = h.summary(res.project);
-  // PR-16 (B5/C-11) in-run RUNLOCK guard — same contract as run/gate: if the
+  // PR-16 (B5/C-11) in-run RUNLOCK guard â€” same contract as run/gate: if the
   // repo's own `src/**`/`scripts/**` changed while this run executed, its bytes
   // are suspect. A scheduler verb is not exempt.
   const runlockViolations =
@@ -1152,7 +1153,7 @@ function respondDriveOutcome(
           `the run overlapped a repo source edit (RUNLOCK): ${runlockViolations
             .slice(0, 5)
             .join(", ")}${runlockViolations.length > 5 ? ` (+${runlockViolations.length - 5} more)` : ""} ` +
-          "— the run's artifacts were produced against a moving tree; freeze the tree and re-run.",
+          "â€” the run's artifacts were produced against a moving tree; freeze the tree and re-run.",
         runlock: { runStartMs: runlockStartMs, violations: runlockViolations },
         steps: res.steps,
         stopped: res.stopped,
@@ -1171,11 +1172,11 @@ function respondDriveOutcome(
         ...extras,
         code: "RT_E_GATE_PENDING",
         remedy:
-          "A hard DoD red is repaired, not approved: read summary.failedGates (the unmet criteria), fix the phase's artifacts or re-run the phase, then re-run `gate` — no HITL accept/reject door exists for a red gate.",
+          "A hard DoD red is repaired, not approved: read summary.failedGates (the unmet criteria), fix the phase's artifacts or re-run the phase, then re-run `gate` â€” no HITL accept/reject door exists for a red gate.",
         error:
           (Array.isArray(res.events) && res.events.length > 0
             ? res.events[res.events.length - 1]
-            : "Hard DoD block — advance refused") + " — resolve the unmet DoD criteria before advancing.",
+            : "Hard DoD block â€” advance refused") + " â€” resolve the unmet DoD criteria before advancing.",
         summary: sealed,
         steps: res.steps,
         stopped: res.stopped,
@@ -1196,7 +1197,7 @@ function respondDriveOutcome(
         path,
         ...extras,
         code: "RT_E_GATES_FAILED",
-        error: `run sealed complete with ${sealed.failedGates?.length ?? 0} failed DoD gate(s): ${census} — resolve the red gates (repair the failing phase and re-run) before shipping.`,
+        error: `run sealed complete with ${sealed.failedGates?.length ?? 0} failed DoD gate(s): ${census} â€” resolve the red gates (repair the failing phase and re-run) before shipping.`,
         summary: sealed,
         steps: res.steps,
         stopped: res.stopped,
@@ -1210,7 +1211,7 @@ function respondDriveOutcome(
   }
   const parked = res.project.status === "awaiting_hitl" || res.project.status === "blocked";
   // W61 B3 (parity with run/gate): a drive that advanced NOTHING and did not
-  // reach a designed park or a clean seal is STUCK — an ok:true/exit-0 re-park
+  // reach a designed park or a clean seal is STUCK â€” an ok:true/exit-0 re-park
   // at 0 steps hides the stall. Surface it coded instead.
   if (!parked && res.steps === 0 && res.outcome !== "complete") {
     const lastEvent =
@@ -1223,7 +1224,7 @@ function respondDriveOutcome(
         code: "RT_E_GATE_PENDING",
         error:
           (typeof lastEvent === "string" && lastEvent.length > 0 ? lastEvent : "the drive made no progress") +
-          ` — it ran but advanced nothing (steps: 0, outcome: ${res.outcome}). ` +
+          ` â€” it ran but advanced nothing (steps: 0, outcome: ${res.outcome}). ` +
           "Resolve the stuck phase (a red P6 stall is reopened with `retry`) before re-running.",
         summary: sealed,
         steps: res.steps,
@@ -1243,8 +1244,8 @@ function respondDriveOutcome(
       // W49 boundary: `RunResult.code` names the coded class of the newest P6
       // synthesis refusal THIS invocation recorded (a keyed 401 surfaces as
       // RT_E_LLM_KEY_REJECTED) while the run still advanced on the deterministic
-      // floor. It is surfaced under its OWN name — never as `code`, which the
-      // taxonomy reserves for a failed command — so an agent driving blind sees
+      // floor. It is surfaced under its OWN name â€” never as `code`, which the
+      // taxonomy reserves for a failed command â€” so an agent driving blind sees
       // the refusal without mistaking ok:true for a failure. Absent when the
       // invocation recorded no refusal (additive + conditional).
       ...(typeof res.code === "string" && res.code ? { refusalCode: res.code } : {}),
@@ -1273,7 +1274,7 @@ async function saveProjectBusyOrRefuse(h, path, project, extras = {}) {
         path,
         ...extras,
         code: "RT_E_BUSY",
-        error: `${saved.error} — another writer held ${saved.lockPath} through the bounded retry window; wait for it to exit and re-run this verb.`,
+        error: `${saved.error} â€” another writer held ${saved.lockPath} through the bounded retry window; wait for it to exit and re-run this verb.`,
       },
       1,
     );
@@ -1287,8 +1288,8 @@ async function saveProjectBusyOrRefuse(h, path, project, extras = {}) {
  * tree, NOT of a verified product: the campaign's real-substance trees
  * committed while their README said `DECLARED SCRIPTS NOT RUN` and their mounted
  * UI never called a generated export. This record names what was ACTUALLY
- * verified — the tree-run verdict + verdictHash, the promoted evidenceHash, and
- * whether the mounted UI calls a real generated export — so `committed:true`
+ * verified â€” the tree-run verdict + verdictHash, the promoted evidenceHash, and
+ * whether the mounted UI calls a real generated export â€” so `committed:true`
  * can never be read as a verified product without those facts beside it.
  * `verifiedProduct` is true ONLY when every one of those is green. It never
  * weakens the substance/red gate (that gate still withholds the commit).
@@ -1300,7 +1301,7 @@ async function deliveryVerification(h, { dir, runVerdict, evidenceHash, committe
   try {
     // R2-02: the ONE canonical predicate (headless.realGeneratedExportWiring).
     // The old `emittedUiWiring` accepted any non-stub barrel export while the
-    // campaign guard counted only job modules — the two seams disagreed. The
+    // campaign guard counted only job modules â€” the two seams disagreed. The
     // record now reads the same definition the guard is being moved onto.
     if (typeof h.realGeneratedExportWiring === "function") {
       const w = h.realGeneratedExportWiring(dir);
@@ -1323,7 +1324,7 @@ async function deliveryVerification(h, { dir, runVerdict, evidenceHash, committe
   const verifiedProduct = run !== null && run.ok === true && declared === true && !run.unverifiedEntry && ui.wired === true;
   return {
     verifiedProduct,
-    // A no-op land (identical tree already committed) reports committed:false —
+    // A no-op land (identical tree already committed) reports committed:false â€”
     // the pre-fix record hardcoded true, so `git.noop:true, committed:false`
     // still read as a fresh commit inside `verification`.
     committed: committed === true,
@@ -1351,21 +1352,21 @@ async function deliveryVerification(h, { dir, runVerdict, evidenceHash, committe
 // ---------------------------------------------------------------------------
 // 330 Switchboard (T4): the ONE `--knowledge` resolver for the run-driving
 // verbs. `run`/`gate`/`unattended` thread the human-accepted cross-project
-// lesson rows into the headless driver as `proven` — the same tier-1 seed the
+// lesson rows into the headless driver as `proven` â€” the same tier-1 seed the
 // `packet` arm carries (`packet.ts:compileAgentPacket({proven})`), so a store
 // of accepted lessons reaches the expansion chain through the drive path too.
 //
 // The limit is the codegen chain's OWN constant (`EXPAND_LESSON_RANK_LIMIT`,
-// knowledge.ts:45) read off the module — never a magic number that can drift
+// knowledge.ts:45) read off the module â€” never a magic number that can drift
 // from it. A valueless `--knowledge` is refused loudly (R5-f10 class: a bare
 // flag parses to `true` and would otherwise be silently ignored). A configured
 // store that cannot be read is a coded refusal at exit 4 carrying the store's
-// own reason — the packet arm's exact shape (329 · 328 P5) — never a silent
-// "no lessons". Absent flag ⇒ `{ present: false }` and the option is omitted,
+// own reason â€” the packet arm's exact shape (329 Â· 328 P5) â€” never a silent
+// "no lessons". Absent flag â‡’ `{ present: false }` and the option is omitted,
 // so the drive stays byte-identical to today.
 // ---------------------------------------------------------------------------
 /** A configured `--knowledge` store whose FILE does not exist is "configured but
- *  unreadable" (fixes/216g §T4) — KnowledgeStore.readStore treats a missing file
+ *  unreadable" (fixes/216g Â§T4) â€” KnowledgeStore.readStore treats a missing file
  *  as an EMPTY store, so the resolver would report `degraded:false` and the verb
  *  would seed NOTHING under ok:true. Refuse it coded (exit 4, the same class as a
  *  corrupt store) so a mistyped path is never a silent "no lessons". */
@@ -1420,15 +1421,15 @@ async function main() {
   await ensureErrorCodes(); // failures carry `code` (RT_E_*) on every envelope
   await ensureRtAppender(); // G: NDJSON event log under logs/ for every command
 
-  // W49 · 335-4 (Switchboard): an agent (or a human) must be able to ASK for the
+  // W49 Â· 335-4 (Switchboard): an agent (or a human) must be able to ASK for the
   // synopsis and get a SUCCESS. Before this, `--help` / `-h` / `help` were just
-  // an empty or unknown subcommand — the bytes were a coded REFUSAL (exit 1,
+  // an empty or unknown subcommand â€” the bytes were a coded REFUSAL (exit 1,
   // ok:false), so an agent that branches on the exit code read discovery as a
   // failure. A help request is not an error: ok:true + exit 0, carrying the same
   // USAGE the refusal paths carry, narrowed to one verb's line when a known verb
   // is named (`--help emit` / `help emit`).
   // NB: parseArgs absorbs `--help emit` as `args.help === "emit"` (a value, not
-  // a boolean) — that string is the verb candidate, not a stray value.
+  // a boolean) â€” that string is the verb candidate, not a stray value.
   if (args.help === true || typeof args.help === "string" || args._.includes("-h") || args._.includes("help")) {
     const candidates = typeof args.help === "string" ? [args.help, ...args._] : [...args._];
     const verb = candidates.find((a) => a !== "-h" && a !== "help" && USAGE.commands[a] !== undefined);
@@ -1449,10 +1450,10 @@ async function main() {
     return;
   }
 
-  // 330 Switchboard (probed): the agent seal is a WILD-RUN concept — the CLI
+  // 330 Switchboard (probed): the agent seal is a WILD-RUN concept â€” the CLI
   // banner and USAGE.wild both state `wild` is "the ONLY verb that accepts it",
   // yet only five drive verbs actually refused it (316 H3). Every other verb
-  // (reject/emit/create/scan/… — 30+) silently ABSORBED the governance flag and
+  // (reject/emit/create/scan/â€¦ â€” 30+) silently ABSORBED the governance flag and
   // returned a success envelope, so a caller could believe the seal had applied
   // when it never could. A governance flag is never silently ignored: the
   // refusal is hoisted to ONE pre-dispatch guard covering every non-wild verb,
@@ -1465,16 +1466,16 @@ async function main() {
   const unknownFlag = Object.keys(args).find((key) => key !== "_" && !KNOWN_FLAGS.has(key));
   if (unknownFlag !== undefined) return refuseUnknownFlag(cmd, unknownFlag);
 
-  // S3 (W46 · 332-4): a value flag with no value never rides through to a
-  // silent default — refuse it coded, naming the flag, before ANY dispatch.
+  // S3 (W46 Â· 332-4): a value flag with no value never rides through to a
+  // silent default â€” refuse it coded, naming the flag, before ANY dispatch.
   // `--x=` (an empty value) is the same class (C1-10 `--token-ledger=`).
   const bareValueFlag = VALUELESS_VALUE_FLAGS.find(
     (key) => args[key] === true || (typeof args[key] === "string" && args[key].trim() === ""),
   );
   if (bareValueFlag !== undefined) return refuseValuelessFlag(cmd, bareValueFlag, args[bareValueFlag]);
 
-  // W49 · 335-4: the same refusal for a documented NUMERIC flag whose value is
-  // present but not a non-negative integer (silently dropped before — see
+  // W49 Â· 335-4: the same refusal for a documented NUMERIC flag whose value is
+  // present but not a non-negative integer (silently dropped before â€” see
   // NUMERIC_VALUE_FLAGS above).
   const badNumericFlag = NUMERIC_VALUE_FLAGS.find(
     (key) => typeof args[key] === "string" && !/^\d+$/.test(args[key]),
@@ -1482,7 +1483,7 @@ async function main() {
   if (badNumericFlag !== undefined) return refuseNonNumericFlag(cmd, badNumericFlag, args[badNumericFlag]);
 
   // `wild --steps 0` was silently dropped by `steps ? {...}` and defaulted to
-  // 24. The documented contract is a POSITIVE bound (`--steps` clamps 1–48), so
+  // 24. The documented contract is a POSITIVE bound (`--steps` clamps 1â€“48), so
   // zero is refused as a usage error rather than quietly reshaped.
   if (typeof args.steps === "string" && /^\d+$/.test(args.steps) && parseInt(args.steps, 10) === 0) {
     return respond(
@@ -1490,7 +1491,7 @@ async function main() {
         ok: false,
         error: `${cmd}: --steps expects a positive integer (got ${args.steps}).`,
         code: "RT_E_VALIDATION",
-        remedy: "Pass a positive step bound (--steps <n>, clamps 1–48), or drop the flag for the default.",
+        remedy: "Pass a positive step bound (--steps <n>, clamps 1â€“48), or drop the flag for the default.",
       },
       1,
     );
@@ -1502,7 +1503,7 @@ async function main() {
   // to its own "Unknown subcommand" refusal. This check runs AFTER the
   // valueless/numeric guards: a misplaced NUMERIC flag is refused with the more
   // precise numeric message (the flag's own contract), and a misplaced boolean
-  // flag — the silent-drop defect — is refused here.
+  // flag â€” the silent-drop defect â€” is refused here.
   const accepted = acceptedFlagsFor(cmd);
   const foreignFlag =
     accepted === null
@@ -1512,8 +1513,8 @@ async function main() {
 
   // C1-10 (KD-8): the opt-in cross-process campaign ledger PREFLIGHT. Load the
   // persistent ledger the caller named and refuse BEFORE any verb dispatches
-  // once the campaign bound is reached — the one thing a per-process
-  // RAPIDTOOL_TOKEN_CAP cannot do. Absent ⇒ nothing here runs (byte-identical).
+  // once the campaign bound is reached â€” the one thing a per-process
+  // RAPIDTOOL_TOKEN_CAP cannot do. Absent â‡’ nothing here runs (byte-identical).
   const ledgerPath = campaignLedgerPath(args);
   if (ledgerPath !== null) {
     const envCap = campaignCapFromEnv();
@@ -1535,7 +1536,7 @@ async function main() {
       return respond(
         {
           ok: false,
-          error: `campaign ledger unreadable: ${ledgerPath} (${err instanceof Error ? err.message : String(err)}) — refusing to reset an operator's bound; repair or remove it by hand`,
+          error: `campaign ledger unreadable: ${ledgerPath} (${err instanceof Error ? err.message : String(err)}) â€” refusing to reset an operator's bound; repair or remove it by hand`,
           code: "RT_E_VALIDATION",
         },
         1,
@@ -1546,7 +1547,7 @@ async function main() {
       return respond(
         {
           ok: false,
-          error: `campaign token bound exceeded: spent ${ledger.spent} >= cap ${ledger.cap} (ledger ${ledgerPath}) — refusing further opted-in work.`,
+          error: `campaign token bound exceeded: spent ${ledger.spent} >= cap ${ledger.cap} (ledger ${ledgerPath}) â€” refusing further opted-in work.`,
           code: "RT_E_BUDGET_EXHAUSTED",
           campaignLedger: {
             path: ledgerPath,
@@ -1556,7 +1557,7 @@ async function main() {
             remaining: 0,
           },
           remedy:
-            "Start a fresh campaign ledger (a new file), or raise RAPIDTOOL_CAMPAIGN_TOKEN_CAP with an owner decision — the bound is cross-process and accumulates every opted-in invocation; never edit `spent` down.",
+            "Start a fresh campaign ledger (a new file), or raise RAPIDTOOL_CAMPAIGN_TOKEN_CAP with an owner decision â€” the bound is cross-process and accumulates every opted-in invocation; never edit `spent` down.",
         },
         1,
       );
@@ -1564,18 +1565,18 @@ async function main() {
     CAMPAIGN_LEDGER = { path: ledgerPath, ...ledger };
   }
 
-  // W45·331-1 (Keywright): resolve DEEPSEEK_API_KEY from <repo>/.env + the
+  // W45Â·331-1 (Keywright): resolve DEEPSEEK_API_KEY from <repo>/.env + the
   // process env BEFORE any dispatch, so every keyed verb (and create's
   // enforceDod default) sees the repo's key, and a conflicting ambient key is
   // surfaced loud + coded rather than silently shadowing it.
   await installRepoEnvKey();
 
-  // E-25: shared project loader — missing/bad project file is a usage-class
+  // E-25: shared project loader â€” missing/bad project file is a usage-class
   // error (exit 1), never an internal error (exit 4).
   const makeLoader = (h) => (cmdName) => {
     const proj = requireArg(args, "project", cmdName);
-    // fixes/217e (G1): `return` the refusal — respond() exits; without it the
-    // verb fell through and ran with `undefined` (audit 216y §2.3 G1).
+    // fixes/217e (G1): `return` the refusal â€” respond() exits; without it the
+    // verb fell through and ran with `undefined` (audit 216y Â§2.3 G1).
     if (proj.error !== undefined) return respond({ ok: false, error: proj.error, code: "RT_E_VALIDATION" }, 1);
     try {
       const project = h.loadProject(proj.value);
@@ -1583,9 +1584,9 @@ async function main() {
       CLI_PHASE = typeof project?.currentPhase === "number" ? project.currentPhase : null;
       return project;
     } catch (err) {
-      // Classify the OBJECT: a read ENOENT → RT_E_PROJECT_MISSING; a malformed
-      // project file (JSON/shape) → RT_E_VALIDATION. Prose could not tell them apart.
-      // fixes/217e (G1): same refusal contract — `return` ends the verb here.
+      // Classify the OBJECT: a read ENOENT â†’ RT_E_PROJECT_MISSING; a malformed
+      // project file (JSON/shape) â†’ RT_E_VALIDATION. Prose could not tell them apart.
+      // fixes/217e (G1): same refusal contract â€” `return` ends the verb here.
       return respond(
         {
           ok: false,
@@ -1629,17 +1630,39 @@ async function main() {
         if (briefSource.error !== undefined) {
           return respond({ ok: false, error: briefSource.error, code: "RT_E_VALIDATION" }, 1);
         }
-        let project = h.createProject({ brief: briefSource.value, name: args.name });
+        // W359 (thread-kind): the delivery kind the brief asked for. An EXPLICIT
+        // --kind wins and is stored verbatim, validated against the ONE vocabulary
+        // (headless.DELIVERY_KINDS â† types.ts DELIVERY_KINDS) so a typo is a usage
+        // refusal instead of a stored nonsense kind. An ABSENT flag stores NOTHING:
+        // the project is created kind-less and the ONE resolver
+        // (engine.deliveryKindOf, read on every consumer) decides from the brief â€”
+        // absent must never silently become `app`.
+        const kind = typeof args.kind === "string" ? args.kind.trim() : undefined;
+        if (kind !== undefined && !h.DELIVERY_KINDS.includes(kind)) {
+          return respond(
+            {
+              ok: false,
+              error: `create: unknown --kind "${kind}" - expected one of ${h.DELIVERY_KINDS.join(" | ")}.`,
+              code: "RT_E_VALIDATION",
+            },
+            1,
+          );
+        }
+        let project = h.createProject({
+          brief: briefSource.value,
+          name: args.name,
+          ...(kind === undefined ? {} : { kind }),
+        });
         // fixes/132 (C2): keyed runs default enforceDod ON (hard DoD gates);
         // --advisory restores advisory-only behavior. The flip happens before
-        // anything observes the project — the saved file carries the flag.
+        // anything observes the project â€” the saved file carries the flag.
         if (flag(args, "advisory")) project = { ...project, enforceDod: false };
-        // fixes/144 (M1): create's default STAYS CWD-relative <slug>.json — the
+        // fixes/144 (M1): create's default STAYS CWD-relative <slug>.json â€” the
         // project JSON is an intermediate control file that every later verb
         // consumes via --project, so it must stay next to the shell chaining the
         // verbs (g4 F1 keeps it; only the DELIVERABLE emit + vault moved home).
-        // R5-f10 (W29 · A2-f11): a valueless --out used to melt into the
-        // default and silently write <slug>.json into the CWD — refuse loudly,
+        // R5-f10 (W29 Â· A2-f11): a valueless --out used to melt into the
+        // default and silently write <slug>.json into the CWD â€” refuse loudly,
         // nothing written.
         if (pathFlagMissing(args.out)) {
           return respond(
@@ -1649,12 +1672,12 @@ async function main() {
         }
         const out = resolve(typeof args.out === "string" ? args.out : `${h.filename(project.name)}.json`);
         h.saveProject(out, project);
-        // 326 F2c (C2 · monitors' OBS-T3-1): the exit row belongs NEXT TO the
-        // project this command CREATED — CLI_PROJECT is the single input to
+        // 326 F2c (C2 Â· monitors' OBS-T3-1): the exit row belongs NEXT TO the
+        // project this command CREATED â€” CLI_PROJECT is the single input to
         // resolveLogDir (:486), and respond() exits in-tick (:243) so no later
         // verb logic reads it. Failure paths above still stamp the invoker's
-        // cwd because no project exists yet (the doc's split —
-        // runtime-log.server.ts:47-50 — now holds for create too).
+        // cwd because no project exists yet (the doc's split â€”
+        // runtime-log.server.ts:47-50 â€” now holds for create too).
         CLI_PROJECT = out;
         // Surface the EFFECTIVE enforcement value (create default policy is
         // env-dependent, so the caller must never guess it).
@@ -1668,23 +1691,23 @@ async function main() {
       case "run":
       case "gate": {
         // 316 H3 (315 V2 finding #4): the seal cannot apply to this driver
-        // (runUntilGate never reads WildStepOptions.agentSeal) — the absorbed
+        // (runUntilGate never reads WildStepOptions.agentSeal) â€” the absorbed
         // flag is refused with the pointer instead of silently ignored. The
         // refusal now fires from the ONE pre-dispatch guard in main() (330),
         // before this arm is even reached.
         const project = loadProjectFor(cmd);
         const path = requireProjectPath(args, cmd);
         // W-47 / T-107.4 (W33 lane L2): `run --unattended` drives the keyed
-        // journey headless to completion unattended — autopilot ON (machine
+        // journey headless to completion unattended â€” autopilot ON (machine
         // gates only) + live ON (P6 through the shared runP6Edge seam; keyless
-        // ⇒ the honest deterministic floor). It is NOT a daemon: a host
+        // â‡’ the honest deterministic floor). It is NOT a daemon: a host
         // scheduler (Windows Task Scheduler / cron) invokes it on a cadence.
         // 341-6: the unattended arms pass `machineGates: true`, so a stock HITL
         // gate (P4/P5/P8/P9) whose DoD passes is cleared through the ledgered
-        // machine actor — a genuine human gate (forceHuman) or a red DoD gate
+        // machine actor â€” a genuine human gate (forceHuman) or a red DoD gate
         // still parks (exit 2), never a fake completion.
         const unattended = flag(args, "unattended");
-        // PR-22: `gate --resynthesize` — the named recovery door out of a red
+        // PR-22: `gate --resynthesize` â€” the named recovery door out of a red
         // running P6. It re-opens the phase (retry) and re-enters the P6
         // journey LIVE, bounded by the driver's own iteration cap, using the
         // recorded unmet requirements as the next cycle's context. Without
@@ -1696,9 +1719,9 @@ async function main() {
         const maxSteps = cmd === "run" && !unattended ? 1 : undefined; // run = single step; gate/unattended = until parked
         // 330 Switchboard (T4): optional `--knowledge <store.json>` seeds the
         // expansion chain with accepted cross-project lessons (the driver's
-        // `proven` option — the same rows the packet arm threads).
+        // `proven` option â€” the same rows the packet arm threads).
         const proven = await resolveProvenRows(cmd, args, project);
-        // PR-16 (B5/C-11): stamp the run window for the in-run RUNLOCK guard —
+        // PR-16 (B5/C-11): stamp the run window for the in-run RUNLOCK guard â€”
         // a repo `src/**`/`scripts/**` mtime newer than this means the run
         // overlapped a code edit (BL-010) and its bytes are suspect.
         const runlockStartMs = Date.now();
@@ -1714,14 +1737,14 @@ async function main() {
           ...(unattended ? { machineGates: true } : {}),
           ...(proven.present ? { proven: proven.rows } : {}),
         });
-        // M6-04 (312 · E2's owed half; landed 316 · I4): the save goes through
-        // the ONE busy-aware helper — bounded wait-and-retry (each attempt
+        // M6-04 (312 Â· E2's owed half; landed 316 Â· I4): the save goes through
+        // the ONE busy-aware helper â€” bounded wait-and-retry (each attempt
         // re-enters saveProject, so the fixes/310 reclaimStaleLock discipline
         // runs on every retry: a SIGKILL-orphaned lock is reclaimed, a
         // transiently-held live lock usually clears inside the window). A
         // still-live writer gets a CODED RT_E_BUSY refusal at the
-        // README-documented busy exit 1 — never the global net's exit 4, the
-        // 308 map6 lost-update mislabel — carrying `preserved`: the run
+        // README-documented busy exit 1 â€” never the global net's exit 4, the
+        // 308 map6 lost-update mislabel â€” carrying `preserved`: the run
         // checkpoint beside the project dir where the completed phase work
         // lives (`resume --project` re-enters it), so writer contention can
         // never silently discard a run's completed work again.
@@ -1737,10 +1760,10 @@ async function main() {
               ...(unattended ? { unattended: true } : {}),
               code: "RT_E_BUSY",
               error:
-                `${saved.error} — another writer held ${saved.lockPath} through the whole bounded retry window. ` +
+                `${saved.error} â€” another writer held ${saved.lockPath} through the whole bounded retry window. ` +
                 (cpPresent
-                  ? `The completed phase work is preserved in the run checkpoint — wait for the writer to exit, then re-enter with \`resume --project ${path}\`.`
-                  : `No resume checkpoint exists for this run (a terminal seal clears it) — wait for the writer to exit, then re-run this verb.`),
+                  ? `The completed phase work is preserved in the run checkpoint â€” wait for the writer to exit, then re-enter with \`resume --project ${path}\`.`
+                  : `No resume checkpoint exists for this run (a terminal seal clears it) â€” wait for the writer to exit, then re-run this verb.`),
               preserved: { checkpoint: cpPath, present: cpPresent, resume: cpPresent ? `resume --project ${path}` : null },
               steps: res.steps,
               stopped: res.stopped,
@@ -1750,18 +1773,18 @@ async function main() {
           );
           return;
         }
-        // E-25: parked awaiting human / blocked → exit 2 (state fully on
-        // stdout); complete / mid-run cap → 0.
+        // E-25: parked awaiting human / blocked â†’ exit 2 (state fully on
+        // stdout); complete / mid-run cap â†’ 0.
         const parked = res.project.status === "awaiting_hitl" || res.project.status === "blocked";
         // fixes/144 (M4-1 completion gate): a COMPLETE seal with any recorded
-        // FAILED DoD gate is NEVER a clean 0 — exit 1 + RT_E_GATES_FAILED +
+        // FAILED DoD gate is NEVER a clean 0 â€” exit 1 + RT_E_GATES_FAILED +
         // the failed-gate census + sealedWithFailures:true, so a red-gate run
         // can never present byte-identical output to a clean one. (This is the
-        // run/gate completion branch — the parked-2 branch above is untouched.)
+        // run/gate completion branch â€” the parked-2 branch above is untouched.)
         const sealed = h.summary(res.project);
         // PR-16 (B5/C-11) in-run RUNLOCK guard: if the repo's own `src/**` or
         // `scripts/**` changed while this run was executing, the run overlapped
-        // a code edit (BL-010) — refuse honestly with the named file(s) instead
+        // a code edit (BL-010) â€” refuse honestly with the named file(s) instead
         // of presenting a clean result produced against a moving tree.
         const runlockViolations =
           typeof h.runlockEditViolations === "function"
@@ -1778,7 +1801,7 @@ async function main() {
                 `the run overlapped a repo source edit (RUNLOCK): ${runlockViolations
                   .slice(0, 5)
                   .join(", ")}${runlockViolations.length > 5 ? ` (+${runlockViolations.length - 5} more)` : ""} ` +
-                "— the run's artifacts were produced against a moving tree; freeze the tree and re-run.",
+                "â€” the run's artifacts were produced against a moving tree; freeze the tree and re-run.",
               runlock: { runStartMs: runlockStartMs, violations: runlockViolations },
               steps: res.steps,
               stopped: res.stopped,
@@ -1799,11 +1822,11 @@ async function main() {
               ...(unattended ? { unattended: true } : {}),
               code: "RT_E_GATE_PENDING",
               remedy:
-                "A hard DoD red is repaired, not approved: read summary.failedGates (the unmet criteria), fix the phase's artifacts or re-run the phase, then re-run `gate` — no HITL accept/reject door exists for a red gate.",
+                "A hard DoD red is repaired, not approved: read summary.failedGates (the unmet criteria), fix the phase's artifacts or re-run the phase, then re-run `gate` â€” no HITL accept/reject door exists for a red gate.",
               error:
                 (Array.isArray(res.events) && res.events.length > 0
                   ? res.events[res.events.length - 1]
-                  : "Hard DoD block — advance refused") + " — resolve the unmet DoD criteria before advancing.",
+                  : "Hard DoD block â€” advance refused") + " â€” resolve the unmet DoD criteria before advancing.",
               summary: sealed,
               steps: res.steps,
               stopped: res.stopped,
@@ -1824,7 +1847,7 @@ async function main() {
               path,
               ...(unattended ? { unattended: true } : {}),
               code: "RT_E_GATES_FAILED",
-              error: `run sealed complete with ${sealed.failedGates?.length ?? 0} failed DoD gate(s): ${census} — resolve the red gates (repair the failing phase and re-run) before shipping.`,
+              error: `run sealed complete with ${sealed.failedGates?.length ?? 0} failed DoD gate(s): ${census} â€” resolve the red gates (repair the failing phase and re-run) before shipping.`,
               summary: sealed,
               steps: res.steps,
               stopped: res.stopped,
@@ -1852,7 +1875,7 @@ async function main() {
                 (typeof lastEvent === "string" && lastEvent.length > 0
                   ? lastEvent
                   : `${cmd} made no progress`) +
-                ` — ${cmd} ran but advanced nothing (steps: 0, outcome: ${res.outcome}). ` +
+                ` â€” ${cmd} ran but advanced nothing (steps: 0, outcome: ${res.outcome}). ` +
                 "Resolve the stuck phase (a red P6 stall is reopened with `retry`) before re-running.",
               summary: sealed,
               steps: res.steps,
@@ -1878,15 +1901,15 @@ async function main() {
         return;
       }
 
-      // T-107.7 (W36 lane N2): REAL run resume — read the per-phase checkpoint that
+      // T-107.7 (W36 lane N2): REAL run resume â€” read the per-phase checkpoint that
       // run/gate wrote beside the project dir, admit it (identity + mode + integer
-      // phase/step sanity — checkpointAdmits), hydrate the minimal read shape, and
+      // phase/step sanity â€” checkpointAdmits), hydrate the minimal read shape, and
       // re-enter at the recorded phase through the same runUntilGate driver the
       // original run used. Never a silent resume: the envelope names the snapshot
       // age + the re-entry phase. `--project` accepts a project FILE (its dir is
       // the checkpoint home; the drive writes the file back) or a DIRECTORY.
       case "resume": {
-        // 316 H3 (315 V2 finding #4): same silent-absorb class — the seal is
+        // 316 H3 (315 V2 finding #4): same silent-absorb class â€” the seal is
         // a wild-run concept; the pointer refusal rides the ONE pre-dispatch
         // guard in main() (330).
         const target = requireArg(args, "project", "resume");
@@ -1894,10 +1917,10 @@ async function main() {
         const t = resolveCheckpointTarget(target.value);
         // Identity guard: when a project FILE was named and exists, admit against ITS
         // id (an id reused by a different brief must fail closed); a directory names
-        // no expected id — the checkpoint's own identity governs.
+        // no expected id â€” the checkpoint's own identity governs.
         let expected;
         // fixes/323 FIX-2c (X2b OBS): the loaded file doubles as the staleness
-        // comparison subject below — a snapshot the file has moved past must
+        // comparison subject below â€” a snapshot the file has moved past must
         // never be silently resumed over it.
         let fileProject = null;
         if (t.file && existsSync(t.file)) {
@@ -1905,7 +1928,7 @@ async function main() {
             fileProject = h.loadProject(t.file);
             expected = { projectId: fileProject.id };
           } catch {
-            /* an unreadable file cannot pin identity — the checkpoint's own id governs */
+            /* an unreadable file cannot pin identity â€” the checkpoint's own id governs */
           }
         }
         const resumed = h.loadResumableCheckpoint(t.dir, expected);
@@ -1914,10 +1937,10 @@ async function main() {
         }
         // fixes/323 FIX-2c (X2b OBS): ignore-with-notice when the named project
         // FILE has superseded the snapshot (id / seal / brief / phase / state
-        // comparison — checkpointSupersededBy). The file is the current truth;
+        // comparison â€” checkpointSupersededBy). The file is the current truth;
         // driving from the snapshot would rewind it (the live X2b repro: a
         // stale P4 gate-park snapshot rewound a file already advanced to P5).
-        // The notice rides `checkpoint` — never a silent switch.
+        // The notice rides `checkpoint` â€” never a silent switch.
         const stale = fileProject ? h.checkpointSupersededBy(resumed.project, resumed.resumedFrom.phase, fileProject) : null;
         if (stale && stale.superseded && fileProject) {
           const runlockStartMs = Date.now();
@@ -1965,17 +1988,17 @@ async function main() {
       }
 
       // W-47/T-107.4 (W36 lane N2): the scheduler-facing drive, REAL where the host
-      // allows — re-enter from a checkpoint when one exists (crash recovery: a Task
+      // allows â€” re-enter from a checkpoint when one exists (crash recovery: a Task
       // Scheduler / cron re-invocation resumes instead of restarting), else start
       // from the named project file; drive autopilot + live until parked. NOT a
-      // daemon: no scheduler/queue in-product — an external hook invokes this verb
+      // daemon: no scheduler/queue in-product â€” an external hook invokes this verb
       // on a cadence. 341-6: this verb passes `machineGates: true`, so a stock
       // HITL gate (P4/P5/P8/P9) whose DoD passes is cleared through the ledgered
-      // machine actor (approve --seat autopilot's actor) — a genuine human gate
+      // machine actor (approve --seat autopilot's actor) â€” a genuine human gate
       // (forceHuman) or a red DoD gate still parks: exit 2 is then the honest
       // outcome, never a fake completion.
       case "unattended": {
-        // 316 H3 (315 V2 finding #4): same silent-absorb class — the seal is
+        // 316 H3 (315 V2 finding #4): same silent-absorb class â€” the seal is
         // a wild-run concept; the pointer refusal rides the ONE pre-dispatch
         // guard in main() (330).
         const target = requireArg(args, "project", "unattended");
@@ -1983,21 +2006,21 @@ async function main() {
         const t = resolveCheckpointTarget(target.value);
         const resumed = h.loadResumableCheckpoint(t.dir);
         // fixes/323 FIX-2c (X2b OBS): the named FILE (when it exists) is loaded
-        // up front — a scheduler re-invocation must never resume a snapshot the
+        // up front â€” a scheduler re-invocation must never resume a snapshot the
         // file has moved past; the file is the current truth and drives below.
         let fileProject = null;
         if (t.file && existsSync(t.file)) {
           try {
             fileProject = h.loadProject(t.file);
           } catch {
-            /* an unreadable file cannot join the comparison — the refusals below / the drive's own validation own that failure */
+            /* an unreadable file cannot join the comparison â€” the refusals below / the drive's own validation own that failure */
           }
         }
         let project;
         let extras = { unattended: true };
         if (resumed.ok) {
           // fixes/323 FIX-2c (X2b OBS): ignore-with-notice when the file has
-          // superseded the snapshot (checkpointSupersededBy — id / seal / brief
+          // superseded the snapshot (checkpointSupersededBy â€” id / seal / brief
           // / phase / state). The stale snapshot is never consumed: the drive
           // starts from the file and the notice rides `checkpoint`.
           const stale = fileProject ? h.checkpointSupersededBy(resumed.project, resumed.resumedFrom.phase, fileProject) : null;
@@ -2030,7 +2053,7 @@ async function main() {
             };
           }
         } else if (resumed.code === "RT_E_CHECKPOINT_MISSING" && t.file && existsSync(t.file)) {
-          // No checkpoint: a fresh project (or one whose COMPLETE seal cleared it) —
+          // No checkpoint: a fresh project (or one whose COMPLETE seal cleared it) â€”
           // start from the file; the drive below writes a fresh checkpoint per phase.
           try {
             project = fileProject ?? h.loadProject(t.file);
@@ -2047,7 +2070,7 @@ async function main() {
           }
         } else {
           // A corrupt/stale/mismatched checkpoint (or a dir with nothing in it) must
-          // never be silently ignored by a scheduler — report the coded refusal.
+          // never be silently ignored by a scheduler â€” report the coded refusal.
           return respond(
             { ok: false, unattended: true, path: resumed.path, dir: t.dir, code: resumed.code, error: resumed.error },
             1,
@@ -2072,16 +2095,16 @@ async function main() {
 
       case "approve": {
         // 316 H3 (315 V2 finding #4): `approve --agent-seal` used to be
-        // absorbed by parseArgs (silently ignored — the pre-fix no-op the V2
+        // absorbed by parseArgs (silently ignored â€” the pre-fix no-op the V2
         // deep-check reproduced). The seal cannot ride this door: `approve`
         // drives the single human/machine gate decision, never the wild loop.
         // The pointer refusal now rides the ONE pre-dispatch guard in main()
         // (330), before this arm is reached.
         const project = loadProjectFor("approve");
         if (project.status !== "awaiting_hitl" || !project.hitl) {
-          // 326 F2b (C1 · E2-OBS-5 class): the RT_E_GATE_PENDING registry
-          // remedy ("Route the project through the open HITL prompt …") points
-          // at a door that CANNOT exist in this branch — it fires exactly when
+          // 326 F2b (C1 Â· E2-OBS-5 class): the RT_E_GATE_PENDING registry
+          // remedy ("Route the project through the open HITL prompt â€¦") points
+          // at a door that CANNOT exist in this branch â€” it fires exactly when
           // hitl is null (no park, no prompt). Keep the code + error bytes
           // (recorded envelopes depend on them); ship the honest context
           // remedy (an explicit `remedy` bypasses respond()'s registry
@@ -2092,43 +2115,43 @@ async function main() {
               error: `No pending gate to approve (status: ${project.status}).`,
               code: "RT_E_GATE_PENDING",
               remedy:
-                "No HITL accept door is open (approve needs status=awaiting_hitl with a pending gate): read the latest verdict (`diagnose`; summary.failedGates / summary.lastGate) and drive the run forward with `gate` — a red DoD gate is repaired, not approved; never fabricate a decision.",
+                "No HITL accept door is open (approve needs status=awaiting_hitl with a pending gate): read the latest verdict (`diagnose`; summary.failedGates / summary.lastGate) and drive the run forward with `gate` â€” a red DoD gate is repaired, not approved; never fabricate a decision.",
             },
             1,
           );
         }
         // Drift guard: a stale gate (hitl on another phase) is a state error
-        // the engine refuses loudly — surface it as exit 1 + PHASE_ILLEGAL
+        // the engine refuses loudly â€” surface it as exit 1 + PHASE_ILLEGAL
         // instead of letting it escape to the exit-4 internal catch-all.
         if (project.hitl.phase !== project.currentPhase) {
           return respond(
             {
               ok: false,
-              error: `approve: pending gate is for P${project.hitl.phase} but the current edge is P${project.currentPhase} — state drifted; refusing a silent no-op.`,
+              error: `approve: pending gate is for P${project.hitl.phase} but the current edge is P${project.currentPhase} â€” state drifted; refusing a silent no-op.`,
               code: "RT_E_PHASE_ILLEGAL",
             },
             1,
           );
         }
-        // 216 (T0.7 — actor-seam fix): this guard used to cover ONLY --force,
+        // 216 (T0.7 â€” actor-seam fix): this guard used to cover ONLY --force,
         // so an agent calling `approve` non-interactively WITHOUT --force
-        // silently minted decidedBy:"human" — no TTY, no note, no seat
+        // silently minted decidedBy:"human" â€” no TTY, no note, no seat
         // evidence (the reproduced forged-advance path). The human seat is now
         // required for EVERY non-TTY approval. An unattended process must use
         // the autopilot seat; it may not impersonate the human seat by default.
         //
-        // 314 F5 (K2/K5 · fixes/311_sd_product §1): the seat is never GUESSED.
+        // 314 F5 (K2/K5 Â· fixes/311_sd_product Â§1): the seat is never GUESSED.
         // The 216 guard left two kinks: (K2) a bare `approve` on a TTY passed
         // through to the ternary below, silently attributing a HUMAN's
-        // decision to the machine seat (decidedBy:"autopilot") — an integrity
+        // decision to the machine seat (decidedBy:"autopilot") â€” an integrity
         // bug on high-stakes gates; (K5) its non-TTY arm pointed at "the
         // autopilot gate" with no exact next step, while --i-am-human is
-        // itself refused off-TTY — a dead end. Now the seat must be NAMED,
-        // exactly one of: `--i-am-human` (human ceremony, TTY only — the 216
+        // itself refused off-TTY â€” a dead end. Now the seat must be NAMED,
+        // exactly one of: `--i-am-human` (human ceremony, TTY only â€” the 216
         // contract) or `--seat autopilot` (EXPLICIT machine attribution, the
-        // documented agent door — 311 audit rec. #1 alt / #2). A bare call is
+        // documented agent door â€” 311 audit rec. #1 alt / #2). A bare call is
         // refused WITH its exact recovery. headless.approve's own default
-        // (HARNESS_APPROVE_ACTOR) is untouched — this discipline is the CLI
+        // (HARNESS_APPROVE_ACTOR) is untouched â€” this discipline is the CLI
         // verb's.
         const humanClaim = flag(args, "i-am-human");
         const seatArg = args.seat;
@@ -2138,7 +2161,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `approve: --seat ${shown} is not a seat — name 'autopilot' for an explicit machine decision, or drop --seat and pass --i-am-human for the human seat.`,
+              error: `approve: --seat ${shown} is not a seat â€” name 'autopilot' for an explicit machine decision, or drop --seat and pass --i-am-human for the human seat.`,
               code: "RT_E_VALIDATION",
               remedy:
                 "Re-run with exactly one seat: `approve --project <p> --seat autopilot` (explicit machine attribution) or `approve --project <p> --i-am-human` from an interactive terminal (human seat).",
@@ -2151,7 +2174,7 @@ async function main() {
             {
               ok: false,
               error:
-                "approve: --i-am-human and --seat autopilot are mutually exclusive — a decision is either a person's or the machine's; name exactly one seat.",
+                "approve: --i-am-human and --seat autopilot are mutually exclusive â€” a decision is either a person's or the machine's; name exactly one seat.",
               code: "RT_E_VALIDATION",
               remedy:
                 "Drop one flag: keep `--i-am-human` for the human seat (TTY-only) or `--seat autopilot` for explicit machine attribution.",
@@ -2161,15 +2184,15 @@ async function main() {
         }
         if (!humanClaim && !machineSeat) {
           const forceClause = flag(args, "force")
-            ? " (--force additionally requires the verified human seat — a machine may never force past a gate)"
+            ? " (--force additionally requires the verified human seat â€” a machine may never force past a gate)"
             : "";
           return respond(
             {
               ok: false,
               error:
                 process.stdin.isTTY === true
-                  ? `approve: no seat named — a bare approval would be attributed to the MACHINE (decidedBy:"autopilot") and the seat is never guessed.${forceClause} Name the seat: \`--i-am-human\` for a human decision (typed RT_HUMAN_SEAT_TOKEN re-entry at the prompt) or \`--seat autopilot\` for an explicit machine decision.`
-                  : `approve from a non-TTY names no claimable seat — the human seat needs an interactive terminal (--i-am-human + typed RT_HUMAN_SEAT_TOKEN re-entry; refused off-TTY) and a machine decision must be explicit.${forceClause} Next step: \`approve --project <p> --seat autopilot\` for an explicit machine approval, or run the verb from a terminal where a person can confirm.`,
+                  ? `approve: no seat named â€” a bare approval would be attributed to the MACHINE (decidedBy:"autopilot") and the seat is never guessed.${forceClause} Name the seat: \`--i-am-human\` for a human decision (typed RT_HUMAN_SEAT_TOKEN re-entry at the prompt) or \`--seat autopilot\` for an explicit machine decision.`
+                  : `approve from a non-TTY names no claimable seat â€” the human seat needs an interactive terminal (--i-am-human + typed RT_HUMAN_SEAT_TOKEN re-entry; refused off-TTY) and a machine decision must be explicit.${forceClause} Next step: \`approve --project <p> --seat autopilot\` for an explicit machine approval, or run the verb from a terminal where a person can confirm.`,
               code: "RT_E_VALIDATION",
               remedy:
                 "Name exactly one seat: `--seat autopilot` (explicit machine attribution, works non-TTY) or `--i-am-human` from an interactive terminal (human seat, typed token re-entry).",
@@ -2177,11 +2200,11 @@ async function main() {
             1,
           );
         }
-        // W44 X2 (seeded ticket T · fixes/321_d2_monitor F-2): a forceHuman gate
-        // is HUMAN-ONLY (R3/B-03) — a rejected review park / failed P6 sandbox
+        // W44 X2 (seeded ticket T Â· fixes/321_d2_monitor F-2): a forceHuman gate
+        // is HUMAN-ONLY (R3/B-03) â€” a rejected review park / failed P6 sandbox
         // is never machine-cleared. The engine enforces this with a bare throw
         // (engine.approveHitl), which main()'s internal catch wraps as
-        // RT_E_INTERNAL / exit 4 + the generic "retry / escalate" remedy — the
+        // RT_E_INTERNAL / exit 4 + the generic "retry / escalate" remedy â€” the
         // WRONG class for a deterministic governance refusal. The gate's own
         // state is already loaded here, so refuse CODED at the verb (usage
         // class, exit 1, remedy = the human door) before the driver call; the
@@ -2191,7 +2214,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `approve: the open gate (P${project.hitl.phase}) is human-only (forceHuman — R3/B-03): a machine seat may never approve a forceHuman gate, and --force cannot carry it either.`,
+              error: `approve: the open gate (P${project.hitl.phase}) is human-only (forceHuman â€” R3/B-03): a machine seat may never approve a forceHuman gate, and --force cannot carry it either.`,
               code: "RT_E_VALIDATION",
               remedy:
                 "Use the human door: run `approve --project <p> --i-am-human` from an interactive terminal (typed RT_HUMAN_SEAT_TOKEN re-entry), or send the phase back with `reject --project <p> --note <qualitative feedback>`. A forceHuman gate can never be machine-approved.",
@@ -2199,17 +2222,17 @@ async function main() {
             1,
           );
         }
-        // 216o (T-107.3 · P0-01/P0-06 · W5-L3 — the CLI length of the ONE seam):
+        // 216o (T-107.3 Â· P0-01/P0-06 Â· W5-L3 â€” the CLI length of the ONE seam):
         // the approve verb consults the policy seam BEFORE handing the decision
         // to the driver, which re-checks at the same seam (defense in depth, one
-        // rule). Action routing mirrors headless.approve: --force ⇒ hitl.force
-        // (Rule B — the human seat plus the out-of-band token; an autopilot seat
+        // rule). Action routing mirrors headless.approve: --force â‡’ hitl.force
+        // (Rule B â€” the human seat plus the out-of-band token; an autopilot seat
         // can never self-approve a force); otherwise hitl.approve on
         // gate:P<phase>.
         //
-        // R5-f12 (W29 LANE H · R11-f04/C2-f02): the --i-am-human claim goes
+        // R5-f12 (W29 LANE H Â· R11-f04/C2-f02): the --i-am-human claim goes
         // through the TWO-CHANNEL seat (see humanSeatClaim): the TYPED TTY
-        // re-entry is the presented token, the env read the expected one — the
+        // re-entry is the presented token, the env read the expected one â€” the
         // same-env-var-both-sides degeneracy this replaces is statically
         // forbidden by scripts/cli-exit-taxonomy.test.mjs. A non-TTY
         // --i-am-human is refused before this seam (no second channel exists
@@ -2218,13 +2241,13 @@ async function main() {
         //
         // W6-L2 (ledger PROVENANCE): the row this verb lands is minted by
         // h.approve below, whose seam verdict stamps `decidedVia` onto the row
-        // (seat label + action/resource/reason + token-path bool, types.ts) —
+        // (seat label + action/resource/reason + token-path bool, types.ts) â€”
         // this verb's consult above and the driver's re-check derive from the
         // same actor/flags/typed token in one process, so the recorded
         // provenance is exactly this verb's enforced verdict. No response-shape
         // change: the approve JSON contract + exit codes stay byte-identical.
         const { evaluatePolicy } = await import("../src/lib/policy.ts");
-        // 314 F5: re-read via flag() on purpose — the W29 static pin
+        // 314 F5: re-read via flag() on purpose â€” the W29 static pin
         // (cli-exit-taxonomy.test.mjs) counts `flag(args,"i-am-human") ? await
         // humanSeatClaim(` claim sites; `humanClaim` above is the same value.
         const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("approve") : null;
@@ -2246,7 +2269,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `approve: refused by the policy seam — ${policyVerdict.reason}`,
+              error: `approve: refused by the policy seam â€” ${policyVerdict.reason}`,
               code: "RT_E_VALIDATION",
             },
             1,
@@ -2262,8 +2285,8 @@ async function main() {
       case "reject": {
         const project = loadProjectFor("reject");
         if (project.status !== "awaiting_hitl" || !project.hitl) {
-          // 326 F2b (C1 · E2-OBS-5 class): same phantom-door remedy as approve
-          // — no HITL reject door exists when hitl is null; ship the honest
+          // 326 F2b (C1 Â· E2-OBS-5 class): same phantom-door remedy as approve
+          // â€” no HITL reject door exists when hitl is null; ship the honest
           // context remedy instead of the registry default.
           return respond(
             {
@@ -2271,18 +2294,18 @@ async function main() {
               error: `No pending gate to reject (status: ${project.status}).`,
               code: "RT_E_GATE_PENDING",
               remedy:
-                "No HITL reject door is open (reject needs status=awaiting_hitl with a pending gate): read the latest verdict (`diagnose`; summary.failedGates / summary.lastGate) and drive the run forward with `gate` — a red DoD gate is repaired, not approved; never fabricate a decision.",
+                "No HITL reject door is open (reject needs status=awaiting_hitl with a pending gate): read the latest verdict (`diagnose`; summary.failedGates / summary.lastGate) and drive the run forward with `gate` â€” a red DoD gate is repaired, not approved; never fabricate a decision.",
             },
             1,
           );
         }
         // Drift guard (store.reject ST-2 parity): a stale/duplicated hitl on
-        // another phase is a state error → exit 1 + PHASE_ILLEGAL, never exit 4.
+        // another phase is a state error â†’ exit 1 + PHASE_ILLEGAL, never exit 4.
         if (project.hitl.phase !== project.currentPhase) {
           return respond(
             {
               ok: false,
-              error: `reject: pending gate is for P${project.hitl.phase} but the current edge is P${project.currentPhase} — state drifted; refusing a silent no-op.`,
+              error: `reject: pending gate is for P${project.hitl.phase} but the current edge is P${project.currentPhase} â€” state drifted; refusing a silent no-op.`,
               code: "RT_E_PHASE_ILLEGAL",
             },
             1,
@@ -2300,13 +2323,13 @@ async function main() {
             1,
           );
         }
-        // 322 X2 (F-1 scripts half · D2 F-1): the reject door carries the SAME
-        // explicit-seat discipline as approve — the seat is never guessed, and a
+        // 322 X2 (F-1 scripts half Â· D2 F-1): the reject door carries the SAME
+        // explicit-seat discipline as approve â€” the seat is never guessed, and a
         // machine path can never mint a human actor. The pre-fix path left the
         // seat to rejectHitl, which hardcoded decidedBy:"human" for EVERY caller
-        // (live bytes: live1/05_sealed_reject_note.out — a non-TTY machine
+        // (live bytes: live1/05_sealed_reject_note.out â€” a non-TTY machine
         // reject stamped "human"). Exactly one seat: `--seat autopilot`
-        // (explicit machine attribution) or `--i-am-human` (human ceremony —
+        // (explicit machine attribution) or `--i-am-human` (human ceremony â€”
         // TTY + typed RT_HUMAN_SEAT_TOKEN re-entry, refused off-TTY); the chosen
         // actor rides h.reject's actor parameter (X1's seam).
         const humanClaim = flag(args, "i-am-human");
@@ -2317,7 +2340,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `reject: --seat ${shown} is not a seat — name 'autopilot' for an explicit machine rejection, or drop --seat and pass --i-am-human for the human seat.`,
+              error: `reject: --seat ${shown} is not a seat â€” name 'autopilot' for an explicit machine rejection, or drop --seat and pass --i-am-human for the human seat.`,
               code: "RT_E_VALIDATION",
               remedy:
                 "Re-run with exactly one seat: `reject --project <p> --note <t> --seat autopilot` (explicit machine attribution) or `reject --project <p> --note <t> --i-am-human` from an interactive terminal (human seat).",
@@ -2330,7 +2353,7 @@ async function main() {
             {
               ok: false,
               error:
-                "reject: --i-am-human and --seat autopilot are mutually exclusive — a decision is either a person's or the machine's; name exactly one seat.",
+                "reject: --i-am-human and --seat autopilot are mutually exclusive â€” a decision is either a person's or the machine's; name exactly one seat.",
               code: "RT_E_VALIDATION",
               remedy: "Drop one flag: keep `--i-am-human` for the human seat (TTY-only) or `--seat autopilot` for explicit machine attribution.",
             },
@@ -2343,8 +2366,8 @@ async function main() {
               ok: false,
               error:
                 process.stdin.isTTY === true
-                  ? `reject: no seat named — a bare rejection would carry no claimed seat and the seat is never guessed. Name the seat: \`--i-am-human\` for a human decision (typed RT_HUMAN_SEAT_TOKEN re-entry at the prompt) or \`--seat autopilot\` for an explicit machine decision.`
-                  : `reject from a non-TTY names no claimable seat — the human seat needs an interactive terminal (--i-am-human + typed RT_HUMAN_SEAT_TOKEN re-entry; refused off-TTY) and a machine decision must be explicit. Next step: \`reject --project <p> --note <t> --seat autopilot\` for an explicit machine rejection, or run the verb from a terminal where a person can confirm.`,
+                  ? `reject: no seat named â€” a bare rejection would carry no claimed seat and the seat is never guessed. Name the seat: \`--i-am-human\` for a human decision (typed RT_HUMAN_SEAT_TOKEN re-entry at the prompt) or \`--seat autopilot\` for an explicit machine decision.`
+                  : `reject from a non-TTY names no claimable seat â€” the human seat needs an interactive terminal (--i-am-human + typed RT_HUMAN_SEAT_TOKEN re-entry; refused off-TTY) and a machine decision must be explicit. Next step: \`reject --project <p> --note <t> --seat autopilot\` for an explicit machine rejection, or run the verb from a terminal where a person can confirm.`,
               code: "RT_E_VALIDATION",
               remedy:
                 "Name exactly one seat: `--seat autopilot` (explicit machine attribution, works non-TTY) or `--i-am-human` from an interactive terminal (human seat, typed token re-entry).",
@@ -2367,13 +2390,13 @@ async function main() {
         const project = loadProjectFor("retry");
         // W61 B3 (recovery door): the old guard accepted only `blocked`, so a
         // keyed P6 that failed and left the project `running` (no rejected
-        // record) could not be retried — the ONE door that applies refused.
+        // record) could not be retried â€” the ONE door that applies refused.
         // Accept the red-running-P6 shape too; headless.retry owns the reset.
         if (project.status !== "blocked" && !h.isRedRunningP6(project)) {
           return respond(
             {
               ok: false,
-              error: `Nothing to retry (status: ${project.status}) — retry applies to rejected/blocked projects and a stalled red P6.`,
+              error: `Nothing to retry (status: ${project.status}) â€” retry applies to rejected/blocked projects and a stalled red P6.`,
               code: "RT_E_PHASE_ILLEGAL",
             },
             1,
@@ -2384,7 +2407,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `Nothing to retry (status: ${project.status}, phase ${project.currentPhase}) — no rejected phase and no red P6 stall to re-open.`,
+              error: `Nothing to retry (status: ${project.status}, phase ${project.currentPhase}) â€” no rejected phase and no red P6 stall to re-open.`,
               code: "RT_E_PHASE_ILLEGAL",
             },
             1,
@@ -2406,7 +2429,7 @@ async function main() {
         } catch (err) {
           // A missing/unreadable --report SOURCE is a usage-class error, not a
           // missing PROJECT: ENOENT on `--report @missing` used to classify as
-          // RT_E_PROJECT_MISSING (the wrong class — the project loaded fine).
+          // RT_E_PROJECT_MISSING (the wrong class â€” the project loaded fine).
           const missingSource =
             err && typeof err === "object" && ((/** @type {any} */ (err).code === "ENOENT") || /ENOENT/.test(String((/** @type {any} */ (err).message))));
           return respond(
@@ -2433,7 +2456,7 @@ async function main() {
         }
         const path = requireProjectPath(args, "ingest");
         try {
-          // E-09: the RICH ingest surfaces whether the report actually landed —
+          // E-09: the RICH ingest surfaces whether the report actually landed â€”
           // a duplicate retry (lost-ack recovery) is success with applied:false,
           // never a fabricated applied:true.
           const res = h.ingestResult(project, report);
@@ -2445,7 +2468,7 @@ async function main() {
         } catch (err) {
           // E-10: a rejected report (wrong phase, malformed payload) throws
           // ReportRejectedError carrying the project with its report.rejected
-          // trail log — persist the trail, then exit 1 (validation class).
+          // trail log â€” persist the trail, then exit 1 (validation class).
           if (err && typeof err === "object" && err.name === "ReportRejectedError" && err.project) {
             const trail = await h.saveProjectBusyAware(path, err.project);
             if (!trail.ok) {
@@ -2473,14 +2496,14 @@ async function main() {
       case "packet": {
         const project = loadProjectFor("packet");
         // fixes/144 (M5-3): optional `--knowledge <store.json>` enables the
-        // tier-1 Ranked-memory seed — cross-project proven lesson rows from
+        // tier-1 Ranked-memory seed â€” cross-project proven lesson rows from
         // the configured store join the packet's fusionRank pool (advisory,
         // human-accepted rows only). Requires a LIVE re-compile through
         // packet.ts (exportPacketText would serve the pre-stamped packet);
         // without the flag the verb is byte-identical to h.packet.
         //
-        // R5-f10 (W29 · A2-f11): a valueless `--out` must never melt away into
-        // the stdout default — parseArgs turns a bare flag into `true`, which
+        // R5-f10 (W29 Â· A2-f11): a valueless `--out` must never melt away into
+        // the stdout default â€” parseArgs turns a bare flag into `true`, which
         // `typeof args.out === "string"` silently ignores. Refuse loudly.
         if (pathFlagMissing(args.out)) {
           return respond(
@@ -2488,7 +2511,7 @@ async function main() {
             1,
           );
         }
-        // 330 Switchboard (probed): the same R5-f10 class for `--knowledge` —
+        // 330 Switchboard (probed): the same R5-f10 class for `--knowledge` â€”
         // a bare `packet --knowledge` parses to `true`, so the
         // `typeof args.knowledge === "string"` read below silently ignored the
         // flag and served the unseeded packet (a knowledge flag that appears to
@@ -2506,7 +2529,7 @@ async function main() {
         let text;
         if (typeof args.knowledge === "string" && args.knowledge.trim()) {
           // A configured-but-MISSING store is unreadable the same way a corrupt
-          // one is (fixes/216g §T4): refuse it coded rather than seed nothing.
+          // one is (fixes/216g Â§T4): refuse it coded rather than seed nothing.
           const knowledgeStorePath = resolve(args.knowledge);
           if (!existsSync(knowledgeStorePath)) return missingKnowledgeStoreRefusal("packet", knowledgeStorePath);
           try {
@@ -2558,7 +2581,7 @@ async function main() {
 
       case "export": {
         const project = loadProjectFor("export");
-        // R5-f10 (W29 · A2-f11): valueless --out guard (see packet).
+        // R5-f10 (W29 Â· A2-f11): valueless --out guard (see packet).
         if (pathFlagMissing(args.out)) {
           return respond(
             { ok: false, error: pathFlagRefusalError("export", "out", args.out), code: "RT_E_VALIDATION" },
@@ -2578,7 +2601,7 @@ async function main() {
       }
 
       case "emit": {
-        // fixes/126: CODE → RUNNABLE-APP path — write the scaffolded project
+        // fixes/126: CODE â†’ RUNNABLE-APP path â€” write the scaffolded project
         // (with the generated module embedded) to --out. No build step: the
         // scaffold emits runnable package.json/tsconfig for the caller.
         // fixes/132 (C2): optional `--check` runs the per-file compile-check
@@ -2589,7 +2612,7 @@ async function main() {
           // (per-project; CWD fallback when the home location is unwritable);
           // --out keeps overriding. headless.emitProject mkdirSync(recursive)s
           // the target AND every file's parent before writeFileSync (headless.ts
-          // emitProject) — no extra mkdir needed here.
+          // emitProject) â€” no extra mkdir needed here.
           if (pathFlagMissing(args.out)) {
             return respond(
               { ok: false, error: pathFlagRefusalError("emit", "out", args.out), code: "RT_E_VALIDATION" },
@@ -2597,7 +2620,7 @@ async function main() {
             );
           }
           // W14-L2 (OV-15): expose headless.emitProject's own `redTree` policy so
-          // the coded refusal's advice — 'emit with redTree:"banner"' — is
+          // the coded refusal's advice â€” 'emit with redTree:"banner"' â€” is
           // reachable from the CLI. `refuse` (the default) and `banner` (emit
           // anyway, with the unmissable banner prepended to the emitted
           // README.md) are accepted; `probe` (no trail read) stays internal to
@@ -2613,16 +2636,16 @@ async function main() {
               1,
             );
           }
-          // R11-f13 (W29 LANE H · A2-f11 re-verified): `--force` is a BOOLEAN
+          // R11-f13 (W29 LANE H Â· A2-f11 re-verified): `--force` is a BOOLEAN
           // flag; a stray value used to be swallowed by parseArgs so the flag
-          // silently read as absent — the value counterpart of the valueless
+          // silently read as absent â€” the value counterpart of the valueless
           // `--out` guard above. Accept the boolean spellings only and refuse
           // the rest loudly: never a silent no-force.
           if (typeof args.force === "string" && !["true", "1", "false", "0"].includes(args.force)) {
             return respond(
               {
                 ok: false,
-                error: `emit --force is a boolean flag (got ${JSON.stringify(args.force)}) — pass it bare (--force) or as --force=true|1|false|0`,
+                error: `emit --force is a boolean flag (got ${JSON.stringify(args.force)}) â€” pass it bare (--force) or as --force=true|1|false|0`,
                 code: "RT_E_VALIDATION",
               },
               1,
@@ -2630,14 +2653,14 @@ async function main() {
           }
           // `--require-verified` opts into exit 5 for a green-but-unverified
           // tree-run. Without `--run` in the SAME invocation no verdict is
-          // computed, so the flag was a silent no-op — refuse it rather than
+          // computed, so the flag was a silent no-op â€” refuse it rather than
           // let a gate believe its strictness applied.
           if (flag(args, "require-verified") && !flag(args, "run")) {
             return respond(
               {
                 ok: false,
                 error:
-                  "emit --require-verified requires --run — it opts into exit 5 for a green-but-unverified emitted tree-run, which is only computed when --run is requested; without --run the flag is a silent no-op.",
+                  "emit --require-verified requires --run â€” it opts into exit 5 for a green-but-unverified emitted tree-run, which is only computed when --run is requested; without --run the flag is a silent no-op.",
                 code: "RT_E_VALIDATION",
                 remedy: "Add --run (to compute the verdict the flag judges), or drop --require-verified.",
               },
@@ -2647,7 +2670,7 @@ async function main() {
           const dest = typeof args.out === "string" ? { path: args.out, fallback: false, error: null } : defaultOutputDir(h, project);
           const dir = dest.path;
           const target = resolve(dir);
-          // fixes/144 (M1): a second emit must overwrite cleanly and SAY so —
+          // fixes/144 (M1): a second emit must overwrite cleanly and SAY so â€”
           // never a silent merge. Snapshot pre-existing content BEFORE writing
           // (writeFileSync replaces each file wholesale; nothing is merged).
           const preExisting = existsSync(target) && readdirSync(target).length > 0;
@@ -2702,12 +2725,12 @@ async function main() {
                 const wroteHere = Array.isArray(emitted.files) && emitted.files.length > 0;
                 const dirHasContent = existsSync(refusalDir) && readdirSync(refusalDir).length > 0;
                 const disk = wroteHere
-                  ? `the emitted tree is kept on disk at ${refusalDir} —`
+                  ? `the emitted tree is kept on disk at ${refusalDir} â€”`
                   : dirHasContent
-                    ? `this invocation wrote NO files (the directory ${refusalDir} still holds an earlier tree) —`
-                    : `this invocation wrote NO files — ${refusalDir} was never materialized —`;
+                    ? `this invocation wrote NO files (the directory ${refusalDir} still holds an earlier tree) â€”`
+                    : `this invocation wrote NO files â€” ${refusalDir} was never materialized â€”`;
                 refusal.error =
-                  `emit refused at delivery: ${seal.detail} — a tree below the brief-driven floor ` +
+                  `emit refused at delivery: ${seal.detail} â€” a tree below the brief-driven floor ` +
                   `(${seal.emitted} file(s), ${seal.modules} module(s), floor ${seal.floor}) is an ` +
                   `under-produced plan, never a normal artifact; ${disk} synthesize ` +
                   "the missing module(s) and re-emit to green.";
@@ -2736,14 +2759,14 @@ async function main() {
           };
           if (Array.isArray(res.quarantined)) { payload.quarantined = res.quarantined; payload.quarantineDir = res.quarantineDir; if (res.quarantineMissing?.length) payload.quarantineMissing = res.quarantineMissing; }
           // W14-L2 (OV-15): under --red-tree banner the emitted tree carries the
-          // unmissable README banner — say so on the envelope too, so an agent
+          // unmissable README banner â€” say so on the envelope too, so an agent
           // driver can never read this as a quietly-clean emit.
           if (res.redTreeBanner === true) {
             payload.redTreeBanner = true;
             payload.redTree = res.redTree ?? null;
           }
           // R2-01 (W352): a below-floor partial shipped under --red-tree banner
-          // carries the caution banner and the recorded refusal — surface both
+          // carries the caution banner and the recorded refusal â€” surface both
           // so an agent driver can never read it as a clean emit.
           if (res.underProduced) {
             payload.underProducedBanner = true;
@@ -2752,24 +2775,24 @@ async function main() {
           if (dest.fallback) {
             payload.fallback = true;
             payload.warning =
-              `Home emit dir was unwritable (${dest.error ?? "unknown"}) — wrote under CWD instead: ${res.dir}`;
+              `Home emit dir was unwritable (${dest.error ?? "unknown"}) â€” wrote under CWD instead: ${res.dir}`;
           }
           if (preExisting) {
             payload.overwritten = true;
             payload.warning =
-              "Output folder already existed — its files were overwritten in place (writeFileSync replaces whole files; nothing was merged or appended).";
+              "Output folder already existed â€” its files were overwritten in place (writeFileSync replaces whole files; nothing was merged or appended).";
           }
-          // R11-f08 (W42 · L4/E4): a forced emit no longer leaves the foreign
-          // survivors in place — move them ASIDE into
+          // R11-f08 (W42 Â· L4/E4): a forced emit no longer leaves the foreign
+          // survivors in place â€” move them ASIDE into
           // `<dir>/.rapidtool-quarantine/<stamp>/` (recoverable, never a
           // delete) and report it. Runs BEFORE --check/--run so those legs
           // judge the intended tree only (A1-f07: the "tested" tree must not
           // be a mixed tree). A failed move flips the envelope ok:false +
-          // RT_E_FOREIGN_FILES — the module never silently drops (R11-f08).
+          // RT_E_FOREIGN_FILES â€” the module never silently drops (R11-f08).
           // A FAILED move means the survivors are STILL in the dir, so the
           // judging legs below are suppressed (foreignLeftInPlace): a green
           // --run over a mixed tree would otherwise mint `tested` over bytes
-          // the factory never authored — the exact A1-f07 defect the move
+          // the factory never authored â€” the exact A1-f07 defect the move
           // exists to prevent.
           let foreignLeftInPlace = false;
           if (Array.isArray(res.survivors) && res.survivors.length > 0) {
@@ -2790,11 +2813,11 @@ async function main() {
           }
           if (foreignLeftInPlace) {
             payload.judgingSkipped =
-              "foreign files could not be quarantined — --verify-kind/--check/--run did not run (the tree is still mixed; R11-f08 · A1-f07)";
+              "foreign files could not be quarantined â€” --verify-kind/--check/--run did not run (the tree is still mixed; R11-f08 Â· A1-f07)";
           }
           if (!foreignLeftInPlace && flag(args, "verify-kind")) {
             const cc = await checkDriver();
-            // fixes/216z (T4.1 / TA-16): the leg is async — scratch-copy npm
+            // fixes/216z (T4.1 / TA-16): the leg is async â€” scratch-copy npm
             // ci/install + the tree's declared build/test under the bounded
             // runner (compile-check.server.ts: verifyKindDir).
             const vk = await cc.verifyKindDir(res.dir);
@@ -2811,7 +2834,7 @@ async function main() {
             payload.check = check;
             if (!check.ok) {
               // Emit itself succeeded, but the emitted code does not all
-              // parse — surface the verdicts and exit 1 (loud, never a
+              // parse â€” surface the verdicts and exit 1 (loud, never a
               // faked all-clear).
               payload.ok = false;
               payload.error = `${check.failed} of ${check.checked} emitted files failed compile-check`;
@@ -2819,18 +2842,18 @@ async function main() {
             }
           }
           // fixes/144 (M3/B3): optional `--run` executes the emitted tree
-          // in-loop — per-file parse verdicts + every emitted tests/*.spec.ts
-          // under the bounded runner + one kind-entry smoke — and appends the
+          // in-loop â€” per-file parse verdicts + every emitted tests/*.spec.ts
+          // under the bounded runner + one kind-entry smoke â€” and appends the
           // TreeRunOutcome (compile/tests/run). Exit 1 when the tree is not
-          // ok (red tree is never a clean emit — loud, never a faked pass).
-          // audit P0-3 (346 · re-audit row 10 residual): the `--git` tail below
+          // ok (red tree is never a clean emit â€” loud, never a faked pass).
+          // audit P0-3 (346 Â· re-audit row 10 residual): the `--git` tail below
           // must NOT land a commit when THIS invocation's `--run` verdict is
-          // red — the run leg flips payload.ok + RT_E_TREE_RUN_FAILED, but the
+          // red â€” the run leg flips payload.ok + RT_E_TREE_RUN_FAILED, but the
           // git leg used to run unconditionally and committed a broken tree.
           // Capture the just-computed verdict so the git leg can consult it.
           let runVerdict = null;
           // C1-06: the promoted "tested" evidenceHash THIS invocation earned (if
-          // any) — carried into the delivery record so "committed" can state
+          // any) â€” carried into the delivery record so "committed" can state
           // exactly which verdict it claims.
           let deliveryEvidenceHash = null;
           if (!foreignLeftInPlace && flag(args, "run")) {
@@ -2841,7 +2864,7 @@ async function main() {
             // treeVerdictHash over the decisive fields), so the emit envelope's
             // treeRun already carries it for the delivery record to persist.
             payload.treeRun = outcome;
-            // W43 · C6/E4 (fixes/312_c6_ux · 311_sd_product K3): self-qualification —
+            // W43 Â· C6/E4 (fixes/312_c6_ux Â· 311_sd_product K3): self-qualification â€”
             // a green --run must never read as "the product works" while the census
             // shows stubs/reexports. The envelope carries the census in the doctor's
             // own vocabulary (`stubs:N reexports:N real:N`) plus the verdict's loud
@@ -2866,20 +2889,20 @@ async function main() {
                 const first = specFails[0];
                 bits.push(
                   `spec ${first.file}: ${first.run}` +
-                    (first.detail ? ` — ${first.detail.slice(0, 300)}` : ""),
+                    (first.detail ? ` â€” ${first.detail.slice(0, 300)}` : ""),
                 );
               }
               if (outcome.run && outcome.run.run !== "pass" && outcome.run.run !== "skip") {
                 bits.push(
                   `entry ${outcome.run.entry ?? outcome.run.kind}: ${outcome.run.run}` +
-                    (outcome.run.detail ? ` — ${outcome.run.detail.slice(0, 300)}` : ""),
+                    (outcome.run.detail ? ` â€” ${outcome.run.detail.slice(0, 300)}` : ""),
                 );
               }
               payload.error = bits.length > 0 ? bits.join("; ") : "tree-run failed";
               payload.code = "RT_E_TREE_RUN_FAILED";
             }
-            // W48 · 334-4 (S2): an `ok` tree whose DECLARED scripts (typecheck /
-            // build) never executed is GREEN BUT UNVERIFIED — nothing ran red,
+            // W48 Â· 334-4 (S2): an `ok` tree whose DECLARED scripts (typecheck /
+            // build) never executed is GREEN BUT UNVERIFIED â€” nothing ran red,
             // so `ok` is NOT redefined and the P6 mint below is untouched. The
             // exit taxonomy (5) and these top-level fields make the unverified
             // toolchain distinguishable from a fully-verified tree.
@@ -2890,11 +2913,11 @@ async function main() {
               payload.unverified = true;
               payload.unverifiedDeclaredScripts = [...outcome.unverifiedDeclaredScripts];
               payload.unverifiedNote =
-                "declared project script(s) did not execute — the emitted tree is ok (nothing ran red) but its toolchain is UNVERIFIED; install deps and re-run --run to verify";
+                "declared project script(s) did not execute â€” the emitted tree is ok (nothing ran red) but its toolchain is UNVERIFIED; install deps and re-run --run to verify";
             }
-            // T9.3 promotion (W44 · G3 · applied from fixes/319_f3_promote §C):
+            // T9.3 promotion (W44 Â· G3 Â· applied from fixes/319_f3_promote Â§C):
             // a GREEN --run earns the tested stamp onto the emitted artifact
-            // ITSELF — the dir's own `.rapidtool/project.json` now carries
+            // ITSELF â€” the dir's own `.rapidtool/project.json` now carries
             // label:"tested" + evidenceHash from THIS verdict. The mint
             // self-guards (red / ok-but-no-spec runs promote nothing; an
             // existing stamp is never rewritten). The ledger absorbs the
@@ -2921,25 +2944,25 @@ async function main() {
               }
             }
           }
-          // W48 · 334-4 (S2) introduced exit 5 for a green-but-unverified tree;
-          // W49 · 335-4 flipped it to OPT-IN (`--require-verified`). A fresh
+          // W48 Â· 334-4 (S2) introduced exit 5 for a green-but-unverified tree;
+          // W49 Â· 335-4 flipped it to OPT-IN (`--require-verified`). A fresh
           // scaffold has no `node_modules`, so its declared toolchain is ALWAYS
-          // unverified — a default that never exits 0 is not a usable pass/fail
+          // unverified â€” a default that never exits 0 is not a usable pass/fail
           // for an agent or a human. The DEFAULT is now 0 for a green tree; the
           // envelope still carries `unverified` / `declaredScriptsVerified` /
           // `unverifiedDeclaredScripts`, so the honest signal is preserved and a
           // hard gate passes --require-verified to get exit 5.
           // R2-01 (campaign #2): the floor seal. codegen journals
           // RT_E_PLAN_UNDERPRODUCED onto the project record (build.json), but
-          // the emit seal never echoed it — a below-floor tree materialized
+          // the emit seal never echoed it â€” a below-floor tree materialized
           // under `--red-tree banner` read as a normal artifact. Re-derive the
           // floor from the project's own P6 journal + codegen's ONE
           // under-production predicate; when the delivered tree is still below
           // the floor, the floor code becomes the DECIDING delivery reason
-          // (top-level `code` + the withheld git reason below) — never a silent
+          // (top-level `code` + the withheld git reason below) â€” never a silent
           // partial. This is a SEPARATE refusal from the substance hold: the
           // below-floor plan has its OWN deciding code and is NOT escaped by
-          // `--allow-empty` (whose contract is substance ONLY) — the scaffold
+          // `--allow-empty` (whose contract is substance ONLY) â€” the scaffold
           // already refuses it pre-write regardless of any flag (R2-01), and the
           // post-write seal must agree.
           const planUnder = await h.planUnderproductionSeal(project);
@@ -2956,18 +2979,18 @@ async function main() {
             if (typeof payload.code !== "string" || payload.code !== planUnder.code) {
               payload.code = planUnder.code;
               payload.error =
-                `emit refused at delivery: ${planUnder.detail} — a tree below the brief-driven floor ` +
+                `emit refused at delivery: ${planUnder.detail} â€” a tree below the brief-driven floor ` +
                 `(${planUnder.emitted} file(s), ${planUnder.modules} module(s), floor ${planUnder.floor}) is an ` +
-                "under-produced plan, never a normal artifact; the emitted tree is kept on disk — synthesize " +
+                "under-produced plan, never a normal artifact; the emitted tree is kept on disk â€” synthesize " +
                 "the missing module(s) and re-emit to green.";
             }
           }
-          // fixes/343_3 · git-native delivery: `emit --git` lands the just-
+          // fixes/343_3 Â· git-native delivery: `emit --git` lands the just-
           // emitted tree as ONE Conventional-Commits commit through
-          // headless.landEmittedTree → git.server's §6b seam (emitted-product
+          // headless.landEmittedTree â†’ git.server's Â§6b seam (emitted-product
           // only, manifest-only staging, the host repo structurally refused,
           // idempotent). The envelope carries the REAL commit; a land refusal
-          // is coded and flips payload.ok false (exit 1) — the emitted tree
+          // is coded and flips payload.ok false (exit 1) â€” the emitted tree
           // still exists on disk either way.
           if (flag(args, "git")) {
             // audit P0-3 (346) + L4-346 continuation: a commit is delivered
@@ -2975,13 +2998,13 @@ async function main() {
             // `emit --git` ALONE is unchanged (no verdict was computed to
             // consult). A red `--run`, a red `--check`/`--verify-kind`, or a
             // quarantine move that left the tree MIXED (foreignLeftInPlace) all
-            // withhold the commit — coded + loud, the emitted tree still on
+            // withhold the commit â€” coded + loud, the emitted tree still on
             // disk (delivery is withheld, the build is not). A commit is
             // evidence of a clean, verified tree, so a red `--check` must
             // withhold exactly as a red `--run` does.
             let withheld = null;
             if (planUnder !== null) {
-              // R2-01: the floor is the DECIDING reason — a below-floor tree is
+              // R2-01: the floor is the DECIDING reason â€” a below-floor tree is
               // an under-produced plan, not a merely-empty or red one. Checked
               // first so the sealed git sub-envelope names the floor code too.
               // NOT escaped by `--allow-empty` (substance-only): the scaffold
@@ -2990,7 +3013,7 @@ async function main() {
                 reason: "plan-underproduced",
                 code: planUnder.code,
                 error:
-                  `git delivery refused: ${planUnder.detail} — a tree below the brief-driven floor is an ` +
+                  `git delivery refused: ${planUnder.detail} â€” a tree below the brief-driven floor is an ` +
                   "under-produced plan, never a normal artifact; no commit was issued and the emitted tree is " +
                   "kept on disk. Synthesize the missing module(s) and re-emit to green.",
               };
@@ -3000,7 +3023,7 @@ async function main() {
                 code: "RT_E_FOREIGN_FILES",
                 error:
                   "git delivery refused: foreign files could not be quarantined, so the emitted " +
-                  "tree is still mixed — no commit was issued and the tree is kept on disk; resolve " +
+                  "tree is still mixed â€” no commit was issued and the tree is kept on disk; resolve " +
                   "the quarantine failure and re-emit before landing it.",
               };
             } else if (
@@ -3015,7 +3038,7 @@ async function main() {
             ) {
               // W61 B1 (delivery): a commit is evidence of a substantive,
               // verified product. A tree the census reads as hollow (no job
-              // modules — substance verdict "empty"), or a green run over a
+              // modules â€” substance verdict "empty"), or a green run over a
               // project carrying an uncleared red tree-run trail, is not that.
               // WITHHOLD the commit, coded + loud, unless the caller explicitly
               // opts in with --allow-empty (a deliberate scaffold-only
@@ -3030,7 +3053,7 @@ async function main() {
                 reason: "substance-empty",
                 code: "RT_E_SUBSTANCE_EMPTY",
                 error:
-                  `git delivery refused: ${why} — a commit is evidence of a substantive, ` +
+                  `git delivery refused: ${why} â€” a commit is evidence of a substantive, ` +
                   "verified product, so no commit was issued and the emitted tree is kept on disk. " +
                   "Synthesize the missing surface and re-emit to green, or pass --allow-empty " +
                   "to land a deliberate scaffold-only commit.",
@@ -3041,7 +3064,7 @@ async function main() {
                 code: "RT_E_TREE_RUN_FAILED",
                 error:
                   "git delivery refused: this invocation's --run verdict is red " +
-                  "(RT_E_TREE_RUN_FAILED) — no commit was issued and the emitted tree is kept " +
+                  "(RT_E_TREE_RUN_FAILED) â€” no commit was issued and the emitted tree is kept " +
                   "on disk; fix the tree and re-run `emit --run` to green before landing it.",
               };
             } else if (flag(args, "check") && payload.check && payload.check.ok !== true) {
@@ -3050,7 +3073,7 @@ async function main() {
                 code: "RT_E_CHECK_FAILED",
                 error:
                   "git delivery refused: this invocation's --check verdict is red " +
-                  "(RT_E_CHECK_FAILED) — no commit was issued and the emitted tree is kept " +
+                  "(RT_E_CHECK_FAILED) â€” no commit was issued and the emitted tree is kept " +
                   "on disk; fix the emitted files and re-run `emit --check` to green before landing it.",
               };
             } else if (flag(args, "verify-kind") && payload.verifyKind && payload.verifyKind.ok !== true) {
@@ -3059,7 +3082,7 @@ async function main() {
                 code: "RT_E_VERIFY_KIND_FAILED",
                 error:
                   "git delivery refused: this invocation's --verify-kind verdict is red " +
-                  "(RT_E_VERIFY_KIND_FAILED) — no commit was issued and the emitted tree is kept " +
+                  "(RT_E_VERIFY_KIND_FAILED) â€” no commit was issued and the emitted tree is kept " +
                   "on disk; fix the toolchain and re-run before landing it.",
               };
             }
@@ -3069,7 +3092,7 @@ async function main() {
               // does. Before this, `git.code` preferred a leg's earlier code:
               // office-invoice-tracker's banner emit carried
               // `git.reason:"substance-empty"` beside `git.code:
-              // "RT_E_TREE_RUN_FAILED"` (the run leg's code) — an inconsistent
+              // "RT_E_TREE_RUN_FAILED"` (the run leg's code) â€” an inconsistent
               // record. The withheld reason owns BOTH codes.
               payload.git = {
                 committed: false,
@@ -3082,7 +3105,7 @@ async function main() {
               // W61 B1: the WITHHELD reason owns the envelope's code when it
               // differs from a leg's own code. The empty-substance refusal is
               // checked before the run-red branch, so payload.code may already
-              // read RT_E_TREE_RUN_FAILED from THAT leg — the more specific
+              // read RT_E_TREE_RUN_FAILED from THAT leg â€” the more specific
               // substance class (and its loud message) must win. Every other
               // withheld leg already carries payload.code === withheld.code, so
               // this is a no-op for them.
@@ -3118,7 +3141,7 @@ async function main() {
                 };
                 if (verification.verifiedProduct !== true) {
                   payload.git.verificationNote =
-                    "the commit landed, but the emitted product is NOT fully verified — read git.verification.unverifiedReasons";
+                    "the commit landed, but the emitted product is NOT fully verified â€” read git.verification.unverifiedReasons";
                 }
               } else {
                 // W352 R-19: a refused delivery (including the pre-commit
@@ -3173,7 +3196,7 @@ async function main() {
               acceptanceFixtures: merged,
               acceptanceBriefHash: String(fnv1a(project.brief ?? "")),
             };
-            // R5-f09 (W29 · A2-f10): the stamp must AGREE with the rows — a
+            // R5-f09 (W29 Â· A2-f10): the stamp must AGREE with the rows â€” a
             // blanket delete broke surviving approved rows of their stamp
             // (hydration demotes approved rows on a brief-hash change; readers
             // treat the pair as one fact). Keep it iff approved rows survive
@@ -3184,7 +3207,7 @@ async function main() {
               delete next.acceptanceApprovedAt;
             }
             h.saveProject(outPath, next);
-            // OPS-1 (W36 · N5): this envelope used respond()'s 1-arg form, so
+            // OPS-1 (W36 Â· N5): this envelope used respond()'s 1-arg form, so
             // `exit_code` was left undefined and JSON.stringify dropped the key
             // entirely (F5's scan: exactly 2 of 177 call sites). Every CLI
             // envelope carries `exit_code`; the draft landed, so exit 0.
@@ -3195,7 +3218,7 @@ async function main() {
                 redCards: draft.redCards,
                 pending: merged.filter((c) => c.approval === "pending").length,
                 approvedKept: merged.filter((c) => c.approval === "approved").length,
-                note: "draft is pending — run fixtures --approve --ids … or --approve-all (never auto)",
+                note: "draft is pending â€” run fixtures --approve --ids â€¦ or --approve-all (never auto)",
               },
               0,
             );
@@ -3213,8 +3236,8 @@ async function main() {
               respond({ ok: false, error: "fixtures --approve needs --ids id1,id2 or --approve-all", code: "RT_E_VALIDATION" }, 1);
               return;
             }
-            // R5-f02 (W29 · A2-f01 · R11-f05): the acceptance approval is a
-            // HUMAN decision — route it through the ONE policy seam
+            // R5-f02 (W29 Â· A2-f01 Â· R11-f05): the acceptance approval is a
+            // HUMAN decision â€” route it through the ONE policy seam
             // (`fixtures.approve`, requiresHumanSeat) exactly like `approve`
             // does for a gate. The seat is the two-channel claim (R5-f12): a
             // non-TTY --i-am-human is refused up front; a denied verdict (e.g.
@@ -3239,7 +3262,7 @@ async function main() {
                 {
                   ok: false,
                   error:
-                    `fixtures: refused by the policy seam — ${policyVerdict.reason} ` +
+                    `fixtures: refused by the policy seam â€” ${policyVerdict.reason} ` +
                     `(sanctioned fallback: ${policyVerdict.fallback}); nothing was written. ` +
                     `A human approves with --i-am-human from a terminal (re-enter RT_HUMAN_SEAT_TOKEN at the prompt).`,
                   code: "RT_E_VALIDATION",
@@ -3269,7 +3292,7 @@ async function main() {
             if (stamped) next.acceptanceApprovedAt = Date.now();
             else delete next.acceptanceApprovedAt;
             h.saveProject(outPath, next);
-            // OPS-1 (W36 · N5): second and last 1-arg respond() in the file —
+            // OPS-1 (W36 Â· N5): second and last 1-arg respond() in the file â€”
             // `exit_code` was silently dropped from this envelope. The approval
             // landed (seat-verified or autopilot per the seam verdict), exit 0.
             respond(
@@ -3301,24 +3324,24 @@ async function main() {
       }
 
       case "eval": {
-        // T5.3 (fixes/262 LANE 5 · W23): READ-ONLY scorecard over the keyed-eval
+        // T5.3 (fixes/262 LANE 5 Â· W23): READ-ONLY scorecard over the keyed-eval
         // harness's own documents under research/eval-out (results.json +
         // history.json + the W16-L1 kill-safety run marker). Prints ONE JSON
-        // object: the M1–M9 rubric (per-criterion aggregates + verbatim
+        // object: the M1â€“M9 rubric (per-criterion aggregates + verbatim
         // evidence), one row per corpus case (criteria / acceptance / grader
         // facts / coverage gaps), the history deltas (the LAST recorded history
         // row per slug vs the current results row) and the per-slug trend.
         //
-        // READ-ONLY over the eval documents (R5-f04 · W29 · A2-f04 narrowed
+        // READ-ONLY over the eval documents (R5-f04 Â· W29 Â· A2-f04 narrowed
         // this from the old broad claim): never writes results.json /
         // history.json / run-in-progress.json, no decision-ledger rows, no
-        // DEEPSEEK_API_KEY touch, no network, no model call — the reader is a
+        // DEEPSEEK_API_KEY touch, no network, no model call â€” the reader is a
         // pure parse+build over bytes already on disk. But like EVERY verb,
         // this exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/
         // (the respond() contract). Exit taxonomy: 0 = the scorecard printed;
         // 1 = usage/validation class (no readable/malformed results.json,
         // unknown --slug) carrying RT_E_VALIDATION; 4 = RT_E_INTERNAL only if
-        // the reader itself throws. Exit 3 is unreachable by design — this verb
+        // the reader itself throws. Exit 3 is unreachable by design â€” this verb
         // has no keyed path to be "not configured".
         const envDir =
           typeof process.env.EVAL_OUT_DIR === "string" && process.env.EVAL_OUT_DIR.trim() !== ""
@@ -3354,7 +3377,7 @@ async function main() {
               {
                 ok: false,
                 dir,
-                error: `eval: no readable results.json under ${dir} (${resultsRead.error}) — run the harness first (npm run eval / scripts/run-eval.mjs); this verb never fabricates a scorecard`,
+                error: `eval: no readable results.json under ${dir} (${resultsRead.error}) â€” run the harness first (npm run eval / scripts/run-eval.mjs); this verb never fabricates a scorecard`,
                 code: "RT_E_VALIDATION",
               },
               1,
@@ -3374,7 +3397,7 @@ async function main() {
               {
                 ok: false,
                 dir,
-                error: `eval: unknown --slug ${JSON.stringify(slug)} — results.json carries: ${
+                error: `eval: unknown --slug ${JSON.stringify(slug)} â€” results.json carries: ${
                   known.length > 0 ? known.join(", ") : "(no entries)"
                 }`,
                 code: "RT_E_VALIDATION",
@@ -3384,7 +3407,7 @@ async function main() {
           }
 
           // history + marker are ADVISORY context: a missing or malformed one
-          // degrades to an honest note (deltas/trend unavailable) — it never
+          // degrades to an honest note (deltas/trend unavailable) â€” it never
           // hides the scorecard, and it is never turned into a fake delta.
           const historyRead = readText(historyPath);
           let historyRows = [];
@@ -3421,10 +3444,10 @@ async function main() {
           });
           const notes = [...scorecard.notes];
           if (historyProblem) {
-            notes.push(`history.json unreadable — ${historyProblem} (deltas/trend unavailable; never fabricated).`);
+            notes.push(`history.json unreadable â€” ${historyProblem} (deltas/trend unavailable; never fabricated).`);
           }
           if (markerProblem) {
-            notes.push(`run-in-progress.json unreadable — ${markerProblem}`);
+            notes.push(`run-in-progress.json unreadable â€” ${markerProblem}`);
           }
           respond({ ...scorecard, notes, trends: sc.buildTrends(historyRows) }, 0);
         } catch (err) {
@@ -3441,16 +3464,16 @@ async function main() {
       }
 
       case "tree-run": {
-        // fixes/149 P0-1 (150-G1): the emit→edit→re-emit seam's ORACLE — run
+        // fixes/149 P0-1 (150-G1): the emitâ†’editâ†’re-emit seam's ORACLE â€” run
         // compile-check's dir-based treeRun over an EXISTING emitted dir.
         // NO re-emit, NO writes before/during reading: the dir is read exactly
         // as the agent left it (the emit-then-run ordering of `emit --run`
-        // above is precisely what made hand-edits unreachable — this verb
-        // never clobbers). Green tree → exit 0; red tree → exit 1 with the
+        // above is precisely what made hand-edits unreachable â€” this verb
+        // never clobbers). Green tree â†’ exit 0; red tree â†’ exit 1 with the
         // first not-ok tail (top-level error, then first failing spec, then
         // the entry verdict) in the envelope. Optional --project loads the
         // project ledger for a READ-ONLY hash-checked divergence report
-        // (`dirDirty`: which tree files differ from the ledger) — nothing is
+        // (`dirDirty`: which tree files differ from the ledger) â€” nothing is
         // ever persisted by this verb.
         const dirArg = requireArg(args, "dir", "tree-run");
         if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
@@ -3467,7 +3490,7 @@ async function main() {
           }
           if (!dirStat) {
             return respond(
-              { ok: false, dir, error: `tree-run: --dir ${JSON.stringify(dirArg.value)} does not exist — nothing to run.`, code: "RT_E_VALIDATION" },
+              { ok: false, dir, error: `tree-run: --dir ${JSON.stringify(dirArg.value)} does not exist â€” nothing to run.`, code: "RT_E_VALIDATION" },
               1,
             );
           }
@@ -3488,7 +3511,7 @@ async function main() {
           const outcome = await cc.treeRun(dir);
           const payload = { ok: outcome.ok === true, dir, treeRun: outcome };
           if (typeof args.project === "string" && args.project.trim()) {
-            // Advisory ledger context — a broken/unrelated ledger must never
+            // Advisory ledger context â€” a broken/unrelated ledger must never
             // hide the tree verdict, so the report is best-effort.
             try {
               const project = loadProjectFor("tree-run");
@@ -3503,10 +3526,10 @@ async function main() {
             } catch (e) {
               // W42 L4-G7 (OPS-12 / A-58): the divergence report stays
               // advisory (verdict + exit are never changed by it), but a
-              // failed ledger read is no longer SILENT — the envelope names
+              // failed ledger read is no longer SILENT â€” the envelope names
               // why the report is absent (message bounded to 200 chars).
               payload.dirDirtyNote =
-                "ledger read failed — divergence report skipped: " +
+                "ledger read failed â€” divergence report skipped: " +
                 (e instanceof Error ? e.message : String(e)).slice(0, 200);
             }
           }
@@ -3519,20 +3542,20 @@ async function main() {
               const first = specFails[0];
               bits.push(
                 `spec ${first.file}: ${first.run}` +
-                  (first.detail ? ` — ${first.detail.slice(0, 300)}` : ""),
+                  (first.detail ? ` â€” ${first.detail.slice(0, 300)}` : ""),
               );
             }
             if (outcome.run && outcome.run.run !== "pass" && outcome.run.run !== "skip") {
               bits.push(
                 `entry ${outcome.run.entry ?? outcome.run.kind}: ${outcome.run.run}` +
-                  (outcome.run.detail ? ` — ${outcome.run.detail.slice(0, 300)}` : ""),
+                  (outcome.run.detail ? ` â€” ${outcome.run.detail.slice(0, 300)}` : ""),
               );
             }
             payload.error = bits.length > 0 ? bits.join("; ") : "tree-run failed";
             payload.code = "RT_E_TREE_RUN_FAILED";
           }
-          // W48 · 334-4 (S2): same unverified-toolchain signal as `emit --run` —
-          // the envelope fields below are always present; W49 · 335-4 made the
+          // W48 Â· 334-4 (S2): same unverified-toolchain signal as `emit --run` â€”
+          // the envelope fields below are always present; W49 Â· 335-4 made the
           // exit for that state OPT-IN (`--require-verified`), default 0.
           if (typeof outcome.declaredScriptsVerified === "boolean") {
             payload.declaredScriptsVerified = outcome.declaredScriptsVerified;
@@ -3541,11 +3564,11 @@ async function main() {
             payload.unverified = true;
             payload.unverifiedDeclaredScripts = [...outcome.unverifiedDeclaredScripts];
             payload.unverifiedNote =
-              "declared project script(s) did not execute — the tree is ok (nothing ran red) but its toolchain is UNVERIFIED; install deps and re-run to verify";
+              "declared project script(s) did not execute â€” the tree is ok (nothing ran red) but its toolchain is UNVERIFIED; install deps and re-run to verify";
           }
           // PR-16 (B5/C-11) in-run RUNLOCK guard: if the repo's own `src/**` or
           // `scripts/**` changed while this tree-run was executing, the verdict
-          // was produced against a moving tree — refuse honestly with the named
+          // was produced against a moving tree â€” refuse honestly with the named
           // file(s) instead of presenting a clean result (BL-010).
           const runlockViolations =
             typeof h.runlockEditViolations === "function"
@@ -3561,7 +3584,7 @@ async function main() {
                   `the tree-run overlapped a repo source edit (RUNLOCK): ${runlockViolations
                     .slice(0, 5)
                     .join(", ")}${runlockViolations.length > 5 ? ` (+${runlockViolations.length - 5} more)` : ""} ` +
-                  "— the verdict was produced against a moving tree; freeze the tree and re-run.",
+                  "â€” the verdict was produced against a moving tree; freeze the tree and re-run.",
                 runlock: { runStartMs: runlockStartMs, violations: runlockViolations },
                 treeRun: outcome,
               },
@@ -3587,25 +3610,25 @@ async function main() {
       }
 
       case "repair": {
-        // fixes/149 P0-1 (150-G1): the emit→edit→re-emit continuation seam —
+        // fixes/149 P0-1 (150-G1): the emitâ†’editâ†’re-emit continuation seam â€”
         // bounded repair of an EDITED emitted dir. Loads the project ledger,
         // re-imports the edited tree files from the dir into
-        // project.generatedTree (path→content, per-file hash — a new hash is
+        // project.generatedTree (pathâ†’content, per-file hash â€” a new hash is
         // a real edit; refused/missing paths are warnings, never silent
         // drops), then runs the journey's bounded repair cycle AGAINST the
-        // dir: treeRun(dir) → red tail → one bounded synthesis repair call
+        // dir: treeRun(dir) â†’ red tail â†’ one bounded synthesis repair call
         // whose context reaches codegen as deps.treeFailure (the driveP6Journey
-        // seam) → the repaired tree files are applied onto the dir in place →
-        // re-import → treeRun again. Green → the tested-equivalent mint + the
-        // honest P6 gate record + converged (exit 0). Budget exhausted →
+        // seam) â†’ the repaired tree files are applied onto the dir in place â†’
+        // re-import â†’ treeRun again. Green â†’ the tested-equivalent mint + the
+        // honest P6 gate record + converged (exit 0). Budget exhausted â†’
         // honest FAILED (exit 1) with the deterministic floor standing. The
         // dir is NEVER re-emitted over (it is the artifact; the project JSON
-        // is the ledger — the ledger is persisted after every completed run,
+        // is the ledger â€” the ledger is persisted after every completed run,
         // converged or failed, so the artifact edits are never lost).
         const dirArg = requireArg(args, "dir", "repair");
         if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
         const project = loadProjectFor("repair");
-        // PR-22: `repair --from-gate` — the same one bounded re-entry, scoped to
+        // PR-22: `repair --from-gate` â€” the same one bounded re-entry, scoped to
         // the EDITED dir: re-open a red running P6 first so the repair cycle can
         // target the recorded unmet state instead of refusing as illegal.
         const repairProject =
@@ -3637,13 +3660,13 @@ async function main() {
           };
           if (res.ok) {
             h.saveProject(path, res.project); // the ledger absorbs the dir edits
-            // T9.3 repair-dir variant (fixes/323 FIX-2c · 319_f3_promote §C4):
-            // the converged repair's FRESH mint is the caller attestation —
+            // T9.3 repair-dir variant (fixes/323 FIX-2c Â· 319_f3_promote Â§C4):
+            // the converged repair's FRESH mint is the caller attestation â€”
             // promote the dir's OWN `.rapidtool/project.json` with the tested
             // evidence THIS run earned. repairTreeDir mints on the LEDGER
             // internally (recordGreen runs before the CLI sees the result), so
             // promoteEmittedTreeTested's fresh-mint guard can never fire here;
-            // res.minted is true only when this repair flipped the label —
+            // res.minted is true only when this repair flipped the label â€”
             // a red/no-spec run reports false and writes nothing.
             const promotedTree = h.promoteRepairedDirTested(res.project, res.dir, res.minted === true);
             return respond(
@@ -3677,7 +3700,7 @@ async function main() {
             );
           }
           if (typeof res.error === "string" && res.error) {
-            // Pre-flight failure (unreadable dir / no tree) — nothing changed.
+            // Pre-flight failure (unreadable dir / no tree) â€” nothing changed.
             return respond(
               { ok: false, error: res.error, code: "RT_E_VALIDATION", dir: res.dir },
               1,
@@ -3690,7 +3713,7 @@ async function main() {
             {
               ok: false,
               outcome: res.outcome,
-              error: `repair budget exhausted after ${res.cycles}/${res.budget} cycle(s) over ${res.dir} — ${res.treeTail ?? "tree-run not ok"}`,
+              error: `repair budget exhausted after ${res.cycles}/${res.budget} cycle(s) over ${res.dir} â€” ${res.treeTail ?? "tree-run not ok"}`,
               code: "RT_E_REPAIR_FAILED",
               path,
               dir: res.dir,
@@ -3718,18 +3741,18 @@ async function main() {
       }
 
       case "edit": {
-        // 216s (108-T1 · W7-L3 redo): the in-place edit verb — ONE textual
+        // 216s (108-T1 Â· W7-L3 redo): the in-place edit verb â€” ONE textual
         // str_replace against a file of an emitted tree dir. DRY-RUN BY
         // DEFAULT: the would-be diff is returned and nothing is written; only
         // an explicit --write applies. The write path does not bypass the
-        // governance seams — it consults the ONE policy seam (evaluatePolicy,
+        // governance seams â€” it consults the ONE policy seam (evaluatePolicy,
         // src/lib/policy.ts) for `repair.apply` on `tree:<dir>` and refuses
         // with a coded envelope when the seam denies the seat; it applies
         // through the T-107.1 applyStrReplace primitive (unique-match
         // contract: ambiguous / missing / no-op edits are coded refusals,
         // never guesses); and every applied write lands ONE attributed ledger
         // row on the --project file (actor + seat + decidedVia provenance +
-        // patch + before/after hashes) — 108 §"mechanisms missing" #1: an
+        // patch + before/after hashes) â€” 108 Â§"mechanisms missing" #1: an
         // edit that is not attributed would claim provenance the audit trail
         // does not have. Existing verb exit codes are untouched:
         // dry-run/applied 0, refusal 1, internal 4.
@@ -3740,7 +3763,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `edit: --dir ${JSON.stringify(dirArg.value)} does not exist — nothing to edit.`,
+              error: `edit: --dir ${JSON.stringify(dirArg.value)} does not exist â€” nothing to edit.`,
               code: "RT_E_VALIDATION",
               dir: dirPath,
             },
@@ -3750,7 +3773,7 @@ async function main() {
         const fileArg = requireArg(args, "file", "edit");
         if (fileArg.error !== undefined) return respond({ ok: false, error: fileArg.error, code: "RT_E_VALIDATION" }, 1);
         // Containment: the target must resolve INSIDE --dir (relative path, no
-        // drive/absolute prefix, no `..` segment) — an edit verb must never
+        // drive/absolute prefix, no `..` segment) â€” an edit verb must never
         // write outside the tree it names, whatever the caller passes.
         const relFile = fileArg.value.replace(/\\/g, "/").trim();
         const relSafe =
@@ -3772,14 +3795,14 @@ async function main() {
         }
         const targetPath = resolve(dirPath, relFile);
         // R11-f07 (S-05): the lexical checks above cannot see a symlinked
-        // parent — verify the PHYSICAL containment too (shared helper).
-        // confirmed-outside → refusal; `null` (unverifiable) keeps the
+        // parent â€” verify the PHYSICAL containment too (shared helper).
+        // confirmed-outside â†’ refusal; `null` (unverifiable) keeps the
         // lexical verdict.
         if (physicalInside(dirPath, targetPath) === false) {
           return respond(
             {
               ok: false,
-              error: `edit: --file ${JSON.stringify(fileArg.value)} resolves OUTSIDE --dir ${JSON.stringify(dirPath)} on the real filesystem (symlinked parent/junction) — refusing (R11-f07).`,
+              error: `edit: --file ${JSON.stringify(fileArg.value)} resolves OUTSIDE --dir ${JSON.stringify(dirPath)} on the real filesystem (symlinked parent/junction) â€” refusing (R11-f07).`,
               code: "RT_E_VALIDATION",
               dir: dirPath,
             },
@@ -3791,7 +3814,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `${findArg.error} (the str_replace needle; the edit refuses an empty --find) — a needle beginning with -- needs the --find=<value> form (parseArgs reads a -- token as the next flag)`,
+              error: `${findArg.error} (the str_replace needle; the edit refuses an empty --find) â€” a needle beginning with -- needs the --find=<value> form (parseArgs reads a -- token as the next flag)`,
               code: "RT_E_VALIDATION",
             },
             1,
@@ -3803,7 +3826,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: 'edit: missing required --replace (pass the replacement text — a value beginning with -- needs the --replace=<value> form; --replace="" deletes the matched block)',
+              error: 'edit: missing required --replace (pass the replacement text â€” a value beginning with -- needs the --replace=<value> form; --replace="" deletes the matched block)',
               code: "RT_E_VALIDATION",
             },
             1,
@@ -3816,7 +3839,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `edit: cannot read ${JSON.stringify(targetPath)} — ${err instanceof Error ? err.message : String(err)}`,
+              error: `edit: cannot read ${JSON.stringify(targetPath)} â€” ${err instanceof Error ? err.message : String(err)}`,
               code: "RT_E_VALIDATION",
               dir: dirPath,
               file: relFile,
@@ -3825,13 +3848,13 @@ async function main() {
           );
         }
         const wantWrite = flag(args, "write");
-        // Policy seam FIRST — dry-run consults it too, so the pre-flight answer
+        // Policy seam FIRST â€” dry-run consults it too, so the pre-flight answer
         // (would --write be allowed?) is exactly what the write then enforces
         // (one rule, no divergence). The env read stays HERE: policy.ts is a
         // pure leaf and never reads env (its purity test pins that).
         //
-        // R5-f12 (W29 LANE H · R11-f04/C2-f02): the --i-am-human claim is the
-        // TWO-CHANNEL seat (see humanSeatClaim) — typed TTY re-entry presented,
+        // R5-f12 (W29 LANE H Â· R11-f04/C2-f02): the --i-am-human claim is the
+        // TWO-CHANNEL seat (see humanSeatClaim) â€” typed TTY re-entry presented,
         // env read expected; a non-TTY claim is refused before this seam (no
         // second channel exists there). The same-env-var-both-sides
         // degeneracy is statically forbidden by
@@ -3867,7 +3890,7 @@ async function main() {
               action: "edit",
               mode: wantWrite ? "write" : "dry-run",
               written: false,
-              error: `edit: refused by the policy seam — ${verdict.reason} (sanctioned fallback: ${verdict.fallback})`,
+              error: `edit: refused by the policy seam â€” ${verdict.reason} (sanctioned fallback: ${verdict.fallback})`,
               code: "RT_E_VALIDATION",
               dir: dirPath,
               file: relFile,
@@ -3910,7 +3933,7 @@ async function main() {
           resource,
           reason: verdict.reason,
           label: seatLabel(actor),
-          tokenPath: verdict.reason.split(" — ")[0] === "human-seat-token-verified",
+          tokenPath: verdict.reason.split(" â€” ")[0] === "human-seat-token-verified",
         };
         const policyEcho = {
           action: "repair.apply",
@@ -3921,8 +3944,8 @@ async function main() {
           tokenPath: decidedVia.tokenPath,
         };
         if (!wantWrite) {
-          // DRY-RUN (the default): the honest pre-flight — the diff, the
-          // would-be hashes and the seat/policy verdict — and NOTHING written.
+          // DRY-RUN (the default): the honest pre-flight â€” the diff, the
+          // would-be hashes and the seat/policy verdict â€” and NOTHING written.
           return respond(
             {
               ok: true,
@@ -3940,12 +3963,12 @@ async function main() {
               hashAfter,
               policy: policyEcho,
               ledger: null,
-              note: "dry-run (the default) — nothing was written; re-run with --write --project <file.json> to apply and attribute the edit in the ledger",
+              note: "dry-run (the default) â€” nothing was written; re-run with --write --project <file.json> to apply and attribute the edit in the ledger",
             },
             0,
           );
         }
-        // --write: attribution is a PRECONDITION, not an afterthought — the
+        // --write: attribution is a PRECONDITION, not an afterthought â€” the
         // applied edit needs the ledger it lands in (108-T1: actor + patch +
         // resulting hash).
         const projArg = requireArg(args, "project", "edit --write");
@@ -3953,7 +3976,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `${projArg.error} — an applied edit must be attributed in the ledger (actor + patch + resulting hash); dry-run (the default) needs no --project.`,
+              error: `${projArg.error} â€” an applied edit must be attributed in the ledger (actor + patch + resulting hash); dry-run (the default) needs no --project.`,
               code: "RT_E_VALIDATION",
               written: false,
               dir: dirPath,
@@ -3974,7 +3997,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `edit: write failed — ${err instanceof Error ? err.message : String(err)}`,
+              error: `edit: write failed â€” ${err instanceof Error ? err.message : String(err)}`,
               ...errCode(err, "RT_E_INTERNAL"),
               written: false,
               dir: dirPath,
@@ -3983,7 +4006,7 @@ async function main() {
             4,
           );
         }
-        // Ledger attribution — ONE append-only JsonLog row on the project the
+        // Ledger attribution â€” ONE append-only JsonLog row on the project the
         // dir belongs to (capped at 200 rows, the lessonLog convention):
         // event `edit.apply`, JSON detail carrying the actor seat, the
         // decidedVia provenance envelope (the same W6 shape the approve path
@@ -4016,7 +4039,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `edit: the file was written but the ledger row could not be persisted — ${err instanceof Error ? err.message : String(err)}`,
+              error: `edit: the file was written but the ledger row could not be persisted â€” ${err instanceof Error ? err.message : String(err)}`,
               ...errCode(err, "RT_E_INTERNAL"),
               written: true,
               ledgerSaved: false,
@@ -4049,7 +4072,7 @@ async function main() {
               rows: Math.min(logs.length + 1, 200),
               decidedVia,
             },
-            note: "the dir is the artifact; the ledger now carries the attributed edit row — run `tree-run --dir <dir> --project <file.json>` (or `repair` with the same flags) to re-check the edited tree",
+            note: "the dir is the artifact; the ledger now carries the attributed edit row â€” run `tree-run --dir <dir> --project <file.json>` (or `repair` with the same flags) to re-check the edited tree",
           },
           0,
         );
@@ -4064,7 +4087,7 @@ async function main() {
       case "vault": {
         const project = loadProjectFor("vault");
         try {
-          // fixes/144 (M1): default = <home>/RapidTool Software/<slug>/vault —
+          // fixes/144 (M1): default = <home>/RapidTool Software/<slug>/vault â€”
           // same parent as the emitted software, per-project (--out overrides).
           if (pathFlagMissing(args.out)) {
             return respond(
@@ -4077,11 +4100,11 @@ async function main() {
           const envelope = { ok: true, count: res.count, dir: res.dir };
           if (dest.fallback) {
             envelope.fallback = true;
-            envelope.warning = `Home vault dir was unwritable (${dest.error ?? "unknown"}) — wrote under CWD instead: ${res.dir}`;
+            envelope.warning = `Home vault dir was unwritable (${dest.error ?? "unknown"}) â€” wrote under CWD instead: ${res.dir}`;
           }
           respond(envelope, 0);
         } catch (err) {
-          // R5-f03 (W29 · A2-f03): internal runtime failure → exit 4 per the
+          // R5-f03 (W29 Â· A2-f03): internal runtime failure â†’ exit 4 per the
           // documented taxonomy (README-cli.md: "Exit 4 = backend or internal
           // runtime failure"). The usage-class failures (unreadable project,
           // bad args) exit 1 with their own codes BEFORE this catch.
@@ -4114,14 +4137,14 @@ async function main() {
       case "crew": {
         const project = loadProjectFor("crew");
         const opts = {};
-        // 316 H7 (carried by I4): parseArgs stores the raw `--max-steps` key —
+        // 316 H7 (carried by I4): parseArgs stores the raw `--max-steps` key â€”
         // reading `args.maxSteps` silently ignored the ONE documented crew knob
         // (the flag parsed fine, then no-oped). Read the key the parser writes.
         if (typeof args["max-steps"] === "string" && /^\d+$/.test(args["max-steps"])) {
           opts.maxSteps = parseInt(args["max-steps"], 10);
         }
-        // W45·331-1: meter the run's REAL provider spend through the provider
-        // call tap (setLlmCallTap — the provider funnel every registry call
+        // W45Â·331-1: meter the run's REAL provider spend through the provider
+        // call tap (setLlmCallTap â€” the provider funnel every registry call
         // routes through). The envelope reports measured usage, never an
         // estimate; cleared in `finally` so no later verb sees the tap.
         const { setLlmCallTap } = await import(DEEPSEEK_SERVER_PATH);
@@ -4141,14 +4164,14 @@ async function main() {
         if (res.ok === false) {
           const hint =
             res.reason === "not-configured"
-              ? " — set DEEPSEEK_API_KEY (repo .env or process environment) to enable the crew"
+              ? " â€” set DEEPSEEK_API_KEY (repo .env or process environment) to enable the crew"
               : "";
           const error =
             typeof res.error === "string" && res.error
               ? `${res.error}${hint}`
               : `crew unavailable (${res.reason ?? "error"})${hint}`;
-          // E-25: backend not configured → 3; runtime/backend failure → 4.
-          // W45·331-1: carry the provider's own code (e.g. RT_E_LLM_KEY_REJECTED)
+          // E-25: backend not configured â†’ 3; runtime/backend failure â†’ 4.
+          // W45Â·331-1: carry the provider's own code (e.g. RT_E_LLM_KEY_REJECTED)
           // instead of re-classifying the prose down to RT_E_UNKNOWN.
           return respond(
             {
@@ -4180,7 +4203,7 @@ async function main() {
           outcome = await h.verifyGeneratedSource(project);
         } catch (err) {
           // No generatedSource yet = validation/state error (exit 1, README
-          // contract); anything else is internal (outer handler → 4).
+          // contract); anything else is internal (outer handler â†’ 4).
           if (err instanceof Error && /no generatedSource/.test(err.message)) {
             return respond({ ok: false, error: err.message, code: "RT_E_PHASE_ILLEGAL" }, 1);
           }
@@ -4198,7 +4221,7 @@ async function main() {
         }
         const payload = { ok: outcome.status === "passed", ...outcome, applied };
         // Failed verdicts carry no `error` key today (VerifyOutcomeShape has
-        // none) — the prose classifier would read "" and stamp RT_E_UNKNOWN on
+        // none) â€” the prose classifier would read "" and stamp RT_E_UNKNOWN on
         // every failure. Surface the evidence so timeouts/refusals classify.
         if (!payload.ok && typeof payload.error === "undefined") {
           payload.error =
@@ -4206,8 +4229,8 @@ async function main() {
               ? outcome.evidence
               : `verify ${outcome.status}`;
         }
-        // E-25: passed → 0; failed verdict → 1; not configured → 3; backend
-        // runtime failure → 4.
+        // E-25: passed â†’ 0; failed verdict â†’ 1; not configured â†’ 3; backend
+        // runtime failure â†’ 4.
         const exitCode =
           outcome.status === "passed"
             ? 0
@@ -4228,9 +4251,9 @@ async function main() {
 
       case "check": {
         // fixes/132 (C2): per-file compile verdicts over an EMITTED dir
-        // (compile-check.server.ts). All pass → 0; any fail → 1 (verdicts
-        // carried on stdout); a missing/non-directory --dir → 1
-        // (RT_E_VALIDATION, the usage class); an unexpected internal throw → 4.
+        // (compile-check.server.ts). All pass â†’ 0; any fail â†’ 1 (verdicts
+        // carried on stdout); a missing/non-directory --dir â†’ 1
+        // (RT_E_VALIDATION, the usage class); an unexpected internal throw â†’ 4.
         const dirArg = requireArg(args, "dir", "check");
         if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
         // A missing/non-directory `--dir` is a usage error: `compileCheckDir`
@@ -4250,7 +4273,7 @@ async function main() {
               {
                 ok: false,
                 dir,
-                error: `check: --dir ${JSON.stringify(dirArg.value)} ${dirStat ? "is not a directory" : "does not exist"} — nothing to compile-check.`,
+                error: `check: --dir ${JSON.stringify(dirArg.value)} ${dirStat ? "is not a directory" : "does not exist"} â€” nothing to compile-check.`,
                 code: "RT_E_VALIDATION",
               },
               1,
@@ -4267,7 +4290,7 @@ async function main() {
             typeof result.error === "string" && result.error
               ? result.error
               : `${result.failed} of ${result.checked} files failed compile-check`;
-          // fixes/135: an expected any-fail verdict is NOT an unknown error —
+          // fixes/135: an expected any-fail verdict is NOT an unknown error â€”
           // carry the honest per-file verdicts with a check-specific code.
           return respond({ ok: false, error: reason, code: "RT_E_CHECK_FAILED", ...result }, 1);
         } catch (err) {
@@ -4283,13 +4306,13 @@ async function main() {
       }
 
       case "scan": {
-        // W23 L6 (G4 · 249 SPEC 3, OV-21 fold): an ADVISORY error-signal scan
-        // over an EMITTED (or any) dir — read-only, no project needed, no
+        // W23 L6 (G4 Â· 249 SPEC 3, OV-21 fold): an ADVISORY error-signal scan
+        // over an EMITTED (or any) dir â€” read-only, no project needed, no
         // policy seam, no writes (structure mirrors the `tree-run` arm). The
         // rules are lexer-level heuristics: R1 catch-empty, R2 catch-swallowed,
-        // R3 neutral-return-unimplemented (OV-21's fold). Findings → exit 1;
-        // a clean tree → 0; an unreadable dir → 1 + RT_E_VALIDATION. This verb
-        // is NEVER wired into a gate and never blocks an emit (218 §3.4/OV-21).
+        // R3 neutral-return-unimplemented (OV-21's fold). Findings â†’ exit 1;
+        // a clean tree â†’ 0; an unreadable dir â†’ 1 + RT_E_VALIDATION. This verb
+        // is NEVER wired into a gate and never blocks an emit (218 Â§3.4/OV-21).
         const scanDir = requireArg(args, "dir", "scan");
         if (scanDir.error !== undefined) return respond({ ok: false, error: scanDir.error, code: "RT_E_VALIDATION" }, 1);
         try {
@@ -4305,18 +4328,18 @@ async function main() {
             scanned: scan.scanned,
             findings,
             advisory: true,
-            note: "advisory finding surface — never blocks an emit (218 §3.4 / OV-21)",
+            note: "advisory finding surface â€” never blocks an emit (218 Â§3.4 / OV-21)",
           };
           if (findings.length > 0) {
             // 330 Switchboard (probed): the sibling check-verbs carry an
-            // `error` on a non-ok result (`check` → its reason, `tree-run` →
+            // `error` on a non-ok result (`check` â†’ its reason, `tree-run` â†’
             // the first not-ok tail); `scan` shipped an EMPTY one, so every
             // findings envelope auto-classified as the opaque RT_E_UNKNOWN
-            // with NO message — an agent branching on `code` read a designed
+            // with NO message â€” an agent branching on `code` read a designed
             // advisory outcome as an opaque failure. The explicit code (the
             // check family's any-fail class) makes the coded branch stable; the
             // findings array remains the payload.
-            payload.error = `scan: ${findings.length} advisory finding(s) in ${scan.dir} — heuristics, not verdicts; review findings[].rule (advisory, never blocks an emit)`;
+            payload.error = `scan: ${findings.length} advisory finding(s) in ${scan.dir} â€” heuristics, not verdicts; review findings[].rule (advisory, never blocks an emit)`;
             payload.code = "RT_E_CHECK_FAILED";
           }
           return respond(payload, payload.ok ? 0 : 1);
@@ -4335,7 +4358,7 @@ async function main() {
       case "design": {
         const project = loadProjectFor("design");
         try {
-          // R5-f10 (W29 · A2-f11): valueless --html guard (see packet).
+          // R5-f10 (W29 Â· A2-f11): valueless --html guard (see packet).
           if (pathFlagMissing(args.html)) {
             return respond(
               { ok: false, error: pathFlagRefusalError("design", "html", args.html), code: "RT_E_VALIDATION" },
@@ -4371,7 +4394,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `diagram: unknown --kind "${kind.value}" — expected one of ${h.DIAGRAM_KINDS.join(" | ")}.`,
+              error: `diagram: unknown --kind "${kind.value}" â€” expected one of ${h.DIAGRAM_KINDS.join(" | ")}.`,
               code: "RT_E_VALIDATION",
             },
             1,
@@ -4380,7 +4403,7 @@ async function main() {
         try {
           const svg = await h.buildDiagram(project, kind.value); // throws on unknown kind / missing module
           const result = { ok: true, kind: kind.value, bytes: Buffer.byteLength(svg, "utf8") };
-          // R5-f10 (W29 · A2-f11): valueless --out guard (see packet).
+          // R5-f10 (W29 Â· A2-f11): valueless --out guard (see packet).
           if (pathFlagMissing(args.out)) {
             return respond(
               { ok: false, error: pathFlagRefusalError("diagram", "out", args.out), code: "RT_E_VALIDATION" },
@@ -4413,14 +4436,14 @@ async function main() {
       // -------------------------------------------------------------------
       // New-pillar subcommands (additive): harvest / swarm / prompt / bench /
       // mine / knowledge / wild. Each keeps the one-JSON envelope + exit-code
-      // discipline; backend not-configured → 3, usage/state errors → 1,
-      // unexpected module failure → outer handler (4).
+      // discipline; backend not-configured â†’ 3, usage/state errors â†’ 1,
+      // unexpected module failure â†’ outer handler (4).
       // -------------------------------------------------------------------
 
       case "harvest": {
         // Bounded live-source harvest for the project brief. The module never
         // fabricates: unreachable backends yield rows [] + honest notes (exit
-        // 0 — the honest empty payload IS the outcome).
+        // 0 â€” the honest empty payload IS the outcome).
         const project = loadProjectFor("harvest");
         try {
           const res = await h.harvest(project);
@@ -4473,8 +4496,8 @@ async function main() {
       }
 
       case "prompt": {
-        // Hyper-prompt expansion (deepseek-v4-flash json) — crew-style exits:
-        // not-configured → 3 (RT_E_LLM_NOT_CONFIGURED), backend failure → 4.
+        // Hyper-prompt expansion (deepseek-v4-flash json) â€” crew-style exits:
+        // not-configured â†’ 3 (RT_E_LLM_NOT_CONFIGURED), backend failure â†’ 4.
         const project = loadProjectFor("prompt");
         const policies =
           typeof args.policies === "string" && args.policies.trim()
@@ -4484,13 +4507,13 @@ async function main() {
         if (res.ok === false) {
           const hint =
             res.reason === "not-configured"
-              ? " — set DEEPSEEK_API_KEY (repo .env or process environment) to enable prompt expansion"
+              ? " â€” set DEEPSEEK_API_KEY (repo .env or process environment) to enable prompt expansion"
               : "";
           const error =
             typeof res.error === "string" && res.error
               ? `${res.error}${hint}`
               : `prompt expansion unavailable (${res.reason ?? "error"})${hint}`;
-          // W45·331-1: carry the provider's code (same reason as the crew arm).
+          // W45Â·331-1: carry the provider's code (same reason as the crew arm).
           return respond(
             {
               ok: false,
@@ -4506,7 +4529,7 @@ async function main() {
       }
 
       case "bench": {
-        // Synthetic estimate suite (tokens/time/complexity/failure points) —
+        // Synthetic estimate suite (tokens/time/complexity/failure points) â€”
         // heuristic, never presented as a measured run (disclaimer included).
         const project = loadProjectFor("bench");
         try {
@@ -4552,7 +4575,7 @@ async function main() {
             {
               ok: false,
               dir: mineDirAbs,
-              error: `mine: --dir ${JSON.stringify(dir.value)} ${mineStat ? "is not a directory" : "does not exist"} — nothing to map.`,
+              error: `mine: --dir ${JSON.stringify(dir.value)} ${mineStat ? "is not a directory" : "does not exist"} â€” nothing to map.`,
               code: "RT_E_VALIDATION",
             },
             1,
@@ -4652,26 +4675,26 @@ async function main() {
       }
 
       case "lesson": {
-        // fixes/144 M5-4 (98 §7): the LESSON verb family — one verb, exactly
+        // fixes/144 M5-4 (98 Â§7): the LESSON verb family â€” one verb, exactly
         // one action flag (the `wild` pattern). Read-only on project memory:
         //   --list      project's lesson-tagged memory rows (never writes)
         //   --propose   a bounded flash DRAFT of a cross-project row from raw
-        //               evidence (never writes — keyed: one bounded DeepSeek
+        //               evidence (never writes â€” keyed: one bounded DeepSeek
         //               turn; keyless: deterministic keyword draft, labeled)
         // The human-gated cross-project WRITE (the only append to a store):
-        //   --accept    top FusionRank lesson rows of --project → the store
+        //   --accept    top FusionRank lesson rows of --project â†’ the store
         //               at --out, actor recorded in every row (idempotent)
         // Store telemetry writers (append-only rows / counters, never deletes):
         //   --supersede a newer row declares an old entry dead (append + mark)
         //   --refute    one counter-evidence unit against an entry (decay)
-        // 216s (112 T5) — the read-only consult + proof-check arms:
+        // 216s (112 T5) â€” the read-only consult + proof-check arms:
         //   --advise    ranked FAIL-class lesson rows for a brief (pre-flight)
-        //   --verify    anchor re-hash → ok | stale | anchor-missing
+        //   --verify    anchor re-hash â†’ ok | stale | anchor-missing
         //               (read-only unless --mark-stale: store telemetry only)
-        // F3 (221 §F3 — W18 lane 2) — the measurement arm:
+        // F3 (221 Â§F3 â€” W18 lane 2) â€” the measurement arm:
         //   --effect    cross-run learning census from project memory rows
         //               (reproduced/unreproduced, per-class rates, evidence
-        //               with the accruing ledger rows) — read-only
+        //               with the accruing ledger rows) â€” read-only
         const actions = ["list", "propose", "accept", "supersede", "refute", "advise", "verify", "effect"].filter(
           (a) => flag(args, a),
         );
@@ -4691,7 +4714,7 @@ async function main() {
           if (action === "list") {
             // Read-only (never writes): the project's lesson-tagged memory
             // rows with kind/class/phase/score/evidence detail. --brief <text>
-            // ranks them against that brief via topLessonRows (fusionRank —
+            // ranks them against that brief via topLessonRows (fusionRank â€”
             // the same read-back semantics the tier-2 seams use, fixes/144
             // M5-4); without --brief the rows come score-desc / id-asc (the
             // selectLessons convention). --limit caps either; default: all
@@ -4718,7 +4741,7 @@ async function main() {
               );
               const level = tags.find((t) => /^L[1-5]$/.test(t)) ?? null;
               // ONE classifier with the F3 report (knowledge.lessonClassTag):
-              // it also skips probe:/actor: telemetry tags — without that skip
+              // it also skips probe:/actor: telemetry tags â€” without that skip
               // a probe-tagged row reported its first PROBE tag as its class.
               const cls = k.lessonClassTag(tags);
               return {
@@ -4749,23 +4772,23 @@ async function main() {
             return;
           }
           if (action === "effect") {
-            // F3 (221 §F3 — W18 lane 2): cross-run learning MEASUREMENT — the
+            // F3 (221 Â§F3 â€” W18 lane 2): cross-run learning MEASUREMENT â€” the
             // read-only 8th arm. The census of the project's lesson-tagged
             // memory rows plus their post-minting recurrence telemetry
             // (`reproducedCount`, accrued by engine.accrueReproducedCounts /
             // report-intake.ts's twin accrual / verify.ts's repro-accrual) and
             // the `lesson.reproduced` ledger rows that accrued it, read back
             // from the project's own logs. NO writer: no promotion, no
-            // demotion, no mint — and the T-11 mute stays (a red seal mints no
-            // lesson row, so it cannot count here). The recurrence≠causation
-            // label, the census-window disclosure and the n≥2 "baseline only"
+            // demotion, no mint â€” and the T-11 mute stays (a red seal mints no
+            // lesson row, so it cannot count here). The recurrenceâ‰ causation
+            // label, the census-window disclosure and the nâ‰¥2 "baseline only"
             // floor ride INSIDE the JSON object (knowledge.lessonOutcomeReport).
             if (typeof args["knowledge-file"] === "string" && args["knowledge-file"].trim()) {
               return respond(
                 {
                   ok: false,
                   error:
-                    "lesson effect: the reproduction census lives in project MEMORY rows — the cross-project store carries counterEvidence, not reproducedCount (and no ledger rows); refusing --knowledge-file rather than reporting an empty store as a measurement",
+                    "lesson effect: the reproduction census lives in project MEMORY rows â€” the cross-project store carries counterEvidence, not reproducedCount (and no ledger rows); refusing --knowledge-file rather than reporting an empty store as a measurement",
                   code: "RT_E_VALIDATION",
                 },
                 1,
@@ -4786,8 +4809,8 @@ async function main() {
             return;
           }
           if (action === "propose") {
-            // Bounded flash DRAFT only — this arm never writes. Keyless (or a
-            // failed/absent keyed turn) → the deterministic keyword draft via
+            // Bounded flash DRAFT only â€” this arm never writes. Keyless (or a
+            // failed/absent keyed turn) â†’ the deterministic keyword draft via
             // knowledge.ts proposeLessonFallback, labeled mode:"keyless".
             const brief = requireArg(args, "brief", "lesson propose");
             if (brief.error !== undefined) return respond({ ok: false, error: brief.error, code: "RT_E_VALIDATION" }, 1);
@@ -4801,7 +4824,7 @@ async function main() {
                 : [];
             const sourceProject =
               typeof args.project === "string" && args.project.trim() ? args.project.trim() : null;
-            // Source-project NAME only (never a path) — the CLI documents that
+            // Source-project NAME only (never a path) â€” the CLI documents that
             // this flag is the origin project's name for the draft's `project`
             // field, NOT a project file to load.
             const deterministic = () => {
@@ -4820,10 +4843,10 @@ async function main() {
             let mode = "keyless";
             let draft = deterministic();
             let note =
-              "deterministic keyword draft (no DEEPSEEK_API_KEY, or the keyed seam was not used) — labeled, never fabricated; save with: knowledge --store <file.json> --save '<draft-json>'";
+              "deterministic keyword draft (no DEEPSEEK_API_KEY, or the keyed seam was not used) â€” labeled, never fabricated; save with: knowledge --store <file.json> --save '<draft-json>'";
             // Keyed seam: ONE bounded flash turn to polish the draft (json
-            // mode, small token cap). Any failure → the deterministic floor
-            // above with the reason in `note` — never a half-draft.
+            // mode, small token cap). Any failure â†’ the deterministic floor
+            // above with the reason in `note` â€” never a half-draft.
             const { isDeepSeekConfigured, completeDeepSeek } = await import(
               pathToFileURL(
                 join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "deepseek.server.ts"),
@@ -4833,7 +4856,7 @@ async function main() {
               try {
                 const res = await completeDeepSeek(
                   `Draft a cross-project RapidTool lesson entry from this raw evidence. ` +
-                    `Return STRICT JSON only: {"title": string ≤ 80 chars, "body": string ≤ 1200 chars (one line), "tags": string[] ≤ 6 lowercase short tags}. ` +
+                    `Return STRICT JSON only: {"title": string â‰¤ 80 chars, "body": string â‰¤ 1200 chars (one line), "tags": string[] â‰¤ 6 lowercase short tags}. ` +
                     `Evidence: ${brief.value.slice(0, 2000)}`,
                   { json: true, maxTokens: 400 },
                 );
@@ -4855,7 +4878,7 @@ async function main() {
                     });
                     mode = "keyed";
                     note =
-                      "keyed flash draft (bounded single DeepSeek turn, json mode) — review before saving with: knowledge --store <file.json> --save '<draft-json>'";
+                      "keyed flash draft (bounded single DeepSeek turn, json mode) â€” review before saving with: knowledge --store <file.json> --save '<draft-json>'";
                   }
                 }
               } catch {
@@ -4879,9 +4902,9 @@ async function main() {
             return;
           }
           if (action === "accept") {
-            // THE human-gated cross-project write (98 §7): promoting this
+            // THE human-gated cross-project write (98 Â§7): promoting this
             // project's top lesson rows into the shared store is an explicit
-            // human act — there is no machine path that appends to the store.
+            // human act â€” there is no machine path that appends to the store.
             const project = loadProjectFor("lesson accept");
             const out = requireArg(args, "out", "lesson accept");
             if (out.error !== undefined) return respond({ ok: false, error: out.error, code: "RT_E_VALIDATION" }, 1);
@@ -4930,15 +4953,15 @@ async function main() {
                 rows: promoted,
                 note:
                   refusedCount > 0
-                    ? `append-only store — ${appendedCount} appended, ${refusedCount} refused (eval-gate or duplicate). Human accept carries actor provenance; identical re-accept is appended:false.`
-                    : "append-only store — the promoted rows carry actor + source-row provenance; re-accept of identical rows is an idempotent no-op (appended:false)",
+                    ? `append-only store â€” ${appendedCount} appended, ${refusedCount} refused (eval-gate or duplicate). Human accept carries actor provenance; identical re-accept is appended:false.`
+                    : "append-only store â€” the promoted rows carry actor + source-row provenance; re-accept of identical rows is an idempotent no-op (appended:false)",
               },
               0,
             );
             return;
           }
           if (action === "supersede") {
-            // A newer row declares an old entry dead — an APPEND, never a
+            // A newer row declares an old entry dead â€” an APPEND, never a
             // delete (append-only law). The old row stays on disk but is
             // excluded from read-back (findPatterns/injectProven).
             const file = requireArg(args, "knowledge-file", "lesson supersede");
@@ -4948,7 +4971,7 @@ async function main() {
             // --evidence <text> is the human's rationale (the superseding
             // row's body carries it verbatim; the old row keeps its ledger).
             // --reason is accepted as an alias for older invocations. Optional:
-            // an absent rationale records "(no reason recorded)" — a supersede
+            // an absent rationale records "(no reason recorded)" â€” a supersede
             // is an append, and the audit row must still land.
             const evidence = [args.evidence, args.reason].find(
               (v) => typeof v === "string" && v.trim() !== "",
@@ -4984,23 +5007,23 @@ async function main() {
                 superseded: updated ? { id: updated.id, supersededBy: updated.supersededBy ?? [] } : null,
                 evidence: reasonText === "(no reason recorded)" ? null : reasonText,
                 by,
-                note: "supersede is an append — the old row remains on disk (audit) but is filtered from read-back",
+                note: "supersede is an append â€” the old row remains on disk (audit) but is filtered from read-back",
               },
               0,
             );
             return;
           }
           if (action === "advise") {
-            // 216s (112 T5 · §4.4 consult-before-failing): read-only ranked
-            // pre-flight. The fail-class lesson rows of ONE source — the
-            // --project's memory or a --knowledge-file store — are ranked
+            // 216s (112 T5 Â· Â§4.4 consult-before-failing): read-only ranked
+            // pre-flight. The fail-class lesson rows of ONE source â€” the
+            // --project's memory or a --knowledge-file store â€” are ranked
             // against --brief (fusionRank; a blank/absent project brief
             // degrades to score-desc) and optionally phase-filtered
-            // (--phase N, project rows only — store rows carry no phase).
+            // (--phase N, project rows only â€” store rows carry no phase).
             // The live telemetry the rows actually carry is printed as-is.
-            // HONEST LIMIT (declare-or-strike): dossier 112 §3.1's
+            // HONEST LIMIT (declare-or-strike): dossier 112 Â§3.1's
             // verdict/scope/stale fields are NOT part of the row schema on
-            // disk — nothing here fabricates them; the note names the live
+            // disk â€” nothing here fabricates them; the note names the live
             // signals (reproducedCount / counterEvidence) instead.
             const ADVISE_FAIL_CLASSES = ["vague-brief", "template-emission", "verify-failure", "drift", "run-summary"];
             const ADVISE_FAIL_RE = /(vague-brief|template-emission|verify-failure|drift|run-summary|harvest-[a-z-]+)/i;
@@ -5019,7 +5042,7 @@ async function main() {
                 {
                   ok: false,
                   error:
-                    "lesson advise: pass exactly one source — --project <file.json> (project-local lessons) or --knowledge-file <store.json> (cross-project lessons)",
+                    "lesson advise: pass exactly one source â€” --project <file.json> (project-local lessons) or --knowledge-file <store.json> (cross-project lessons)",
                   code: "RT_E_VALIDATION",
                 },
                 1,
@@ -5083,7 +5106,7 @@ async function main() {
                   phase: phaseFilter,
                   count: rows.length,
                   rows,
-                  note: "read-only pre-flight (consult BEFORE failing) — nothing was written; ranking is deterministic; telemetry is printed as-is: reproducedCount + counterEvidence are the live lesson-row fields on disk today (112 §3.1's verdict/scope/stale fields are not in the row schema — never fabricated here)",
+                  note: "read-only pre-flight (consult BEFORE failing) â€” nothing was written; ranking is deterministic; telemetry is printed as-is: reproducedCount + counterEvidence are the live lesson-row fields on disk today (112 Â§3.1's verdict/scope/stale fields are not in the row schema â€” never fabricated here)",
                 },
                 0,
               );
@@ -5094,7 +5117,7 @@ async function main() {
                 {
                   ok: false,
                   error:
-                    "lesson advise: --knowledge-file needs --brief to rank store rows (the store carries no score field — ranking is lexical; a blank brief has nothing to rank against). Use --project for the score-desc fallback.",
+                    "lesson advise: --knowledge-file needs --brief to rank store rows (the store carries no score field â€” ranking is lexical; a blank brief has nothing to rank against). Use --project for the score-desc fallback.",
                   code: "RT_E_VALIDATION",
                 },
                 1,
@@ -5105,7 +5128,7 @@ async function main() {
                 {
                   ok: false,
                   error:
-                    "lesson advise: --phase filters project-memory rows only — store entries carry no phase field; refusing to pretend the filter applied.",
+                    "lesson advise: --phase filters project-memory rows only â€” store entries carry no phase field; refusing to pretend the filter applied.",
                   code: "RT_E_VALIDATION",
                 },
                 1,
@@ -5143,16 +5166,16 @@ async function main() {
                 phase: null,
                 count: rows.length,
                 rows,
-                note: "read-only pre-flight over the cross-project store — findPatterns excludes superseded/retired rows by default; nothing was written",
+                note: "read-only pre-flight over the cross-project store â€” findPatterns excludes superseded/retired rows by default; nothing was written",
               },
               0,
             );
             return;
           }
           if (action === "verify") {
-            // 216s (112 T5 · §3.3 proof-carrying lessons): re-hash the
+            // 216s (112 T5 Â· Â§3.3 proof-carrying lessons): re-hash the
             // artifact named by --anchor and compare it against every lesson
-            // row's recorded evidenceHash= token → ok | stale | anchor-missing.
+            // row's recorded evidenceHash= token â†’ ok | stale | anchor-missing.
             // READ-ONLY by default; the ONLY mutating form is --mark-stale,
             // which writes the store's existing counterEvidence telemetry
             // (content fields untouched, append-only discipline kept) and is
@@ -5176,7 +5199,7 @@ async function main() {
                 {
                   ok: false,
                   error:
-                    "lesson verify: pass exactly one source — --knowledge-file <store.json> (cross-project rows; the only source --mark-stale can write telemetry to) or --project <file.json> (project-local rows)",
+                    "lesson verify: pass exactly one source â€” --knowledge-file <store.json> (cross-project rows; the only source --mark-stale can write telemetry to) or --project <file.json> (project-local rows)",
                   code: "RT_E_VALIDATION",
                 },
                 1,
@@ -5188,7 +5211,7 @@ async function main() {
                 {
                   ok: false,
                   error:
-                    "lesson verify: --mark-stale needs --knowledge-file — the store's counterEvidence bump is the only machine telemetry writer; project-memory rows have none (refusing to pretend a write happened).",
+                    "lesson verify: --mark-stale needs --knowledge-file â€” the store's counterEvidence bump is the only machine telemetry writer; project-memory rows have none (refusing to pretend a write happened).",
                   code: "RT_E_VALIDATION",
                 },
                 1,
@@ -5226,7 +5249,7 @@ async function main() {
               if (recorded === null) {
                 return {
                   status: "anchor-missing",
-                  reason: "row records no evidenceHash= token — nothing to re-hash against",
+                  reason: "row records no evidenceHash= token â€” nothing to re-hash against",
                 };
               }
               if (anchorHash === null) {
@@ -5240,7 +5263,7 @@ async function main() {
               }
               return {
                 status: "stale",
-                reason: `the anchor's current hash (hex ${anchorHash.hex} / decimal ${anchorHash.decimal}) differs from the recorded ${recorded} — the proof no longer holds for these bytes`,
+                reason: `the anchor's current hash (hex ${anchorHash.hex} / decimal ${anchorHash.decimal}) differs from the recorded ${recorded} â€” the proof no longer holds for these bytes`,
               };
             };
             const counts = { ok: 0, stale: 0, "anchor-missing": 0 };
@@ -5298,8 +5321,8 @@ async function main() {
                   rows,
                   marked,
                   note: markStale
-                    ? `telemetry-only write — counterEvidence bumped on ${(marked ?? []).filter((m) => m.marked).length} stale store row(s); content fields untouched (append-only discipline kept)`
-                    : "read-only report — nothing was written (pass --mark-stale to bump counterEvidence on stale store rows; telemetry only)",
+                    ? `telemetry-only write â€” counterEvidence bumped on ${(marked ?? []).filter((m) => m.marked).length} stale store row(s); content fields untouched (append-only discipline kept)`
+                    : "read-only report â€” nothing was written (pass --mark-stale to bump counterEvidence on stale store rows; telemetry only)",
                 },
                 0,
               );
@@ -5342,7 +5365,7 @@ async function main() {
                 anchorMissing: counts["anchor-missing"],
                 rows,
                 marked: null,
-                note: "read-only report over project-memory rows — --mark-stale is refused for this source (no machine telemetry writer); nothing was written",
+                note: "read-only report over project-memory rows â€” --mark-stale is refused for this source (no machine telemetry writer); nothing was written",
               },
               0,
             );
@@ -5377,12 +5400,12 @@ async function main() {
               id: updated.id,
               counterEvidence: counter,
               retired,
-              // The store rows record COUNTS only (append-only telemetry) —
+              // The store rows record COUNTS only (append-only telemetry) â€”
               // the reason is echoed for the caller's own ledger/audit trail.
               evidence,
               note: retired
-                ? "row RETIRED from read-back (counter-evidence at LESSON_RETIRE_COUNTER) — kept on disk for audit"
-                : "counter-evidence bumped — read-back score decays by half per unit; store rows record counts only, keep the refute reason in your own ledger",
+                ? "row RETIRED from read-back (counter-evidence at LESSON_RETIRE_COUNTER) â€” kept on disk for audit"
+                : "counter-evidence bumped â€” read-back score decays by half per unit; store rows record counts only, keep the refute reason in your own ledger",
             },
             0,
           );
@@ -5400,7 +5423,7 @@ async function main() {
         // 308 B-02 (B2, C2 completion): the verb drives wildStep through
         // headless, so its wild.step_* telemetry rides the CALLER's onEvent
         // seam. Make the NDJSON appender explicitly available at this verb's
-        // entry (no-op when main() already loaded it — cliLogEvent itself
+        // entry (no-op when main() already loaded it â€” cliLogEvent itself
         // no-ops while rtServer is null, so the hop can never throw).
         await ensureRtAppender();
         // Bounded headless wild-mode macro-run (engine.wildStep loop, default
@@ -5422,20 +5445,20 @@ async function main() {
           );
         }
         const action = actions[0] ?? "step";
-        // 313/T4.4 — THE AGENT SEAL: `--agent-seal` opts the run into the
+        // 313/T4.4 â€” THE AGENT SEAL: `--agent-seal` opts the run into the
         // classifier-as-approver path (coded [seat agent-seal] rows; never a
         // 'human' seat). The engine arms read opts.agentSeal; this is the
         // switch's last hop from the CLI.
         const agentSeal = flag(args, "agent-seal");
         // 2026-10-05: a governance flag is never silently ignored. `--pause` and
-        // `--stop` only mutate run state — they never drive the loop — so an
+        // `--stop` only mutate run state â€” they never drive the loop â€” so an
         // `--agent-seal` beside them would be absorbed. Refuse it coded, naming
         // the doors that DO carry it (start / resume / bare step all drive).
         if (agentSeal && (action === "pause" || action === "stop")) {
           return respond(
             {
               ok: false,
-              error: `wild: --agent-seal does not apply to --${action} — ${action} only mutates run state and never drives the classifier-as-approver loop, so the seal would be silently absorbed.`,
+              error: `wild: --agent-seal does not apply to --${action} â€” ${action} only mutates run state and never drives the classifier-as-approver loop, so the seal would be silently absorbed.`,
               code: "RT_E_VALIDATION",
               remedy:
                 "The seal opts the wild LOOP in: use `wild --start --agent-seal`, `wild --resume --agent-seal`, or bare `wild --agent-seal` on an active run. Drop the flag here.",
@@ -5447,10 +5470,10 @@ async function main() {
         // 174-3: pause/resume/step/stop must NOT force-stop a persisted active
         // run (CLI is the driver). --start still hydrates-stop so a crash
         // cannot silently resume without --resume.
-        // 308 M3 (fuzz): this arm called h.loadProject RAW — the fuzz's 4
+        // 308 M3 (fuzz): this arm called h.loadProject RAW â€” the fuzz's 4
         // STACK(exit4) crashes (ENOENT/EISDIR/missing-id) all landed here while
         // the makeLoader guard (E-25) kept every other verb coded. Same classify
-        // contract: read ENOENT → RT_E_PROJECT_MISSING; malformed → RT_E_VALIDATION.
+        // contract: read ENOENT â†’ RT_E_PROJECT_MISSING; malformed â†’ RT_E_VALIDATION.
         let project;
         if (action === "start") {
           project = loadProjectFor("wild");
@@ -5474,7 +5497,7 @@ async function main() {
             : undefined;
         // 308 B-02 (B2, C2 completion): the headless wild legs emit their
         // wild.step_* telemetry through the caller's onEvent seam; the CLI's
-        // honest sink is cliLogEvent (NDJSON under logs/ via resolveLogDir —
+        // honest sink is cliLogEvent (NDJSON under logs/ via resolveLogDir â€”
         // seed shape matches wildStep's emits 1:1). Telemetry-side only: the
         // envelope and project bytes are untouched (no-op while rtServer null).
         const opts = {
@@ -5493,8 +5516,8 @@ async function main() {
           } else if (action === "resume") {
             // 2026-10-05: `--resume` is not merely an unpause. A paused run's
             // driver has exited (the console's startWildRun PA-01 contract), so
-            // resuming must CONTINUE the bounded loop — the documented
-            // `wild --resume continues the run` contract — or a non-expert sees
+            // resuming must CONTINUE the bounded loop â€” the documented
+            // `wild --resume continues the run` contract â€” or a non-expert sees
             // a no-op. Unpause first, then drive one bounded macro-run through
             // the same seam bare `wild` uses. A run that was NOT paused stays the
             // byte-identical idempotent no-op the table documents.
@@ -5524,7 +5547,7 @@ async function main() {
               steps: res.steps,
               changed,
               summary: h.summary(res.project),
-              // 185-H1: never dual-channel ok:true + error — detail rides as `note`.
+              // 185-H1: never dual-channel ok:true + error â€” detail rides as `note`.
               ...(res.note ? { note: res.note } : {}),
             },
             0,
@@ -5544,10 +5567,10 @@ async function main() {
 
       case "chat": {
         // Grounded copilot turn over the project (UI Chat tab parity): the
-        // same chat.server.ts chatOnceServer the browser POSTs to — identical
+        // same chat.server.ts chatOnceServer the browser POSTs to â€” identical
         // context builder, caps and honesty, no server-fn wrapper needed under
-        // bare Node. not-configured → 3 (RT_E_LLM_NOT_CONFIGURED); validation
-        // → 1; provider/backend failure → 4.
+        // bare Node. not-configured â†’ 3 (RT_E_LLM_NOT_CONFIGURED); validation
+        // â†’ 1; provider/backend failure â†’ 4.
         const project = loadProjectFor("chat");
         const ask = requireArg(args, "ask", "chat");
         if (ask.error !== undefined) return respond({ ok: false, error: ask.error, code: "RT_E_VALIDATION" }, 1);
@@ -5603,7 +5626,7 @@ async function main() {
 
       case "deepen": {
         // E-13 recovery for a completed research phase (0/7/11) whose recorded
-        // gate failed with p7-research unmet — the path the UI's own fallback
+        // gate failed with p7-research unmet â€” the path the UI's own fallback
         // text points at ("re-run research from the CLI instead"). MUTATING
         // when changed: the deepened project (fresh corpus entry/artifacts,
         // research.deepened log, re-recorded gate) is persisted back to
@@ -5635,7 +5658,7 @@ async function main() {
             {
               ok: true,
               // K7 item 8 (W40 N5): a bare `undefined` here made JSON.stringify
-              // DROP the key for unchanged no-ops — consumers saw no `path` at
+              // DROP the key for unchanged no-ops â€” consumers saw no `path` at
               // all. null is the explicit, shape-stable "not persisted".
               path: res.changed ? path : null,
               phase: res.phase,
@@ -5659,19 +5682,19 @@ async function main() {
       }
 
       case "doctor": {
-        // E-25: capability pre-flight — no project required. Never throws.
+        // E-25: capability pre-flight â€” no project required. Never throws.
         // 214: optional --tree scans leftover job files (never invents bodies).
         try {
           let tree = typeof args.tree === "string" && args.tree.trim() ? args.tree.trim() : "";
-          // 326 F2d (T3 [NEW-BUG] · doctor --tree path honesty): two false-
+          // 326 F2d (T3 [NEW-BUG] Â· doctor --tree path honesty): two false-
           // clean classes closed here, both live-confirmed keyless.
           if (tree && process.platform === "win32") {
             // (a) MSYS drive forms. git-bash hands `/c/Users/...` to the CLI
             // verbatim, and resolve() on win32 reads it as <cwd>\c\Users\...
-            // — a silent FALSE-EMPTY scan (the same tree via its Windows form
+            // â€” a silent FALSE-EMPTY scan (the same tree via its Windows form
             // returns stubs:1; live bytes: t3_scratch/dryrun_doctor_game_msys
-            // .txt vs …_win.txt). Translate the single-letter drive form
-            // (git-bash's own /c/.. ⇄ C:\.. mapping — unambiguous) BEFORE
+            // .txt vs â€¦_win.txt). Translate the single-letter drive form
+            // (git-bash's own /c/.. â‡„ C:\.. mapping â€” unambiguous) BEFORE
             // resolve(). Any other POSIX-literal --tree is refused rather
             // than mapped onto a drive root nobody named (browser-guard.mjs
             // R11-f06 class).
@@ -5681,7 +5704,7 @@ async function main() {
               return respond(
                 {
                   ok: false,
-                  error: `doctor: --tree ${JSON.stringify(tree)} is a POSIX-style path — on win32 it has no unambiguous meaning (resolve() would silently scan a drive root the caller never named). Pass a Windows path (C:\\...) or an MSYS drive form (/c/...).`,
+                  error: `doctor: --tree ${JSON.stringify(tree)} is a POSIX-style path â€” on win32 it has no unambiguous meaning (resolve() would silently scan a drive root the caller never named). Pass a Windows path (C:\\...) or an MSYS drive form (/c/...).`,
                   code: "RT_E_VALIDATION",
                   tree: null,
                 },
@@ -5691,7 +5714,7 @@ async function main() {
           }
           if (tree) {
             // (b) a non-existent or non-directory --tree must never come back
-            // ok:true/stubs:0/files:[] — that reads as a clean health bill for
+            // ok:true/stubs:0/files:[] â€” that reads as a clean health bill for
             // a scan that never happened (T3 evidence: NOPE_XYZ exit 0). Same
             // coded-refusal class as `edit --dir`'s missing-dir guard.
             let treeStat = null;
@@ -5704,7 +5727,7 @@ async function main() {
               return respond(
                 {
                   ok: false,
-                  error: `doctor: --tree ${JSON.stringify(tree)} does not exist — nothing to scan.`,
+                  error: `doctor: --tree ${JSON.stringify(tree)} does not exist â€” nothing to scan.`,
                   code: "RT_E_VALIDATION",
                   tree: resolve(tree),
                 },
@@ -5715,7 +5738,7 @@ async function main() {
               return respond(
                 {
                   ok: false,
-                  error: `doctor: --tree ${JSON.stringify(tree)} is not a directory — nothing to scan.`,
+                  error: `doctor: --tree ${JSON.stringify(tree)} is not a directory â€” nothing to scan.`,
                   code: "RT_E_VALIDATION",
                   tree: resolve(tree),
                 },
@@ -5725,12 +5748,12 @@ async function main() {
           }
           const status = await h.doctorStatus({
             ...(tree ? { treeDir: tree } : {}),
-            // W46 · 332-2: the project file's persisted run spend is the record
+            // W46 Â· 332-2: the project file's persisted run spend is the record
             // the operator actually asks about; without this the doctor arm
             // reported the fresh process's empty session ledger (`calls: 0`).
             ...(CLI_PROJECT ? { projectPath: CLI_PROJECT } : {}),
           });
-          // 342-5: the MCP surface — owner-gated OFF by default. It reports the
+          // 342-5: the MCP surface â€” owner-gated OFF by default. It reports the
           // gate truthfully and, only when RAPIDTOOL_MCP_ENABLED is set AND a
           // server is configured, the REAL tools/list. A disabled host spawns
           // nothing and lists nothing (never a fabricated list). `--mcp-call`
@@ -5765,7 +5788,7 @@ async function main() {
                 return respond(
                   {
                     ok: false,
-                    error: `doctor: --mcp-call-args must be a JSON object — ${err instanceof Error ? err.message : String(err)}`,
+                    error: `doctor: --mcp-call-args must be a JSON object â€” ${err instanceof Error ? err.message : String(err)}`,
                     code: "RT_E_VALIDATION",
                   },
                   1,
@@ -5800,7 +5823,7 @@ async function main() {
       }
 
       case "diagnose": {
-        // The AI-agent diagnostic verb: one JSON — last N telemetry rows,
+        // The AI-agent diagnostic verb: one JSON â€” last N telemetry rows,
         // timeline, most-likely-cause heuristic, growth stats. No project
         // required; --project targets its .rapidtool/logs. Never throws.
         try {
@@ -5811,11 +5834,11 @@ async function main() {
             ? rtServer.readRtTail(rtServer.resolveLogDir(CLI_PROJECT), 200)
             : [];
           // OPS-9 (K13, W40 N5): readRtTail returns NEWEST-first; the diagnosis
-          // contract documents `errors` as OLDEST-first (diagnose.ts:83 — the
+          // contract documents `errors` as OLDEST-first (diagnose.ts:83 â€” the
           // cited `errors[i]` evidence indices assume it) and the UI path
           // presents a chronological timeline. One reversed copy feeds both.
           const chronological = rows.slice().reverse();
-          // OPS-10 helpers: the newest row for an event (chronological ⇒ scan back).
+          // OPS-10 helpers: the newest row for an event (chronological â‡’ scan back).
           const newestRow = (event) => {
             for (let i = chronological.length - 1; i >= 0; i -= 1) {
               if (chronological[i].event === event) return chronological[i];
@@ -5839,7 +5862,7 @@ async function main() {
           let wildRun = null;
           // fixes/348 (W1): the raw per-phase audit + the read-only pipeline
           // review, both built from the SAME loaded project. Absent when no
-          // --project was supplied — the projector names the gap, the review
+          // --project was supplied â€” the projector names the gap, the review
           // stays null (never a fabricated empty project).
           let audit;
           let review = null;
@@ -5851,7 +5874,7 @@ async function main() {
           let chatLogRowCount = 0;
           if (typeof CLI_PROJECT === "string" && CLI_PROJECT.trim()) {
             try {
-              // G2 (fixes/320): diagnose OBSERVES the persisted run — load it
+              // G2 (fixes/320): diagnose OBSERVES the persisted run â€” load it
               // with preserveWildRun so engine.hydrateWildRun cannot force-stop
               // a parked/active run into a read-time artifact (its browser-
               // hydrate default); pause/resume/step/stop load the same way
@@ -5860,7 +5883,7 @@ async function main() {
               try {
                 projectFileBytes = statSync(CLI_PROJECT).size;
               } catch {
-                /* unstattable project file — honest 0 */
+                /* unstattable project file â€” honest 0 */
               }
               ledgerRowCount = Array.isArray(p.decisions) ? p.decisions.length : 0;
               chatLogRowCount = Array.isArray(p.chatLog) ? p.chatLog.length : 0;
@@ -5868,14 +5891,14 @@ async function main() {
               status = typeof p.status === "string" ? p.status : null;
               currentPhase = typeof p.currentPhase === "number" ? p.currentPhase : null;
               // G2 (fixes/320): the canonical projection now lives in
-              // diagnose.ts (`projectWildRun`) — disk truth verbatim; overdueMs
+              // diagnose.ts (`projectWildRun`) â€” disk truth verbatim; overdueMs
               // derived ONLY for a progressing run (active && !pause), never a
               // growing `now - lastAutoAt` on a parked/stopped run.
               wildRun = rtDiag.projectWildRun(p.wildRun, Date.now());
-              // fixes/348 (W1): the loaded project is the audit's authority —
+              // fixes/348 (W1): the loaded project is the audit's authority â€”
               // its phases/artifacts/tokenUsage feed the per-phase projector
               // (the coded rows already ride `errors` below), and the SAME
-              // project feeds the read-only pipeline review (W1 · 347).
+              // project feeds the read-only pipeline review (W1 Â· 347).
               CLI_PHASE = currentPhase;
               audit = rtDiag.auditFromProject(p);
               // The review is pure, but diagnose's contract is "never throws":
@@ -5910,9 +5933,9 @@ async function main() {
           }
           // K7 item 9 (W40 N5): the checkpoint snapshot `resume`/`unattended`
           // would re-enter, read-only via checkpoint.server.ts:readCheckpoint
-          // (present/path/savedAt only — never admits, never hydrates). The dir
+          // (present/path/savedAt only â€” never admits, never hydrates). The dir
           // is the project file's home (same resolution as the log dir above);
-          // no --project → honest null (nothing to look beside).
+          // no --project â†’ honest null (nothing to look beside).
           let checkpoint = null;
           if (typeof CLI_PROJECT === "string" && CLI_PROJECT.trim()) {
             try {
@@ -5924,7 +5947,7 @@ async function main() {
                   ? { present: false, path: cp.path, savedAt: null }
                   : { present: false, path: cp.path, savedAt: null, code: cp.code, error: cp.error };
             } catch {
-              /* checkpoint surface is advisory — the honest null stands */
+              /* checkpoint surface is advisory â€” the honest null stands */
             }
           }
           const diagnosis = rtDiag.buildDiagnosis({
@@ -5944,7 +5967,7 @@ async function main() {
                 r.level === "critical" ||
                 // fixes/323 FIX-2c (F-3): exit-2 park rows ride the input so the
                 // verdict NAMES the park (class `honest-park`) instead of
-                // misreading it — true for new warn+parked rows AND for legacy
+                // misreading it â€” true for new warn+parked rows AND for legacy
                 // error-level exit-2 rows already on disk (the pre-fix bytes
                 // read `level:"error", code:null`). buildDiagnosis separates
                 // them; they are never counted as errors.
@@ -5961,7 +5984,7 @@ async function main() {
               detailOrMessage: r.message,
             })),
             watchdog: {
-              // OPS-10 (K13, W40 N5): derive from the same read — the old
+              // OPS-10 (K13, W40 N5): derive from the same read â€” the old
               // hardcoded nulls hid rows that were sitting right here; an
               // absent row still lands as an honest null.
               lastHeartbeatAt: heartbeatRow ? heartbeatRow.ts : null,
@@ -5979,7 +6002,7 @@ async function main() {
                   }
                 : null,
               lastLongTaskMs: asFiniteNumber(longTaskRow?.payload?.durationMs),
-              // OPS-10b: budgets from their single authority (rt-events.ts —
+              // OPS-10b: budgets from their single authority (rt-events.ts â€”
               // the module diagnose.ts itself imports them from); the old
               // 255_000/60_000 literals + "keep in sync" note are gone.
               budgetsMs: { wildStep: rtEvents.WILD_STEP_BUDGET_MS, chat: rtEvents.CHAT_STEP_BUDGET_MS },
@@ -5989,7 +6012,7 @@ async function main() {
               bytes: {
                 projectFile: projectFileBytes,
                 // K7 item-5 class (W40 N5): module-absent = genuinely NOT
-                // measured → null, never a fake 0 (the type permits null and
+                // measured â†’ null, never a fake 0 (the type permits null and
                 // the UI path already reports null for what it cannot measure).
                 logDirBytes: rtServer ? rtServer.logDirBytes(rtServer.resolveLogDir(CLI_PROJECT)) : null,
                 localStorageEstimate: null,
@@ -5999,13 +6022,13 @@ async function main() {
             persistHealth,
             crashSnapshot: null,
             // fixes/348 (W1): the per-phase audit built from the loaded project
-            // (undefined when no project → the projector's honest named gap).
+            // (undefined when no project â†’ the projector's honest named gap).
             audit,
           });
           // K7 item 9 (W40 N5 + rendezvous fix): the computed checkpoint snapshot now
-          // actually RIDES the envelope — it was computed and dropped (assigned-unused).
+          // actually RIDES the envelope â€” it was computed and dropped (assigned-unused).
           // fixes/348 (W1): the read-only pipeline review (pipeline-review.ts)
-          // now rides too — the additively reachable consumer W1 wired.
+          // now rides too â€” the additively reachable consumer W1 wired.
           respond({ ok: true, ...diagnosis, checkpoint, review }, 0);
         } catch (err) {
           respond(
@@ -6024,7 +6047,7 @@ async function main() {
         respond({ ok: false, error: `Unknown subcommand: ${cmd}`, usage: USAGE, code: "RT_E_VALIDATION" }, 1);
     }
   } catch (err) {
-    // E-25: internal error → exit 4, stack on STDERR only (stdout stays one
+    // E-25: internal error â†’ exit 4, stack on STDERR only (stdout stays one
     // parseable JSON object). Classify the OBJECT: a thrown `.code` (e.g.
     // phases.ts's RT_E_PHASE_ILLEGAL) survives; prose-only could not see it.
     const message = err instanceof Error ? err.message : String(err);
@@ -6042,27 +6065,27 @@ function requireProjectPath(args, cmdName) {
 }
 
 // ---------------------------------------------------------------------------
-// The human seat — TWO channels (W29 LANE H · R5-f12 · R11-f04/C2-f02).
+// The human seat â€” TWO channels (W29 LANE H Â· R5-f12 Â· R11-f04/C2-f02).
 //
 // The defect this closes: `approve` and `edit --write` read BOTH
 // `humanSeatToken` and `expectedHumanSeatToken` from the SAME
 // `process.env.RT_HUMAN_SEAT_TOKEN`, so policy.ts's `isVerifiedHumanSeatToken`
 // collapsed to "the env var is non-empty" and the `human-seat-unverified`
-// deny was unreachable from the CLI — any process that merely exported the
+// deny was unreachable from the CLI â€” any process that merely exported the
 // variable (its own value!) minted `decidedBy:"human"`.
 //
 // Two channels now:
-//   · Channel A (possession/claim) — RT_HUMAN_SEAT_TOKEN in the environment,
+//   Â· Channel A (possession/claim) â€” RT_HUMAN_SEAT_TOKEN in the environment,
 //     the out-of-band secret the human exports in their own shell.
-//   · Channel B (presence/confirmation) — an interactive re-entry typed at a
+//   Â· Channel B (presence/confirmation) â€” an interactive re-entry typed at a
 //     TTY prompt; the environment cannot furnish a keystroke from a person.
 // The TYPED value is the presented side; the env read stays the expected side
 // (policy.ts remains a pure, env-free leaf). A non-TTY claim of the human
-// seat is refused outright — no second channel exists there, so no human row
+// seat is refused outright â€” no second channel exists there, so no human row
 // may be minted. Honest ceiling: same-OS-user processes can always read
 // env/files; this is an accountability control under the ledger-trust
-// assumption, NOT a security boundary (README-cli.md §The `approve` seat
-// states the same ceiling) — but it must never be VACUOUS again.
+// assumption, NOT a security boundary (README-cli.md Â§The `approve` seat
+// states the same ceiling) â€” but it must never be VACUOUS again.
 // ---------------------------------------------------------------------------
 async function promptHumanSeatToken() {
   // The prompt goes to STDERR so stdout stays exactly one JSON object.
@@ -6076,9 +6099,9 @@ async function promptHumanSeatToken() {
           settle(value);
         }
       };
-      rl.question("Confirm human seat — re-enter RT_HUMAN_SEAT_TOKEN: ", (a) => finish(a));
+      rl.question("Confirm human seat â€” re-enter RT_HUMAN_SEAT_TOKEN: ", (a) => finish(a));
       // EOF (Ctrl-D) closes the interface without answering: treat as an empty
-      // presented token → the seam's human-seat-unverified deny, never a hang.
+      // presented token â†’ the seam's human-seat-unverified deny, never a hang.
       rl.once("close", () => finish(""));
     });
     return typeof answer === "string" ? answer.trim() : "";
@@ -6102,15 +6125,15 @@ async function humanSeatClaim(cmd) {
     // recovery that only held for one of the three verbs.
     const machineLine =
       cmd === "approve"
-        ? "For an explicit MACHINE decision use `approve --project <p> --seat autopilot` — a bare call is never guessed a seat."
+        ? "For an explicit MACHINE decision use `approve --project <p> --seat autopilot` â€” a bare call is never guessed a seat."
         : cmd === "reject"
-          ? "For an explicit MACHINE rejection use `reject --project <p> --note <t> --seat autopilot` — a bare call is never guessed a seat."
+          ? "For an explicit MACHINE rejection use `reject --project <p> --note <t> --seat autopilot` â€” a bare call is never guessed a seat."
           : cmd === "fixtures"
-            ? "Approving fixtures is a human-only decision (the autopilot seat can never approve them) — run the verb from a terminal where a person can confirm."
+            ? "Approving fixtures is a human-only decision (the autopilot seat can never approve them) â€” run the verb from a terminal where a person can confirm."
             : "Use the autopilot seat instead (omit --i-am-human) or run the verb from a terminal where a person can confirm.";
     return {
       error:
-        `${cmd}: --i-am-human refused — the human seat needs an interactive confirmation ` +
+        `${cmd}: --i-am-human refused â€” the human seat needs an interactive confirmation ` +
         `(re-enter RT_HUMAN_SEAT_TOKEN at the TTY prompt) and this stdin is not a TTY, so the ` +
         `environment alone cannot furnish a second channel. ${machineLine}`,
     };
@@ -6124,36 +6147,36 @@ async function humanSeatClaim(cmd) {
 
 const USAGE = {
   description: "File-based headless RapidTool driver (no browser).",
-  help: "help | --help | -h [<verb>]   # print this synopsis as a SUCCESS envelope (ok:true, exit 0); name a verb (`--help emit`) to narrow `usage.commands` to that verb's line — a help request is never a coded failure",
+  help: "help | --help | -h [<verb>]   # print this synopsis as a SUCCESS envelope (ok:true, exit 0); name a verb (`--help emit`) to narrow `usage.commands` to that verb's line â€” a help request is never a coded failure",
   commands: {
-    create: "create --brief <text|file> [--name <text>] [--advisory] [--out <file.json>]   # --brief <path> (or the @<path> form) naming an EXISTING readable file READS it (a YAML-front-matter corpus fixture's `brief:` scalar is unwrapped); any other value is the brief prose (a path is never silently used as prose); default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
+    create: "create --brief <text|file> [--name <text>] [--kind app|tool|game|library|service] [--advisory] [--out <file.json>]   # --brief <path> (or the @<path> form) naming an EXISTING readable file READS it (a YAML-front-matter corpus fixture's `brief:` scalar is unwrapped); any other value is the brief prose (a path is never silently used as prose); --kind stores an EXPLICIT delivery kind (anything else is a usage refusal, exit 1); omitting it stores NO kind and lets the resolver infer from the brief; default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
     run: "run --project <file.json> [--live] [--unattended] [--knowledge <store.json>]   # advance one phase; --unattended = autopilot+live forced until parked (the scheduler-facing twin is the `unattended` verb); --knowledge seeds the P6 expansion with human-accepted cross-project lesson rows (proven), same store->rows resolver as `packet`",
     gate: "gate --project <file.json> [--autopilot] [--live] [--unattended] [--resynthesize] [--knowledge <store.json>]  # advance until parked; --unattended forces autopilot+live; --resynthesize re-opens a red RUNNING P6 (retry) and re-enters the P6 journey LIVE once, bounded, from the recorded unmet requirements (the recovery door for BL-003; without it a red running P6 re-parks at 0 steps); --knowledge as on run",
-    resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",
-    unattended: "unattended --project <file.json|dir> [--knowledge <store.json>]  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live; a stock HITL gate (P4/P5/P8/P9) whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`), so only a forceHuman gate (or any red DoD gate) still parks (exit 2); NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); --knowledge as on run/gate",
-    approve: "approve --project <file.json> (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed, name exactly one: --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY); --seat autopilot = explicit MACHINE attribution (`decidedBy:\"autopilot\"`, seat harness; works non-TTY — the documented agent door for a parked gate); --agent-seal is REFUSED here (RT_E_VALIDATION) — the seal is a wild-run concept: `wild --start|--resume --agent-seal`",
-    reject: "reject --project <file.json> --note <text> (--i-am-human | --seat autopilot)   # the seat is never guessed, name exactly one: --seat autopilot = explicit MACHINE attribution (works non-TTY — the documented agent door for rejecting a parked gate); --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY)",
+    resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age â€” exit taxonomy identical to gate (2 = parked). Never a silent resume",
+    unattended: "unattended --project <file.json|dir> [--knowledge <store.json>]  # W-47: scheduler-facing drive â€” re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live; a stock HITL gate (P4/P5/P8/P9) whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`), so only a forceHuman gate (or any red DoD gate) still parks (exit 2); NOT a daemon (a host hook â€” Windows Task Scheduler / cron â€” invokes it on a cadence); --knowledge as on run/gate",
+    approve: "approve --project <file.json> (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed, name exactly one: --i-am-human = human-seat claim â€” needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY); --seat autopilot = explicit MACHINE attribution (`decidedBy:\"autopilot\"`, seat harness; works non-TTY â€” the documented agent door for a parked gate); --agent-seal is REFUSED here (RT_E_VALIDATION) â€” the seal is a wild-run concept: `wild --start|--resume --agent-seal`",
+    reject: "reject --project <file.json> --note <text> (--i-am-human | --seat autopilot)   # the seat is never guessed, name exactly one: --seat autopilot = explicit MACHINE attribution (works non-TTY â€” the documented agent door for rejecting a parked gate); --i-am-human = human-seat claim â€” needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY)",
     retry: "retry --project <file.json>                  # unlock a rejected/blocked phase",
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
-    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified] [--allow-empty] [--git]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 0 when it is ok (the envelope always carries declaredScriptsVerified/unverifiedDeclaredScripts when a declared script did not run); --require-verified opts into exit 5 for that green-but-unverified state; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse); --git lands the emitted tree as ONE Conventional-Commits delivery commit (feat(<slug>): <brief>) — emitted files only, a foreign file is reported not committed, the host repo is never a target, and a clean tree is a no-op (envelope `git`); with --run, --git WITHHOLDS the commit (RT_E_SUBSTANCE_EMPTY) when the tree's substance verdict is \"empty\" or the project carries an uncleared red trail, unless --allow-empty opts into a deliberate scaffold-only commit; --allow-empty is substance-ONLY and does NOT lift the SEPARATE below-floor refusal (RT_E_PLAN_UNDERPRODUCED, raised at scaffold time before any flag is read)",
-    fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR approve selected/all ids — never auto-approves: --approve routes through the policy seam's human seat (--i-am-human + a TTY re-entry of RT_HUMAN_SEAT_TOKEN; a denied verdict writes nothing and stamps no decidedBy)",
-    eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated — the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
-    "tree-run": "tree-run --dir <dir> [--project <file.json>] [--require-verified]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0 (the envelope still names an unverified declared toolchain; --require-verified turns that state into exit 5); red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
-    repair: "repair --dir <dir> --project <file.json> [--budget N] [--from-gate]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); PR-22 --from-gate re-opens a red RUNNING P6 first so the cycle targets the recorded unmet state instead of refusing as illegal; the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
-    edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>] [--i-am-human]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat (--i-am-human claims the human seat through the ONE TTY-gated `humanSeatClaim` seam; --seat is not accepted here), then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
-    summary: "summary --project <file.json>   # envelope: ok + summary incl. nextAction {kind,cmd,phase,why} — the SAME 7-arm vocabulary the console renders (run/approve/retry/done/running/fix-gate/unknown)",
+    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified] [--allow-empty] [--git]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 0 when it is ok (the envelope always carries declaredScriptsVerified/unverifiedDeclaredScripts when a declared script did not run); --require-verified opts into exit 5 for that green-but-unverified state; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse); --git lands the emitted tree as ONE Conventional-Commits delivery commit (feat(<slug>): <brief>) â€” emitted files only, a foreign file is reported not committed, the host repo is never a target, and a clean tree is a no-op (envelope `git`); with --run, --git WITHHOLDS the commit (RT_E_SUBSTANCE_EMPTY) when the tree's substance verdict is \"empty\" or the project carries an uncleared red trail, unless --allow-empty opts into a deliberate scaffold-only commit; --allow-empty is substance-ONLY and does NOT lift the SEPARATE below-floor refusal (RT_E_PLAN_UNDERPRODUCED, raised at scaffold time before any flag is read)",
+    fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR approve selected/all ids â€” never auto-approves: --approve routes through the policy seam's human seat (--i-am-human + a TTY re-entry of RT_HUMAN_SEAT_TOKEN; a denied verdict writes nothing and stamps no decidedBy)",
+    eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated â€” the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
+    "tree-run": "tree-run --dir <dir> [--project <file.json>] [--require-verified]  # fixes/149 P0-1 emitâ†’editâ†’re-emit oracle: compile-check treeRun over an EXISTING emitted dir â€” read-only, never re-emits over the dir (an edited file is never clobbered); green â†’ 0 (the envelope still names an unverified declared toolchain; --require-verified turns that state into exit 5); red â†’ 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
+    repair: "repair --dir <dir> --project <file.json> [--budget N] [--from-gate]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (pathâ†’content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun â†’ red tail â†’ one bounded synthesis repair call with deps.treeFailure â†’ apply repaired files in place â†’ re-import â†’ treeRun again); green â†’ tested-equivalent mint + honest P6 gate + converged (0); budget exhausted â†’ honest failed (1, RT_E_REPAIR_FAILED); PR-22 --from-gate re-opens a red RUNNING P6 first so the cycle targets the recorded unmet state instead of refusing as illegal; the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
+    edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>] [--i-am-human]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file â€” DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat (--i-am-human claims the human seat through the ONE TTY-gated `humanSeatClaim` seam; --seat is not accepted here), then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
+    summary: "summary --project <file.json>   # envelope: ok + summary incl. nextAction {kind,cmd,phase,why} â€” the SAME 7-arm vocabulary the console renders (run/approve/retry/done/running/fix-gate/unknown)",
     vault: "vault --project <file.json> [--out <dir>]   # one .md per note + _index.md MOC (default <home>/RapidTool Software/<slug>/vault)",
     search: "search --project <file.json> --query <text> [--limit <n>]  # token-overlap vault search",
     crew: "crew --project <file.json> [--max-steps <n>]  # advisory multi-agent crew (needs DEEPSEEK_API_KEY)",
     verify: "verify --project <file.json> [--apply]      # machine verify-fix on generatedSource; --apply persists the verdict",
     check: "check --dir <path>                          # per-file compile verdicts over an emitted dir (.js via node --check; .ts via the typescript devDep)",
-    scan: "scan --dir <dir>                            # W23 L6 (G4 · OV-21): ADVISORY error-signal scan over an emitted dir — catch-empty + catch-swallowed + neutral-return-unimplemented; read-only, never a gate and never blocks an emit; exit 0 clean / 1 findings (RT_E_VALIDATION for an unreadable dir)",
+    scan: "scan --dir <dir>                            # W23 L6 (G4 Â· OV-21): ADVISORY error-signal scan over an emitted dir â€” catch-empty + catch-swallowed + neutral-return-unimplemented; read-only, never a gate and never blocks an emit; exit 0 clean / 1 findings (RT_E_VALIDATION for an unreadable dir)",
     design: "design --project <file.json> [--html <out.html>]  # design tokens (+ standalone HTML when --html)",
     diagram: "diagram --project <file.json> --kind phases|architecture|flow [--out <file.svg>]  # SVG diagram",
     artifacts: "artifacts --project <file.json>           # index of project artifacts (id/phase/kind/title/bytes)",
-    doctor: "doctor [--project <file.json>] [--tree <dir>] [--mcp-call <tool>] [--mcp-call-args <json>]  # capability pre-flight (llm/research/runner/node/factory). The `mcp` field reports the owner-gated MCP client honestly: OFF by default (RAPIDTOOL_MCP_ENABLED unset) — zero child spawned, tools null with the coded RT_E_MCP_DISABLED refusal; only when enabled AND RAPIDTOOL_MCP_SERVER is configured is the server's REAL tools/list returned (never fabricated). --mcp-call additionally runs the read-only round-trip for that tool",
+    doctor: "doctor [--project <file.json>] [--tree <dir>] [--mcp-call <tool>] [--mcp-call-args <json>]  # capability pre-flight (llm/research/runner/node/factory). The `mcp` field reports the owner-gated MCP client honestly: OFF by default (RAPIDTOOL_MCP_ENABLED unset) â€” zero child spawned, tools null with the coded RT_E_MCP_DISABLED refusal; only when enabled AND RAPIDTOOL_MCP_SERVER is configured is the server's REAL tools/list returned (never fabricated). --mcp-call additionally runs the read-only round-trip for that tool",
     diagnose: "diagnose [--project <file.json>]           # one-shot telemetry diagnosis from the NDJSON log tail: timeline + most-likely-cause heuristic + growth stats (no project required)",
     harvest: "harvest --project <file.json>               # bounded live-source harvest (repos/license/snippets) for the brief",
     swarm: "swarm --project <file.json>                  # deterministic advisory swarm critique of the current phase",
@@ -6161,23 +6184,23 @@ const USAGE = {
     bench: "bench --project <file.json>                  # synthetic estimates: tokens/time/complexity/failure points",
     mine: "mine --dir <path> [--limit N]                # bounded structural codebase map + convention map",
     knowledge: "knowledge --store <file.json> (--save <json>|--find <query>) [--limit N]  # cross-project pattern store",
-    lesson: "lesson (--list --project <file.json> [--brief <text>] [--limit N] | --propose --brief <text> [--title <t>] [--kind fix|pattern|note] [--tags a,b] [--project <name>] | --accept --project <file.json> --out <knowledge.json> [--actor <name>] [--limit N] | --supersede --knowledge-file <knowledge.json> --id <K...> [--evidence <text>|--reason <text>] [--by human|machine] | --refute --knowledge-file <knowledge.json> --id <K...> [--evidence <text>] | --advise (--project <file.json> | --knowledge-file <knowledge.json>) [--brief <text>] [--phase N] [--limit N] | --verify (--knowledge-file <knowledge.json> | --project <file.json>) --anchor <path> [--mark-stale] [--limit N] | --effect --project <file.json>)  # lesson family: list rows read-only (fusionRank vs --brief, else score-desc) / propose = bounded flash DRAFT, never writes (keyless drafts labeled 'draft (keyless)') / accept = THE human-gated cross-project write, actor recorded per row, idempotent per actor / supersede + refute = store telemetry (append-only rows + counters, never deletes) / advise = read-only ranked FAIL-class pre-flight (reproducedCount + counterEvidence printed as-is) / verify = anchor re-hash → ok | stale | anchor-missing (read-only unless --mark-stale: store counterEvidence telemetry only) / effect = F3 read-only cross-run learning MEASUREMENT (recurrence census: reproduced/unreproduced, per-class rates + per-row evidence with the accruing lesson.reproduced ledger rows; recurrence ≠ causation, census window, n≥2 'baseline only' floor — never an eval score)",
-    wild: "wild --project <file.json> [--start|--pause|--resume|--stop] [--steps N] [--agent-seal]  # wild-mode macro-run; --start enables + begins a run; --agent-seal = THE agent seal (a wild-run concept — the ONLY verb that accepts it): classifier-as-approver (coded [seat agent-seal] rows, never a human seat), bounded reject retries, ONE DoD-repair pass on a hard-DoD red",
+    lesson: "lesson (--list --project <file.json> [--brief <text>] [--limit N] | --propose --brief <text> [--title <t>] [--kind fix|pattern|note] [--tags a,b] [--project <name>] | --accept --project <file.json> --out <knowledge.json> [--actor <name>] [--limit N] | --supersede --knowledge-file <knowledge.json> --id <K...> [--evidence <text>|--reason <text>] [--by human|machine] | --refute --knowledge-file <knowledge.json> --id <K...> [--evidence <text>] | --advise (--project <file.json> | --knowledge-file <knowledge.json>) [--brief <text>] [--phase N] [--limit N] | --verify (--knowledge-file <knowledge.json> | --project <file.json>) --anchor <path> [--mark-stale] [--limit N] | --effect --project <file.json>)  # lesson family: list rows read-only (fusionRank vs --brief, else score-desc) / propose = bounded flash DRAFT, never writes (keyless drafts labeled 'draft (keyless)') / accept = THE human-gated cross-project write, actor recorded per row, idempotent per actor / supersede + refute = store telemetry (append-only rows + counters, never deletes) / advise = read-only ranked FAIL-class pre-flight (reproducedCount + counterEvidence printed as-is) / verify = anchor re-hash â†’ ok | stale | anchor-missing (read-only unless --mark-stale: store counterEvidence telemetry only) / effect = F3 read-only cross-run learning MEASUREMENT (recurrence census: reproduced/unreproduced, per-class rates + per-row evidence with the accruing lesson.reproduced ledger rows; recurrence â‰  causation, census window, nâ‰¥2 'baseline only' floor â€” never an eval score)",
+    wild: "wild --project <file.json> [--start|--pause|--resume|--stop] [--steps N] [--agent-seal]  # wild-mode macro-run; --start enables + begins a run; --agent-seal = THE agent seal (a wild-run concept â€” the ONLY verb that accepts it): classifier-as-approver (coded [seat agent-seal] rows, never a human seat), bounded reject retries, ONE DoD-repair pass on a hard-DoD red",
     chat: "chat --project <file.json> --ask <text> [--history <json-array>]  # grounded copilot turn; slash tools /status /gate /packet /fixtures /ls /read /help work keyless; free-text needs DEEPSEEK_API_KEY",
     deepen: "deepen --project <file.json> [--phase N]    # re-run live research over a completed research phase (0/7/11)",
   },
 };
 
 // ---------------------------------------------------------------------------
-// M6-05/M6-06 (B1 · fixes/310): the Node-side global nets. The CLI contract is
+// M6-05/M6-06 (B1 Â· fixes/310): the Node-side global nets. The CLI contract is
 // ONE JSON object on stdout + the exit taxonomy (0/1/2/3/4/5; 5 = `emit --run` /
 // `tree-run` green-but-unverified declared scripts), but `main()`'s
-// internal try/catch only wraps the dispatch below its first awaits — a
+// internal try/catch only wraps the dispatch below its first awaits â€” a
 // rejection from ensureErrorCodes()/ensureRtAppender() (or any uncaught throw
 // later in the process) used to exit with a bare Node stack and NO envelope
 // (308 map6 M6-05/06). The browser client carries its own nets
 // (rt-client.ts:411-454); Node gets the same shape here: ONE
-// `exitInternalError` seam — stack on stderr only, then the SAME respond()
+// `exitInternalError` seam â€” stack on stderr only, then the SAME respond()
 // envelope the internal catch emits (ok:false + RT_E_INTERNAL + exit 4).
 // Pinned by scripts/cli-exit-taxonomy.test.mjs (source-text legs + behavioral
 // spawns that inject a real unhandled rejection / uncaught throw).
@@ -6190,12 +6213,12 @@ function exitInternalError(err) {
     respond({ ok: false, error: message, ...errCode(err, "RT_E_INTERNAL") }, 4);
   } catch {
     // respond() itself failed (fd 1 unusable and the async fallback too):
-    // last-resort exit — still non-zero, still one shape attempted.
+    // last-resort exit â€” still non-zero, still one shape attempted.
     try {
       process.stderr.write(`cli: internal error: ${String(err)}\n`);
     } catch {
       // The process is already past a failed stdout write AND a failed
-      // stderr write — the descriptor pair is gone. Nothing left to report
+      // stderr write â€” the descriptor pair is gone. Nothing left to report
       // through; exit non-zero without masking the original error.
     }
     process.exit(4);
@@ -6203,7 +6226,7 @@ function exitInternalError(err) {
 }
 
 // The nets register BEFORE main() runs, so even a synchronous throw in its
-// prologue is covered. `uncaughtException` is safe to observe here — we always
+// prologue is covered. `uncaughtException` is safe to observe here â€” we always
 // exit immediately (a one-shot CLI has no state worth resuming).
 process.on("unhandledRejection", (reason) => exitInternalError(reason));
 process.on("uncaughtException", (err) => exitInternalError(err));

@@ -1,9 +1,10 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// headless.ts — file-based headless driver for RapidTool (no browser, no store).
+// headless.ts â€” file-based headless driver for RapidTool (no browser, no store).
 //
 // Lets an AI agent drive a RapidTool project end-to-end with no DOM, no
 // localStorage, and no Vite server. It is a thin, file-backed orchestration
-// layer over the existing PURE engine/io/phases/report-intake exports — it
+// layer over the existing PURE engine/io/phases/report-intake exports â€” it
 // IMPORTS those read-only and never mutates them (ownership contract: build
 // agent #3 owns this file only).
 //
@@ -13,11 +14,11 @@
 //
 // Live mode (`live: true`) is OPTIONAL and off by default. When on, the live
 // branch delegates to engine.liveLayer (E-12: single live implementation for
-// artifact/narrative builders) and, when that layer cannot run — under bare
-// Node its TanStack server-fn backends always fail — a small direct
+// artifact/narrative builders) and, when that layer cannot run â€” under bare
+// Node its TanStack server-fn backends always fail â€” a small direct
 // server-module overlay supplies real keyless research (freeWebSearch) plus an
 // optional DeepSeek narrative for research phases 0/7/11, layered on the
-// deterministic applyPhaseResult exactly like engine.runPhaseAsync does — and
+// deterministic applyPhaseResult exactly like engine.runPhaseAsync does â€” and
 // every failure degrades gracefully back to the deterministic floor (honesty
 // contract: never fabricate live output). Deterministic paths make NO network
 // calls.
@@ -25,8 +26,12 @@
 import {
   applyPhaseResult,
   approveHitl,
+  // W359 (thread-kind): the ONE kind resolver. Consumers read the RESOLVED kind
+  // (`deliveryKindOf(project)`), never the stored field, which is absent on the
+  // keyless path (engine.ts:4074 sits behind the keyed guards).
+  deliveryKindOf,
   emptyProject,
-  // 2026-10-05: the engine's off-intent relevance filter — the headless research
+  // 2026-10-05: the engine's off-intent relevance filter â€” the headless research
   // overlay applies the SAME partition the engine's fetchResearch does, so an
   // off-topic listing/category page never earns the headless corpus or an
   // artifact (engine.ts owns the filter semantics; this is the single call).
@@ -38,7 +43,7 @@ import {
   liveLayerFailureRow,
   // A4-E9: the additive `degraded` phase marker for a thrown live/keyed pass.
   markPhaseDegraded,
-  // W36 N2 (fixes/281): F3-01 residue closed — engine.ts exports readWildPlan (R13-f02 landed it;
+  // W36 N2 (fixes/281): F3-01 residue closed â€” engine.ts exports readWildPlan (R13-f02 landed it;
   // store.ts consumes it); the former inline accessor in generateWildPlan is re-pointed to it.
   readWildPlan,
   rejectHitl,
@@ -62,9 +67,9 @@ import { applyReportResult, validateReport, type ReportApplyReason } from "./rep
 import { canEnter, PHASES, PHASE_LAST, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
 import { evaluatePolicy, seatLabel, seatTokenPath } from "./policy.ts";
 import { applyWrites, rollback, snapshotPaths, WRITE_SET_LOCK } from "./write-set.ts";
-// T-107.7 (W33 lane L2 write half · W36 lane N2 read half): the real run
+// T-107.7 (W33 lane L2 write half Â· W36 lane N2 read half): the real run
 // checkpoint. headless IS the bare-Node host whose runs know a project working
-// dir — the per-phase commit below writes the bounded snapshot beside
+// dir â€” the per-phase commit below writes the bounded snapshot beside
 // `.rapidtool/` and completion clears it; `loadResumableCheckpoint` (below) is
 // the read/admit/hydrate seam the CLI `resume`/`unattended` verbs consume.
 // Static import is safe here: headless is a backend module (node:fs already
@@ -75,7 +80,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, 
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-// R14-f01 (W33 lane F1): Node-side Auto-Review supervisor binding — headless IS
+// R14-f01 (W33 lane F1): Node-side Auto-Review supervisor binding â€” headless IS
 // the bare-Node host where the wild loop runs; null (keyless) keeps the engine's
 // existing default byte-identical.
 import { createNodeWildReviewer } from "./wild-review.ts";
@@ -95,7 +100,14 @@ import type {
   Project,
   WildPlan,
 } from "./types.ts";
-// 308 B-02 (B2): the Optional telemetry sink's seed shape — the same
+// W359 (thread-kind): the delivery-kind VOCABULARY the CLI validates `create
+// --kind` against. types.ts owns the ONE list; this is a re-export (the same
+// binding), never a second copy â€” the CLI reads it off the driver the way it
+// already reads DIAGRAM_KINDS.
+import { DELIVERY_KINDS } from "./types.ts";
+
+export { DELIVERY_KINDS };
+// 308 B-02 (B2): the Optional telemetry sink's seed shape â€” the same
 // RtEventSeed the engine emits and the CLI's cliLogEvent consumes.
 import type { RtEventSeed } from "./rt-events.ts";
 
@@ -109,11 +121,11 @@ import {
   type FleetMetrics,
 } from "./acceptance.ts";
 import type { SpendSlice, TokenLedger, TokenSpend } from "./token-ledger.ts";
-// T5.5 (OV-41 spend half, W43 · H6): the summary envelope's spend half reads
-// the PROCESS session budget — the SAME T-107.6 accessor `recordSessionSpend`
-// records into — through the SAME boundary reader the packet envelope carries
+// T5.5 (OV-41 spend half, W43 Â· H6): the summary envelope's spend half reads
+// the PROCESS session budget â€” the SAME T-107.6 accessor `recordSessionSpend`
+// records into â€” through the SAME boundary reader the packet envelope carries
 // (`packetBudgetBoundary`, F2-04), so the two surfaces can never drift.
-// W46 · 332-2 (AW45-c06): the run's cumulative spend PERSISTS on the project
+// W46 Â· 332-2 (AW45-c06): the run's cumulative spend PERSISTS on the project
 // (`tokenUsage`); `accumulateSpend` / `spendDelta` / `normalizeLedger` fold
 // each invocation's session delta into it, and `summary`/`doctor` read it back.
 // token-ledger.ts / packet.ts are client-safe pure modules (no node:fs);
@@ -128,7 +140,7 @@ import {
   totalTokens,
 } from "./token-ledger.ts";
 import { packetBudgetBoundary, type PacketBudget } from "./packet.ts";
-// Lane 1 (fixes/349): plain-English run documents — the pure report renderer and
+// Lane 1 (fixes/349): plain-English run documents â€” the pure report renderer and
 // the artifact materializer; headless owns the run's filesystem, so it writes
 // them beside the persisted project (writeRunDocuments below). Both modules are
 // PURE and this file only READS them (never mutates the engine).
@@ -140,7 +152,7 @@ import { materializeArtifacts } from "./artifacts.ts";
 // ---------------------------------------------------------------------------
 
 /** Does this record represent a run that actually started? A fresh
- *  `createProject` (phase 0 "ready", no artifacts) is not — it must not sprout
+ *  `createProject` (phase 0 "ready", no artifacts) is not â€” it must not sprout
  *  run documents. Used as the default gate for the document side-write so a
  *  plain save of an unstarted project stays byte-identical on disk. */
 function runHasDocuments(project: Project): boolean {
@@ -162,10 +174,10 @@ export type RunDocumentsResult =
   | { ok: false; reason: string };
 
 /**
- * Lane 1 (fixes/349): materialize the run's visible documents into `runDir` —
+ * Lane 1 (fixes/349): materialize the run's visible documents into `runDir` â€”
  * `RUN_REPORT.md` (run-report.renderRunReport) plus one `artifacts/*.md` per
  * phase artifact (artifacts.materializeArtifacts). FAIL-SOFT BY CONTRACT: it
- * never throws and never pretends — a partial/failed write returns
+ * never throws and never pretends â€” a partial/failed write returns
  * `{ ok:false, reason }` so the caller can record the reason on the project.
  * The only paths it will ever write are `RUN_REPORT.md` and files under
  * `artifacts/`; an existing non-directory at either location is refused rather
@@ -184,7 +196,7 @@ export function writeRunDocuments(runDir: string, project: Project): RunDocument
         return { ok: false, reason: `RUN_REPORT.md exists as a directory at ${reportPath}` };
       }
     } catch {
-      /* absent — the normal case */
+      /* absent â€” the normal case */
     }
     const artifactsDir = join(dir, "artifacts");
     try {
@@ -192,7 +204,7 @@ export function writeRunDocuments(runDir: string, project: Project): RunDocument
         return { ok: false, reason: `artifacts path exists and is not a directory at ${artifactsDir}` };
       }
     } catch {
-      /* absent — created below */
+      /* absent â€” created below */
     }
 
     const report = renderRunReport(project);
@@ -212,8 +224,8 @@ export function writeRunDocuments(runDir: string, project: Project): RunDocument
 }
 
 /** Load a project from a JSON file (parse + validate + hydrate via io.importProject).
- *  W49 · 335-2: the byte source is a local file `readFileSync` already loaded in
- *  full, so the hostile-PASTE size cap protects nothing here — it only stranded
+ *  W49 Â· 335-2: the byte source is a local file `readFileSync` already loaded in
+ *  full, so the hostile-PASTE size cap protects nothing here â€” it only stranded
  *  a legitimate record `saveProject` wrote. The cap is lifted for this path
  *  (a caller may still pin one via `opts.maxChars`). */
 export function loadProject(path: string, opts?: { preserveWildRun?: boolean; maxChars?: number }): Project {
@@ -231,18 +243,18 @@ export function loadProject(path: string, opts?: { preserveWildRun?: boolean; ma
 }
 
 // ---------------------------------------------------------------------------
-// fixes/310 (B1 · M6-01/M6-02): stale-lock reclamation for the two O_EXCL lock
+// fixes/310 (B1 Â· M6-01/M6-02): stale-lock reclamation for the two O_EXCL lock
 // sites (saveProject's `<project>.lock`, emit's `.rapidtool-emit.lock`). A
 // SIGKILLed writer cannot run its release; its lock file stranded the project
-// forever — every later writer refused RT_E_BUSY with no retry path short of a
+// forever â€” every later writer refused RT_E_BUSY with no retry path short of a
 // manual unlink (308 map6 probes M6-01/02). The claim now writes the holder's
 // identity (pid + ts) INTO the fresh lock; on EEXIST the next claimant
 // consults the holder: a DEAD pid is an orphan and is reclaimed (rename-aside
-// claim + one "wx" re-attempt — the repo's own pid+ts discipline, cf.
+// claim + one "wx" re-attempt â€” the repo's own pid+ts discipline, cf.
 // checkpoint.server.ts A1-08), an identityless legacy lock falls back to a
 // bounded age (mtime), and a LIVE holder always refuses. Reclamation is never
 // a blanket bypass: the live-lock pin forbids it and `--force` (foreign-files)
-// semantics are untouched. Ceiling: pid liveness is same-machine semantics —
+// semantics are untouched. Ceiling: pid liveness is same-machine semantics â€”
 // these locks are local-disk files by design.
 // ---------------------------------------------------------------------------
 const LOCK_STALE_MAX_AGE_MS = 10 * 60 * 1000;
@@ -252,7 +264,7 @@ function errnoCode(err: unknown): string {
   return err && typeof err === "object" && "code" in err ? String((err as { code?: unknown }).code) : "";
 }
 
-/** Parse a lock's holder identity (fixes/310). Absent/invalid → null — the
+/** Parse a lock's holder identity (fixes/310). Absent/invalid â†’ null â€” the
  *  legacy/identityless class, decided by the bounded-age fallback. */
 function parseLockIdentity(content: string): { pid: number } | null {
   try {
@@ -261,12 +273,12 @@ function parseLockIdentity(content: string): { pid: number } | null {
       return { pid: parsed.pid };
     }
   } catch {
-    /* legacy/foreign content — age decides */
+    /* legacy/foreign content â€” age decides */
   }
   return null;
 }
 
-/** Is `pid` a live process on this host? EPERM means "exists but not ours" →
+/** Is `pid` a live process on this host? EPERM means "exists but not ours" â†’
  *  alive (the safe direction: never reclaim a holder we merely cannot signal). */
 function pidIsAlive(pid: number): boolean {
   try {
@@ -277,28 +289,28 @@ function pidIsAlive(pid: number): boolean {
   }
 }
 
-/** Reclaim an orphaned lock. true → the stale file is gone/moved aside and the
- *  caller should re-attempt `wx` (exactly once); false → a live holder, or an
- *  identityless lock inside its age bound — refuse RT_E_BUSY. The reclaim is
+/** Reclaim an orphaned lock. true â†’ the stale file is gone/moved aside and the
+ *  caller should re-attempt `wx` (exactly once); false â†’ a live holder, or an
+ *  identityless lock inside its age bound â€” refuse RT_E_BUSY. The reclaim is
  *  claimed ATOMICALLY via rename(): racing reclaimers cannot both win, and a
  *  fresh lock created by another writer can never be unlinked out from under
- *  it by a stale read (the open window a naive read→unlink order would have). */
+ *  it by a stale read (the open window a naive readâ†’unlink order would have). */
 function reclaimStaleLock(lockPath: string): boolean {
   let content: string | null = null;
   try {
     content = readFileSync(lockPath, "utf8");
   } catch {
-    return true; // vanished (released/reclaimed) — let the caller re-attempt wx
+    return true; // vanished (released/reclaimed) â€” let the caller re-attempt wx
   }
   const holder = parseLockIdentity(content);
   if (holder !== null) {
-    if (pidIsAlive(holder.pid)) return false; // live holder — never a bypass
+    if (pidIsAlive(holder.pid)) return false; // live holder â€” never a bypass
   } else {
     let ageMs: number;
     try {
       ageMs = Date.now() - statSync(lockPath).mtimeMs;
     } catch {
-      return false; // cannot stat — leave it alone
+      return false; // cannot stat â€” leave it alone
     }
     if (ageMs < LOCK_STALE_MAX_AGE_MS) return false;
   }
@@ -329,7 +341,7 @@ function acquireExclusiveLock(lockPath: string): number | null {
       try {
         writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }));
       } catch {
-        /* identity is advisory — an identityless lock falls back to mtime age */
+        /* identity is advisory â€” an identityless lock falls back to mtime age */
       }
       return fd;
     } catch (err) {
@@ -338,7 +350,7 @@ function acquireExclusiveLock(lockPath: string): number | null {
       if (!reclaimStaleLock(lockPath)) return null; // live/fresh holder
     }
   }
-  return null; // unreachable (every path above returns) — keeps the type honest
+  return null; // unreachable (every path above returns) â€” keeps the type honest
 }
 
 /** Persist a project to `path` atomically (write temp file, then rename over target).
@@ -348,7 +360,7 @@ export function saveProject(path: string, project: Project, opts?: { documents?:
   mkdirSync(dirname(target), { recursive: true });
   const lockPath = `${target}.lock`;
   let fd: number | null = null;
-  // fixes/310 (B1 · M6-02): stale-aware claim (acquireExclusiveLock) — an
+  // fixes/310 (B1 Â· M6-02): stale-aware claim (acquireExclusiveLock) â€” an
   // SIGKILLed writer's stranded lock is reclaimed; a live holder still refuses.
   fd = acquireExclusiveLock(lockPath);
   if (fd === null) {
@@ -424,18 +436,18 @@ export function saveProject(path: string, project: Project, opts?: { documents?:
   return target;
 }
 
-/** M6-04 (312 · E2): the busy-aware save the CLI's run/gate arm uses instead
- *  of a bare `saveProject` — bounded wait-and-retry per the `RT_E_BUSY`
+/** M6-04 (312 Â· E2): the busy-aware save the CLI's run/gate arm uses instead
+ *  of a bare `saveProject` â€” bounded wait-and-retry per the `RT_E_BUSY`
  *  agentAction remedy ("wait and retry the save"), then a CODED refusal
  *  instead of a thrown `RT_E_BUSY` the top-level net would mislabel exit 4
  *  (the README-documented busy exit is 1). Each attempt re-enters
  *  `saveProject`, so the fixes/310 `reclaimStaleLock` discipline runs on
  *  EVERY retry: an orphaned lock (dead holder, SIGKILL residue) is reclaimed
  *  on the first attempt; a transiently-held live lock usually clears inside
- *  the window; a still-live writer after the bound gets the coded refusal —
+ *  the window; a still-live writer after the bound gets the coded refusal â€”
  *  the caller then surfaces `preserved` (the run checkpoint) so the completed
  *  phase work is never discarded. `sleep` is injectable for deterministic
- *  tests; ONLY `RT_E_BUSY` is classified — every other failure propagates
+ *  tests; ONLY `RT_E_BUSY` is classified â€” every other failure propagates
  *  unchanged (those are still the caller's own bugs). */
 export type SaveProjectBusyAwareResult =
   | { ok: true; path: string; attempts: number }
@@ -517,15 +529,15 @@ export function createProject(input: { brief: string; name?: string; kind?: Proj
 // Live research + narrative (optional; only fires when `live: true`).
 //
 // E-12 (M-10 closure, honest variant): the ENGINE's exported `liveLayer` is the
-// single live implementation — artifact/narrative builders, honesty footers and
+// single live implementation â€” artifact/narrative builders, honesty footers and
 // the `project.research` corpus shape all live in engine.ts. runPhase's live
 // branch therefore delegates to it.
 //
 // Bare-Node reality check (verified 2026-09-06): engine.liveLayer reaches its
 // backends through TanStack server functions (llm.ts / research.ts), which
 // throw outside a Start server runtime ("No Start context found in
-// AsyncLocalStorage"). Under bare Node — the ONLY host this file-based driver
-// runs on — engine.liveLayer therefore ALWAYS resolves to the deterministic
+// AsyncLocalStorage"). Under bare Node â€” the ONLY host this file-based driver
+// runs on â€” engine.liveLayer therefore ALWAYS resolves to the deterministic
 // floor, and a naive full dedup would silently kill the CLI's documented
 // `--live` research. Headless keeps the smallest possible remainder below:
 // a direct server-module research overlay (tavily/websearch/deepseek are plain
@@ -543,14 +555,14 @@ const RESEARCH_PHASES: ReadonlySet<PhaseId> = new Set([0, 7, 11]);
  * configured, else DuckDuckGo/SearXNG/Wikipedia) + an optional DeepSeek phase
  * narrative, layered over the deterministic result `project` already carries.
  * Queries come from engine.ts's exported `researchQueryFor` (single-sourced in
- * fixes/128_x6 — no private mirror, so the corpus entries this overlay writes
+ * fixes/128_x6 â€” no private mirror, so the corpus entries this overlay writes
  * are byte-identical to the engine's). Returns `project` unchanged when
- * nothing live succeeded — never throws, never fabricates.
+ * nothing live succeeded â€” never throws, never fabricates.
  */
 async function bareNodeLiveOverlay(
   project: Project,
   phase: PhaseId,
-  /** 342-2: research-only mode — skip the DeepSeek phase narrative so the
+  /** 342-2: research-only mode â€” skip the DeepSeek phase narrative so the
    *  overlay stays keyless (the eval harness's research-only live leg). */
   { researchOnly = false }: { researchOnly?: boolean } = {},
 ): Promise<Project> {
@@ -562,12 +574,12 @@ async function bareNodeLiveOverlay(
   // only when non-zero, so a clean run stays byte-identical).
   let droppedOffIntent = 0;
   // OV-29 (fixes/252, W19-L1): coded rows for the two degrades below that used
-  // to be comment-only. Folded into OV-13's shape — a keyed failure (or a
+  // to be comment-only. Folded into OV-13's shape â€” a keyed failure (or a
   // failed keyless search) must leave a coded, visible row, never a silent
-  // degrade that reads like a clean keyless run. Empty ⇒ byte-identical return.
+  // degrade that reads like a clean keyless run. Empty â‡’ byte-identical return.
   const degradeRows: JsonLog[] = [];
 
-  // 1) Real web research — Tavily when keyed, else the free keyless fallback.
+  // 1) Real web research â€” Tavily when keyed, else the free keyless fallback.
   try {
     const { tavilySearch, isTavilyConfigured } = await import("./tavily.server.ts");
     const { freeWebSearch } = await import("./websearch.server.ts");
@@ -575,7 +587,7 @@ async function bareNodeLiveOverlay(
     const result = isTavilyConfigured() ? await tavilySearch(query) : await freeWebSearch(query);
     if (result && result.ok === true && (result.items?.length ?? 0) > 0) {
       // W61 C9 parity (2026-10-05): apply the engine's off-intent relevance
-      // filter to the headless findings — the engine's fetchResearch drops
+      // filter to the headless findings â€” the engine's fetchResearch drops
       // category/listing pages before they earn the corpus; the headless path
       // used to persist them verbatim (`items` above). Accepted findings land
       // in the artifacts/corpus; dropped ones are excluded but counted below so
@@ -587,13 +599,13 @@ async function bareNodeLiveOverlay(
       cited = items.length > 0;
       if (droppedOffIntent > 0) {
         // Visible, coded-class warn row: an off-intent drop is never silent
-        // (honesty contract — a filtered result is not a fabricated one).
+        // (honesty contract â€” a filtered result is not a fabricated one).
         degradeRows.push({
           ts: Date.now(),
           phase,
           level: "warn",
           event: `p${phase}.live.research.filtered`,
-          detail: `${droppedOffIntent} off-intent result(s) dropped by the relevance filter (W61 C9) — ${
+          detail: `${droppedOffIntent} off-intent result(s) dropped by the relevance filter (W61 C9) â€” ${
             items.length === 0
               ? "no relevant finding landed"
               : `${items.length} relevant finding(s) kept`
@@ -607,7 +619,7 @@ async function bareNodeLiveOverlay(
           ? ((result as { provider?: string }).provider as string)
           : null;
     } else if (!result || result.ok !== true) {
-      // A coded refusal (RT_E_RESEARCH_UNAVAILABLE from either backend) — the
+      // A coded refusal (RT_E_RESEARCH_UNAVAILABLE from either backend) â€” the
       // row carries the backend's OWN code. `ok:true` with zero items is NOT a
       // degrade: the backend ran and found nothing.
       degradeRows.push(
@@ -620,12 +632,12 @@ async function bareNodeLiveOverlay(
       );
     }
   } catch (err) {
-    /* research unavailable → items stay empty, not cited (recorded, never
-       silent — OV-29, fixes/252) */
+    /* research unavailable â†’ items stay empty, not cited (recorded, never
+       silent â€” OV-29, fixes/252) */
     degradeRows.push(liveDegradeRow(phase, "research", err, "RT_E_RESEARCH_UNAVAILABLE"));
   }
 
-  // 2) LLM phase narrative — fires whenever DeepSeek is configured, independent
+  // 2) LLM phase narrative â€” fires whenever DeepSeek is configured, independent
   // of whether live research succeeded. 342-2: skipped in research-only mode so
   // the eval harness's research leg never spends an LLM call.
   if (!researchOnly) {
@@ -638,21 +650,21 @@ async function bareNodeLiveOverlay(
                 .slice(0, 5)
                 .map((it) => `- ${it.title}: ${(it.content ?? "").slice(0, 200)}`)
                 .join("\n")}`
-            : "(no live research available — reason from the brief and lattice only)";
+            : "(no live research available â€” reason from the brief and lattice only)";
         const comp = await completeDeepSeek(
           `Write a concise one-paragraph phase narrative for ${project.name} (${phaseDef(phase).code} ${phaseDef(phase).title}). ${ground}\n\nBrief: ${project.brief.slice(0, 400)}`,
         );
-        // CF-SE2-3b (312 · E2; tail landed by 317 · J3): the narrative call is
-        // metered into the process session ledger — I2: EVERY response that
+        // CF-SE2-3b (312 Â· E2; tail landed by 317 Â· J3): the narrative call is
+        // metered into the process session ledger â€” I2: EVERY response that
         // reports usage, success or refusal (a refusal that burned tokens still
         // counts against the cap).
         if (comp && comp.usage) recordSessionSpend(comp.usage);
         if (comp && comp.ok === true && typeof comp.text === "string" && comp.text.trim()) {
           narrative = comp.text.trim();
         } else {
-          // OV-29's real case: the key IS present but the call failed — without
+          // OV-29's real case: the key IS present but the call failed â€” without
           // this row the run read exactly like a keyless one. `comp.code` carries
-          // the provider's registered class (RT_E_LLM_REJECTED / …).
+          // the provider's registered class (RT_E_LLM_REJECTED / â€¦).
           degradeRows.push(
             liveDegradeRow(
               phase,
@@ -665,7 +677,7 @@ async function bareNodeLiveOverlay(
       }
     } catch (err) {
       narrative = null;
-      /* recorded, never silent — OV-29, fixes/252 */
+      /* recorded, never silent â€” OV-29, fixes/252 */
       degradeRows.push(liveDegradeRow(phase, "narrative", err, "RT_E_LLM_REJECTED"));
     }
   }
@@ -688,20 +700,20 @@ async function bareNodeLiveOverlay(
           phase,
           kind: "research" as const,
           title: "Phase narrative (LLM)",
-          // M-07: honesty footer — never let generated prose masquerade as fact.
+          // M-07: honesty footer â€” never let generated prose masquerade as fact.
           body: `${narrative}${
             items.length > 0
-              ? `\n\n> generated prose — grounded in ${items.length} fetched sources`
-              : "\n\n> generated prose — not grounded in fetched sources; verify before relying on it"
+              ? `\n\n> generated prose â€” grounded in ${items.length} fetched sources`
+              : "\n\n> generated prose â€” not grounded in fetched sources; verify before relying on it"
           }`,
           language: "markdown",
         },
       ]
     : [];
 
-  // 99 §6 (fixes/128_x6): under bare Node engine.liveLayer's server-fn
+  // 99 Â§6 (fixes/128_x6): under bare Node engine.liveLayer's server-fn
   // research seam always fails, so it stamps meta.liveUnavailable=true right
-  // before this overlay runs — real findings landing HERE must clear that
+  // before this overlay runs â€” real findings landing HERE must clear that
   // explained dead-end flag (it must never coexist with a corpus that
   // landed), and a real DeepSeek narrative must stamp the honest route
   // (E-14) that the engine's server-fn path cannot.
@@ -754,16 +766,16 @@ export async function runPhase(
   opts: {
     live?: boolean;
     /** 342-2: run ONLY the keyless bare-Node research overlay for a research
-     *  phase (0/7/11) even when `live` is false — the eval harness's
+     *  phase (0/7/11) even when `live` is false â€” the eval harness's
      *  post-journey drain needs the free-search corpus without keying the
-     *  P8–P12 narratives `live:true` would. Default false ⇒ byte-identical. */
+     *  P8â€“P12 narratives `live:true` would. Default false â‡’ byte-identical. */
     researchLive?: boolean;
-    /** W-02 (fixes/271 · §R1-f02): injection seam for the phase-6 edge
-     *  (driveP6Journey deps). Production callers omit it — the default is the
+    /** W-02 (fixes/271 Â· Â§R1-f02): injection seam for the phase-6 edge
+     *  (driveP6Journey deps). Production callers omit it â€” the default is the
      *  real keyed journey. */
     p6Deps?: Partial<P6JourneyDeps>;
-    /** T4 (112 §4.4 / 216g): caller-supplied cross-project proven lesson rows
-     *  for the phase-6 synthesis prompt (driveP6Journey). Absent ⇒ legacy. */
+    /** T4 (112 Â§4.4 / 216g): caller-supplied cross-project proven lesson rows
+     *  for the phase-6 synthesis prompt (driveP6Journey). Absent â‡’ legacy. */
     proven?: readonly RankableLessonRow[];
   } = {},
 ): Promise<Project> {
@@ -771,16 +783,16 @@ export async function runPhase(
   try {
     if (!opts.live) {
       const floor = applyPhaseResult(project, phase);
-      // 342-2: the keyless research overlay for research phases — the eval
+      // 342-2: the keyless research overlay for research phases â€” the eval
       // harness's live-research leg (free search; no LLM narrative).
       if (opts.researchLive === true && RESEARCH_PHASES.has(phase)) {
         return bareNodeLiveOverlay(floor, phase, { researchOnly: true });
       }
       return floor;
     }
-    // W-02 (fixes/271 · §R1-f02): phase 6 owns the tested-mint edge — route it
-    // through the ONE runP6Edge seam (keyed ⇒ driveP6Journey synthesis +
-    // tree-run mint; keyless ⇒ the same deterministic floor liveLayer(…, 6)
+    // W-02 (fixes/271 Â· Â§R1-f02): phase 6 owns the tested-mint edge â€” route it
+    // through the ONE runP6Edge seam (keyed â‡’ driveP6Journey synthesis +
+    // tree-run mint; keyless â‡’ the same deterministic floor liveLayer(â€¦, 6)
     // produces). Before this, run/gate could synthesize but never mint.
     if (phase === 6) return await runP6Edge(project, opts.p6Deps, opts.proven);
     // E-12: delegate to the engine's liveLayer (single live implementation).
@@ -796,8 +808,8 @@ export async function runPhase(
     if (engineDidLive || !RESEARCH_PHASES.has(phase)) return viaEngine;
     return bareNodeLiveOverlay(viaEngine, phase);
   } catch (err) {
-    // fixes/255 (W20-L3 · OV-13, the "silent-skip region"): a thrown live pass
-    // used to skip silently to the deterministic floor — under a key that read
+    // fixes/255 (W20-L3 Â· OV-13, the "silent-skip region"): a thrown live pass
+    // used to skip silently to the deterministic floor â€” under a key that read
     // exactly like a keyless run. Mint G2's own row (engine's runPhaseAsync
     // records the same throw the same way), never a silent skip. Non-live runs
     // record nothing: no live layer ran.
@@ -818,7 +830,7 @@ export async function runPhase(
 // ---------------------------------------------------------------------------
 
 /** Mirror of store.canAutopilot: autopilot never self-approves a human-only
- *  gate (failed P6 sandbox / reframe), a stock HITL phase, a tight schedule —
+ *  gate (failed P6 sandbox / reframe), a stock HITL phase, a tight schedule â€”
  *  or a phase that fails its own DoD criteria (M-09). */
 function canAutopilot(project: Project, enabled: boolean): boolean {
   if (!enabled || !project.hitl) return false;
@@ -839,7 +851,7 @@ function canAutopilot(project: Project, enabled: boolean): boolean {
 /**
  * E-20 parity (headless): when autopilot is ON but the parked gate's DoD is
  * unmet, append the machine-readable denial log the store writes
- * (`autopilot.gate_denied`, warn, unmet ids) — the old headless code parked on
+ * (`autopilot.gate_denied`, warn, unmet ids) â€” the old headless code parked on
  * "Waiting on human approval." with no trail at all. forceHuman and stock
  * gates are excluded: their denials are POLICY (human-only by design), not DoD
  * failures, so no DoD log is minted for them. Returns null when nothing should
@@ -873,12 +885,12 @@ function deniedGateLog(project: Project): Project | null {
  * verb parked at P4 forever (`steps:0` on every re-invocation). With
  * `machineGates` enabled a stock gate may be cleared, but ONLY when it is not
  * human-only (`forceHuman`) and the phase's DoD gate passes once the machine
- * approval is applied — never a red gate, never a human-only gate. Returns the
+ * approval is applied â€” never a red gate, never a human-only gate. Returns the
  * approved project through the SAME `approve`/`HARNESS_APPROVE_ACTOR` path the
  * CLI's `approve --seat autopilot` door uses (so the ledger row names the
  * machine actor), or null when the gate must stay parked.
  *
- * The P4/P5/P8/P9 DoD includes an "approved — decision ledger records the
+ * The P4/P5/P8/P9 DoD includes an "approved â€” decision ledger records the
  * approver" criterion that is necessarily unmet while the gate is OPEN, so the
  * pass check runs against the would-be approval result: a genuinely red
  * artifact/validation gate stays red and the park survives.
@@ -886,8 +898,8 @@ function deniedGateLog(project: Project): Project | null {
  * Tightness: unlike `canAutopilot`, this door does NOT consult
  * `schedule.tightness`. `canAutopilot`'s `< 7.2` guard gates the IMPLICIT
  * autopilot auto-approval (a caller can set `autopilot:true` with no operator
- * decision). This door is the EXPLICIT machine-seat door — enabled only by the
- * scheduler-facing `unattended` / `--unattended` arms — and it routes through
+ * decision). This door is the EXPLICIT machine-seat door â€” enabled only by the
+ * scheduler-facing `unattended` / `--unattended` arms â€” and it routes through
  * the exact `approve`/`HARNESS_APPROVE_ACTOR` path the documented
  * `approve --seat autopilot` door uses, which has never consulted tightness.
  * Adding the guard here would make the two machine doors disagree (the CLI
@@ -902,7 +914,7 @@ function machineApproveGate(
   if (!autopilot || !machineGates) return null;
   const gate = project.hitl;
   if (!gate || gate.phase !== project.currentPhase) return null;
-  if (gate.forceHuman) return null; // human-only by policy — never cleared
+  if (gate.forceHuman) return null; // human-only by policy â€” never cleared
   if (!(STOCK_HITL as readonly number[]).includes(gate.phase)) return null;
   const rec = project.phases.find((p) => p.id === gate.phase);
   if (!rec || rec.startedAt == null) return null; // not a gate a real run opened
@@ -926,7 +938,7 @@ function advanceTo(project: Project, next: PhaseId): Project {
  * The measured delta is ACCUMULATED onto any spend already on the record (a
  * rejected phase re-run folds, it never erases the earlier attempt) via the
  * ledger's own `accumulateSpend`, so no number is estimated or invented. A phase
- * with no measured call (delta empty) leaves the record byte-identical — absent
+ * with no measured call (delta empty) leaves the record byte-identical â€” absent
  * stays absent, never a fabricated 0. Pure arithmetic; never reads/sets a cap.
  */
 export function recordPhaseSpend(project: Project, phase: PhaseId, baseline: TokenLedger): Project {
@@ -945,7 +957,7 @@ async function runReady(
   live: boolean,
   /** W-02 (fixes/271): threaded injection seam for the phase-6 edge. */
   p6Deps?: Partial<P6JourneyDeps>,
-  /** T4 (112 §4.4 / 216g): caller-supplied proven lesson rows for P6. */
+  /** T4 (112 Â§4.4 / 216g): caller-supplied proven lesson rows for P6. */
   proven?: readonly RankableLessonRow[],
   /** 341-6: opt-in stock-gate clearing (see `machineApproveGate`). */
   machineGates = false,
@@ -953,7 +965,7 @@ async function runReady(
   researchLive = false,
 ): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   if (!priorsSealed(project.phases, phase)) {
-    return { project, error: `Cannot enter P${phase} — prior phases are not sealed.`, stopped: true };
+    return { project, error: `Cannot enter P${phase} â€” prior phases are not sealed.`, stopped: true };
   }
   const running: Project = {
     ...project,
@@ -964,23 +976,35 @@ async function runReady(
     status: "running" as const,
   };
   // 350 (F1): snapshot the session ledger BEFORE the phase synthesizes, then
-  // fold the measured delta onto the phase record after it finishes — the
+  // fold the measured delta onto the phase record after it finishes â€” the
   // per-phase keyed spend the audit/report used to read as `unknown`.
   const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   const updated = await runPhase(running, phase, { live, researchLive, p6Deps, proven });
-  const finished = finishPhase(updated, phase, autopilot, machineGates);
+  const finished = await finishPhase(updated, phase, autopilot, machineGates);
   return { ...finished, project: recordPhaseSpend(finished.project, phase, spendBaseline) };
 }
 
-function finishPhase(
+async function finishPhase(
   updated: Project,
   phase: PhaseId,
   autopilot: boolean,
   machineGates = false,
-): { project: Project; stopped: boolean; error?: string; dodBlocked?: boolean } {
+): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   let p = updated;
+  // W359 (thread-kind Â· fixes/353): the P6 kind-aware criteria (`p6-web-surface`,
+  // `p6-game-surface`, `p6-runnable-entry`) judge `generatedTree âˆª emittedSurface`
+  // (dod.ts surfaceFiles). The page/router/game/entry surface is written by
+  // `scaffold.ts`, never by synthesis, so a gate read over the SYNTHESIZED tree
+  // alone refuses a correct product. `codegen.server.ts:8857` stamps it on the
+  // keyed synthesis path only; this driver seam (`stampEmittedSurfaceForGate`) is
+  // what covers every other leg â€” the keyless P6 floor, `run`/`gate`/`resume`/
+  // `unattended`. It runs BEFORE the verdict is recorded, including the
+  // awaiting_hitl park (whose gate `approve` records later, from the persisted
+  // record, which now carries the stamp). A scaffold refusal returns the project
+  // unchanged, so the criteria stay honestly red.
+  if (phase === 6) p = await stampEmittedSurfaceForGate(p);
   // E-02 (DoD gate parity with store.finishPhase): record the machine-checkable
-  // verdict for every phase that completed during synthesis — deterministic
+  // verdict for every phase that completed during synthesis â€” deterministic
   // phases never pass through approveHitl (the only engine path that recorded a
   // gate before), so without this their PhaseRecord.gate stayed null and no
   // gate artifact existed. recordGateInto no-ops while the phase is still
@@ -990,7 +1014,7 @@ function finishPhase(
   if (p.status !== "awaiting_hitl" && phase < PHASE_LAST) {
     // T0.4 (fixes/162): store.finishPhase refuses to LEAVE when enforceDod
     // and the just-recorded gate is red. Headless used to auto-advance past
-    // the P10 hard gate — rapidtool run/gate and run-eval silently skipped it.
+    // the P10 hard gate â€” rapidtool run/gate and run-eval silently skipped it.
     if (p.enforceDod === true) {
       const r = runGate(p, phase);
       if (!r.pass) {
@@ -1007,12 +1031,12 @@ function finishPhase(
   p = stampPacket(p);
   if (canAutopilot(p, autopilot)) {
     p = approveHitl(p, { decidedBy: "autopilot" });
-    // E-02 (store SWEEP-2 parity): the auto-approval just completed the phase —
+    // E-02 (store SWEEP-2 parity): the auto-approval just completed the phase â€”
     // record its DoD gate now (the call above no-op'd while awaiting_hitl), so
     // the artifact + gate.verdict log exist exactly as for human approvals.
     p = recordGateInto(p, phase);
   } else {
-    // 341-6: opt-in stock-gate clearing (default off ⇒ byte-identical).
+    // 341-6: opt-in stock-gate clearing (default off â‡’ byte-identical).
     const machined = machineApproveGate(p, autopilot, machineGates);
     if (machined) p = machined;
   }
@@ -1028,7 +1052,7 @@ async function advanceOnce(
   live: boolean,
   /** W-02 (fixes/271): threaded injection seam for the phase-6 edge. */
   p6Deps?: Partial<P6JourneyDeps>,
-  /** T4 (112 §4.4 / 216g): caller-supplied proven lesson rows for P6. */
+  /** T4 (112 Â§4.4 / 216g): caller-supplied proven lesson rows for P6. */
   proven?: readonly RankableLessonRow[],
   /** 341-6: opt-in stock-gate clearing (see `machineApproveGate`). */
   machineGates = false,
@@ -1039,7 +1063,7 @@ async function advanceOnce(
   const rec = project.phases.find((p) => p.id === phase);
   if (!rec) return { project, error: "Unknown phase.", stopped: true };
   if (project.status === "blocked" && rec.status === "rejected") {
-    return { project, error: "Phase rejected — retry with the note applied.", stopped: true };
+    return { project, error: "Phase rejected â€” retry with the note applied.", stopped: true };
   }
   if (rec.status === "locked") return { project, error: "Phase is locked.", stopped: true };
   if (rec.status === "awaiting_hitl") {
@@ -1050,20 +1074,20 @@ async function advanceOnce(
       // are recordGateInto's).
       return { project: recordGateInto(approved, phase), stopped: false };
     }
-    // 341-6: opt-in stock-gate clearing (default off ⇒ byte-identical). The
+    // 341-6: opt-in stock-gate clearing (default off â‡’ byte-identical). The
     // approved project already carries its recorded gate (approve() does it).
     const machined = machineApproveGate(project, autopilot, machineGates);
     if (machined) return { project: machined, stopped: false };
     // E-20 parity (headless): when autopilot is ON but the parked gate's DoD
     // is unmet, persist the autopilot.gate_denied trail (same exclusions as
-    // the store) and say WHY in the event — the park stays a 0-progress stop.
+    // the store) and say WHY in the event â€” the park stays a 0-progress stop.
     if (autopilot) {
       const denied = deniedGateLog(project);
       if (denied) {
         const unmet = runGate(project, phase).unmet.map((g) => g.id).join(", ");
         return {
           project: denied,
-          error: `Waiting on human approval — P${phase} DoD unmet (${unmet}).`,
+          error: `Waiting on human approval â€” P${phase} DoD unmet (${unmet}).`,
           stopped: true,
         };
       }
@@ -1095,14 +1119,14 @@ async function advanceOnce(
   return runReady(project, phase, autopilot, live, p6Deps, proven, machineGates, researchLive);
 }
 
-/** Why a run/gate invocation ended (F-02/F-04 closure — store's stoppedReason
+/** Why a run/gate invocation ended (F-02/F-04 closure â€” store's stoppedReason
  *  vocabulary plus "progress"/"cap" for non-terminal stops). */
 export type RunOutcome = "hitl" | "complete" | "blocked" | "error" | "progress" | "cap" | "dod";
 
 export type RunResult = {
   project: Project;
   /** Phases that COMPLETED (or ran into a gate) during this invocation.
-   *  0 = parked/terminal with no progress — never trust `ok`/exit 0 alone. */
+   *  0 = parked/terminal with no progress â€” never trust `ok`/exit 0 alone. */
   steps: number;
   stopped: boolean;
   events: string[];
@@ -1112,18 +1136,18 @@ export type RunResult = {
    *  hit without a park ("cap"). */
   outcome: RunOutcome;
   /** fixes/144 (M4-1): true ONLY when the run sealed complete AND at least one
-   *  recorded DoD gate stands FAILED (sealHonesty(project).clean === false) —
+   *  recorded DoD gate stands FAILED (sealHonesty(project).clean === false) â€”
    *  a red-gate completion that the CLI surfaces as RT_E_GATES_FAILED, never
    *  as a byte-identical clean 0. */
   sealedWithFailures: boolean;
-  /** A4-E2(c) / A4-E3 (Decision D2(c)): the honest terminal status —
+  /** A4-E2(c) / A4-E3 (Decision D2(c)): the honest terminal status â€”
    *  `complete_with_failures` when the run sealed `complete` with a dirty seal
    *  (a recorded failed DoD gate), never a bare `complete`. Present only for a
    *  `complete` outcome; absent on parks/caps/errors. */
   terminalStatus?: "complete" | "complete_with_failures";
-  /** W48 · 334-2 (L2): the coded class of the newest P6 synthesis refusal THIS
-   *  invocation recorded (`<RT_E code> · <reason>`, codegen's refusal-log
-   *  shape) — absent when the invocation appended no refusal. A P6-synthesis
+  /** W48 Â· 334-2 (L2): the coded class of the newest P6 synthesis refusal THIS
+   *  invocation recorded (`<RT_E code> Â· <reason>`, codegen's refusal-log
+   *  shape) â€” absent when the invocation appended no refusal. A P6-synthesis
    *  401 surfaces as RT_E_LLM_KEY_REJECTED, so a consumer (the console chip,
    *  334-5) can move on the refusal class instead of parsing prose. Additive +
    *  conditional: no existing consumer's shape changes. */
@@ -1131,18 +1155,18 @@ export type RunResult = {
 };
 
 /**
- * T-107.7 (W33 lane L2) — the per-phase commit checkpoint (WRITE side).
+ * T-107.7 (W33 lane L2) â€” the per-phase commit checkpoint (WRITE side).
  *
  * Called from `runUntilGate` NEXT TO the existing per-phase commit: every loop
  * iteration that actually moved the run (phase edge advanced, or artifacts
- * landed — the same predicate the `steps` counter uses) persists
- * `writeCheckpoint(dir, project, { phase, step, mode })` — the bounded, atomic
+ * landed â€” the same predicate the `steps` counter uses) persists
+ * `writeCheckpoint(dir, project, { phase, step, mode })` â€” the bounded, atomic
  * snapshot at `<dir>/.rapidtool/checkpoint.json` that `rapidtool resume`
  * re-enters from (`cp.run.phase`). `step` stays 0: this driver's unit of work
  * IS the phase (phase-granular resume), per the CheckpointRun contract.
  *
- * GUARD (load-bearing): no `dir` ⇒ NO-OP. headless runs are the only host with
- * a writable project dir; the browser/console path (store's per-phase commit —
+ * GUARD (load-bearing): no `dir` â‡’ NO-OP. headless runs are the only host with
+ * a writable project dir; the browser/console path (store's per-phase commit â€”
  * zustand + engine.runPhaseAsync) has no filesystem at all, and in-process
  * callers (tests, eval) pass no `checkpointDir`, so every pre-existing path
  * keeps its exact bytes. A checkpoint failure NEVER throws into the run and
@@ -1157,7 +1181,7 @@ function commitRunCheckpoint(dir: string | undefined, project: Project): void {
   }
 }
 
-/** T-107.7 (W33 lane L2): clear-on-complete — a terminal seal has no successor
+/** T-107.7 (W33 lane L2): clear-on-complete â€” a terminal seal has no successor
  *  state to re-enter, so the bounded checkpoint is removed (best-effort; a
  *  missing file is already the desired state). */
 function clearRunCheckpoint(dir: string | undefined): void {
@@ -1170,7 +1194,7 @@ function clearRunCheckpoint(dir: string | undefined): void {
 }
 
 /**
- * PR-16 (B5/C-11) — the in-run RUNLOCK guard. Return every file under the
+ * PR-16 (B5/C-11) â€” the in-run RUNLOCK guard. Return every file under the
  * repo's `src/` + `scripts/` whose mtime is NEWER than the run's own start,
  * repo-relative POSIX, sorted. A non-empty list means the run overlapped a
  * source edit (BL-010: office-stock-tracker ran while `src/**` was edited), so
@@ -1219,17 +1243,17 @@ export function runlockEditViolations(
 }
 
 /**
- * T-107.7 (W36 lane N2) — the READ side of the checkpoint seam: read → admit → hydrate, so the
+ * T-107.7 (W36 lane N2) â€” the READ side of the checkpoint seam: read â†’ admit â†’ hydrate, so the
  * CLI `resume`/`unattended` verbs share ONE implementation of the read-side law.
  *
- * - A1-09/fixes/281: the reader proves only a MINIMAL shape — `hydrateProject` repairs it here
+ * - A1-09/fixes/281: the reader proves only a MINIMAL shape â€” `hydrateProject` repairs it here
  *   (readers refuse; hydrators repair), so callers never touch an unhydrated snapshot.
  * - A1-07: `checkpointAdmits` owns the coded admission (identity + mode + integer phase/step);
- *   the mode is recomputed from THIS process's env (`runModeFor`) — a keyed snapshot never
+ *   the mode is recomputed from THIS process's env (`runModeFor`) â€” a keyed snapshot never
  *   resumes keyless and vice versa. A named project file may pin the expected identity via
  *   `ask.projectId` (an id reused by a different brief fails closed).
  * - A20: the recorded `run.phase` is the re-entry point only when the snapshot's own phase
- *   records carry it — anything else is internally incoherent and refused here.
+ *   records carry it â€” anything else is internally incoherent and refused here.
  */
 export type CheckpointResumeResult =
   | { ok: true; project: Project; path: string; savedAt: number; resumedFrom: { phase: number; step: number } }
@@ -1247,7 +1271,7 @@ export function loadResumableCheckpoint(
     mode: ask.mode ?? runModeFor(),
   });
   if (!admitted.ok) return { ok: false, code: admitted.code, error: admitted.error, path: read.path };
-  // A20: re-enter by RECORD ID — refuse a snapshot that cannot describe its own re-entry phase.
+  // A20: re-enter by RECORD ID â€” refuse a snapshot that cannot describe its own re-entry phase.
   const phases = Array.isArray(checkpoint.project.phases) ? checkpoint.project.phases : [];
   const hasRecord = phases.some(
     (record) => (record as { id?: unknown } | null | undefined)?.id === checkpoint.run.phase,
@@ -1256,7 +1280,7 @@ export function loadResumableCheckpoint(
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `checkpoint: snapshot has no phase record for P${checkpoint.run.phase} — refusing a re-entry the snapshot cannot describe`,
+      error: `checkpoint: snapshot has no phase record for P${checkpoint.run.phase} â€” refusing a re-entry the snapshot cannot describe`,
       path: read.path,
     };
   }
@@ -1278,39 +1302,39 @@ export function loadResumableCheckpoint(
 }
 
 /**
- * fixes/323 FIX-2c (X2b OBS · window #4 item 2) — the checkpoint-STALENESS
+ * fixes/323 FIX-2c (X2b OBS Â· window #4 item 2) â€” the checkpoint-STALENESS
  * comparison: a snapshot must never be silently resumed over a project file it
  * has been superseded by. PURE (no fs, no clock): the CLI arms hand in the
  * admitted snapshot's hydrated project + its re-entry phase and the named
  * project FILE's already-loaded state, and get back whether re-entering the
  * snapshot would override newer file state.
  *
- * Superseded when — first match names the reason:
+ * Superseded when â€” first match names the reason:
  *   1. identity: the file's id differs from the snapshot's (a dir reused by a
  *      different project must never resume the old snapshot);
  *   2. terminal seal: the file is already `complete` (nothing to re-enter past
- *      the seal — a leftover snapshot must not rewind it);
+ *      the seal â€” a leftover snapshot must not rewind it);
  *   3. brief divergence: both briefs are strings and differ (the states have
- *      diverged — the snapshot no longer describes the file's intent);
+ *      diverged â€” the snapshot no longer describes the file's intent);
  *   4. phase: the file sits BEYOND the snapshot's re-entry phase (resuming
- *      would rewind completed work — the live X2b shape: a stale gate-park
+ *      would rewind completed work â€” the live X2b shape: a stale gate-park
  *      snapshot at P4 silently rewound a file already advanced to P5);
  *   5. state: the file records MORE completed phases than the snapshot (the
  *      file knows work the snapshot does not);
  *   6. rejection / retry: the file records a rejection at the re-entry edge
  *      (project `blocked` or the edge record `rejected`), or a
- *      `rejectionHistory` the snapshot predates (a retried edge) — human
- *      history the snapshot cannot hold (fixes/325 A4, fixes/336 · 336-2);
+ *      `rejectionHistory` the snapshot predates (a retried edge) â€” human
+ *      history the snapshot cannot hold (fixes/325 A4, fixes/336 Â· 336-2);
  *   7. array growth: the file carries more artifacts / logs / decisions /
  *      memory rows than the snapshot (a non-drive mutation like `ingest` landed
- *      work after the per-phase commit) — skipped when the snapshot is at its
- *      bound, where the trimmed suffix makes counts incomparable (fixes/336 · 336-2).
+ *      work after the per-phase commit) â€” skipped when the snapshot is at its
+ *      bound, where the trimmed suffix makes counts incomparable (fixes/336 Â· 336-2).
  * A file BEHIND the snapshot is deliberately NOT superseded: that is the
  * crash-recovery shape `resume` exists for (the file is only saved at the END
  * of a drive, so a crash leaves it lagging the per-phase commits).
  *
  * Adjudicated NON-decisive axes (recorded, not silently dropped): full-project
- * or per-file content hashes and file mtimes — after a NORMAL park the file is
+ * or per-file content hashes and file mtimes â€” after a NORMAL park the file is
  * written after the checkpoint by the same drive, so it legitimately differs
  * (hitl block, park-time logs) and is strictly newer; treating that as stale
  * would flag every designed resume. The axes above are the ones that mean "the
@@ -1332,7 +1356,7 @@ export function checkpointSupersededBy(
   if (file?.status === "complete") {
     return {
       superseded: true,
-      reason: "the project file is already sealed complete — the snapshot predates the seal",
+      reason: "the project file is already sealed complete â€” the snapshot predates the seal",
     };
   }
   const fileBrief = typeof file?.brief === "string" ? file.brief : null;
@@ -1340,7 +1364,7 @@ export function checkpointSupersededBy(
   if (fileBrief !== null && snapBrief !== null && fileBrief !== snapBrief) {
     return {
       superseded: true,
-      reason: "the project file's brief differs from the snapshot's — the states have diverged",
+      reason: "the project file's brief differs from the snapshot's â€” the states have diverged",
     };
   }
   const filePhase =
@@ -1348,38 +1372,38 @@ export function checkpointSupersededBy(
   if (filePhase !== null && Number.isInteger(snapshotPhase) && filePhase > snapshotPhase) {
     return {
       superseded: true,
-      reason: `the project file is at P${filePhase} — beyond the snapshot's re-entry phase P${snapshotPhase}; resuming would rewind completed work`,
+      reason: `the project file is at P${filePhase} â€” beyond the snapshot's re-entry phase P${snapshotPhase}; resuming would rewind completed work`,
     };
   }
   // 6. rejection (fixes/325 A4): the file records a HITL REJECTION the snapshot
   //    predates. The CLI `reject` verb writes the file at the SAME edge the
   //    snapshot records (phase/seal/id/brief axes all read equal): the edge
-  //    record flips `awaiting_hitl` → `rejected`, project status →
+  //    record flips `awaiting_hitl` â†’ `rejected`, project status â†’
   //    `blocked` (engine.rejectHitl), and a reject decision + `hitl.rejected`
   //    warn log + episodic memory row land in the append-only ledger. NONE of
   //    that is in the snapshot (a rejection is a human act after the per-phase
   //    commit; no drive path records it), so resuming the snapshot rewrites
-  //    the file from it and silently drops the rejection — note,
+  //    the file from it and silently drops the rejection â€” note,
   //    rejectionHistory, decision, memory row. Repro: a4_scratch/probe2.mts
   //    (pre-fix verdict superseded:false, then a resume-drive rewrote the file
-  //    blocked/rejected → awaiting_hitl with 0 rejection rows).
+  //    blocked/rejected â†’ awaiting_hitl with 0 rejection rows).
   const edgeRecord = (Array.isArray(file?.phases) ? file.phases : []).find(
     (record) => (record as { id?: unknown } | null | undefined)?.id === snapshotPhase,
   ) as { status?: unknown } | null | undefined;
   if (edgeRecord?.status === "rejected" || file?.status === "blocked") {
     return {
       superseded: true,
-      reason: `the project file records a rejected P${snapshotPhase} (status ${String(file?.status)}) — the snapshot predates the human rejection; resuming would drop it`,
+      reason: `the project file records a rejected P${snapshotPhase} (status ${String(file?.status)}) â€” the snapshot predates the human rejection; resuming would drop it`,
     };
   }
-  // 7. retry-after-rejection (fixes/336 · 336-2): `reject` flips the edge to
+  // 7. retry-after-rejection (fixes/336 Â· 336-2): `reject` flips the edge to
   //    rejected/blocked (axis 6); `retry` unlocks it back to ready/running but
   //    KEEPS `rejectionHistory`, and NEITHER verb updates the per-phase
   //    snapshot. Resuming the pre-rejection snapshot therefore rewinds the
   //    retried edge and drops the rejection record + its decision (live
-  //    keyless probe: running/ready/history 1/decisions 1 → awaiting_hitl/
+  //    keyless probe: running/ready/history 1/decisions 1 â†’ awaiting_hitl/
   //    history 0/decisions 0). The file holds human history the snapshot
-  //    cannot describe — the file is the current truth.
+  //    cannot describe â€” the file is the current truth.
   const rejectionCount = (record: unknown): number => {
     const history = (record as { rejectionHistory?: unknown } | null | undefined)?.rejectionHistory;
     return Array.isArray(history) ? history.length : 0;
@@ -1390,18 +1414,18 @@ export function checkpointSupersededBy(
   if (rejectionCount(edgeRecord) > rejectionCount(snapEdgeRecord)) {
     return {
       superseded: true,
-      reason: `the project file records ${rejectionCount(edgeRecord)} rejection(s) at P${snapshotPhase} the snapshot predates — resuming would drop the rejection record`,
+      reason: `the project file records ${rejectionCount(edgeRecord)} rejection(s) at P${snapshotPhase} the snapshot predates â€” resuming would drop the rejection record`,
     };
   }
-  // 8. array growth (fixes/336 · 336-2): a NON-DRIVE mutation (`ingest` lands a
+  // 8. array growth (fixes/336 Â· 336-2): a NON-DRIVE mutation (`ingest` lands a
   //    report's artifacts/logs/memory at the current edge; reject/retry land
   //    decisions) does not refresh the per-phase snapshot. Resuming the snapshot
   //    rewrites the file and DROPS that work (live keyless probe: park P4 /
-  //    11 artifacts → ingest → 12 → resume → 11, the report gone). A normal
+  //    11 artifacts â†’ ingest â†’ 12 â†’ resume â†’ 11, the report gone). A normal
   //    park leaves checkpoint and file counts EQUAL (measured 20/20 artifacts,
   //    32/32 logs, 13/13 memory, 2/2 decisions), so growth means the file holds
   //    work the snapshot lacks. Each axis is skipped once the snapshot is AT its
-  //    bound (a trimmed snapshot is a suffix — counts are not comparable then).
+  //    bound (a trimmed snapshot is a suffix â€” counts are not comparable then).
   const grew = (key: "artifacts" | "logs" | "decisions" | "memory", cap: number): boolean => {
     const snapshotRows = Array.isArray(snapshot?.[key]) ? (snapshot[key] as unknown[]) : [];
     const fileRows = Array.isArray(file?.[key]) ? (file[key] as unknown[]) : [];
@@ -1420,7 +1444,7 @@ export function checkpointSupersededBy(
     const fileRows = Array.isArray(file?.[grown[0]]) ? (file[grown[0]] as unknown[]).length : 0;
     return {
       superseded: true,
-      reason: `the project file carries ${fileRows} ${grown[0]} row(s) — more than the snapshot's ${snapshotRows}; the file holds work the snapshot does not`,
+      reason: `the project file carries ${fileRows} ${grown[0]} row(s) â€” more than the snapshot's ${snapshotRows}; the file holds work the snapshot does not`,
     };
   }
   const countSealed = (p: Project): number =>
@@ -1432,14 +1456,14 @@ export function checkpointSupersededBy(
   if (fileSealed > snapSealed) {
     return {
       superseded: true,
-      reason: `the project file records ${fileSealed} completed phase(s) — more than the snapshot's ${snapSealed}; the file knows work the snapshot does not`,
+      reason: `the project file records ${fileSealed} completed phase(s) â€” more than the snapshot's ${snapSealed}; the file knows work the snapshot does not`,
     };
   }
   return { superseded: false, reason: null };
 }
 
 /** Advance the pipeline until it parks (awaiting_hitl / complete / blocked) or
- *  hits `maxSteps` (default 40 — 13 phases × ~2 iterations + margin). */
+ *  hits `maxSteps` (default 40 â€” 13 phases Ã— ~2 iterations + margin). */
 export async function runUntilGate(
   project: Project,
   opts: {
@@ -1448,34 +1472,34 @@ export async function runUntilGate(
     maxSteps?: number;
     /** W-02 (fixes/271): threaded injection seam for the phase-6 edge. */
     p6Deps?: Partial<P6JourneyDeps>;
-    /** T4 (112 §4.4 / 216g): caller-supplied cross-project proven lesson rows
+    /** T4 (112 Â§4.4 / 216g): caller-supplied cross-project proven lesson rows
      *  (from `knowledge.provenRowsFromStore`) for the P6 synthesis prompt.
-     *  Threaded to the phase-6 journey; absent/empty ⇒ byte-identical runs. */
+     *  Threaded to the phase-6 journey; absent/empty â‡’ byte-identical runs. */
     proven?: readonly RankableLessonRow[];
     /** T-107.7 (W33 lane L2): the project's working dir. When present, every
      *  committed phase writes the bounded run checkpoint beside `.rapidtool/`
      *  (`commitRunCheckpoint`) and a terminal complete clears it
      *  (`clearRunCheckpoint`). Absent (browser/console path, in-process
-     *  callers) ⇒ no-op: no dir, no write, byte-identical runs. */
+     *  callers) â‡’ no-op: no dir, no write, byte-identical runs. */
     checkpointDir?: string;
     /** 341-6 (autonomy loop): opt-in machine-gate clearing. When true (and
      *  `autopilot`), a STOCK HITL gate (P4/P5/P8/P9) that is not `forceHuman`
      *  and whose DoD gate passes after the machine approval is cleared through
-     *  `approve(…, HARNESS_APPROVE_ACTOR)` — the same ledgered actor the CLI
-     *  `approve --seat autopilot` door uses. Default false ⇒ byte-identical. */
+     *  `approve(â€¦, HARNESS_APPROVE_ACTOR)` â€” the same ledgered actor the CLI
+     *  `approve --seat autopilot` door uses. Default false â‡’ byte-identical. */
     machineGates?: boolean;
     /** 342-2: run the KEYLESS bare-Node research overlay for research phases
      *  even when `live` is false. The eval harness's post-journey drain needs
      *  the free-search corpus (P7's `p7-research`), but must not key the
-     *  P8–P12 narratives. Default false ⇒ byte-identical. */
+     *  P8â€“P12 narratives. Default false â‡’ byte-identical. */
     researchLive?: boolean;
     /** A4-E2(a) / Decision D2(a): the opt-in ADVISORY TAIL. On an `enforceDod`
-     *  run a red P6 hard-blocks the advance, so P7–P12 stay `locked` and the
+     *  run a red P6 hard-blocks the advance, so P7â€“P12 stay `locked` and the
      *  run never reaches its terminal artifacts. With this flag set, the tail
      *  phases are driven onward with enforcement temporarily relaxed (exactly
      *  the advisory `advanceOnce` semantics) after the recorded hard block, and
      *  the run's own `enforceDod` flag is restored on the returned record. One
-     *  `p6.tail.after-red` warn row names the transition. Default off ⇒
+     *  `p6.tail.after-red` warn row names the transition. Default off â‡’
      *  byte-identical. */
     advisoryTail?: boolean;
   } = {},
@@ -1486,14 +1510,14 @@ export async function runUntilGate(
   const researchLive = Boolean(opts.researchLive);
   const maxSteps =
     typeof opts.maxSteps === "number" && opts.maxSteps > 0 ? Math.floor(opts.maxSteps) : 40;
-  // W46 · 332-2 (L1 / AW45-c06): the run's cost must survive the process. Each
+  // W46 Â· 332-2 (L1 / AW45-c06): the run's cost must survive the process. Each
   // CLI verb is a fresh process, so the session ledger is a per-invocation
   // number; snapshot it here and fold THIS invocation's delta into the
   // project's cumulative `tokenUsage` at the run boundary (below). The session
-  // cap keeps enforcing the process ledger unchanged — persisted spend never
+  // cap keeps enforcing the process ledger unchanged â€” persisted spend never
   // feeds the cap.
   const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
-  // W48 · 334-2 (L2): the newest refusal already on the record at entry — a
+  // W48 Â· 334-2 (L2): the newest refusal already on the record at entry â€” a
   // refusal this invocation appends must be distinguishable from it, so a
   // stale coded class never attaches to a clean run.
   const refusalBefore = newestP6Refusal(project);
@@ -1519,14 +1543,14 @@ export async function runUntilGate(
       (p.artifacts?.length ?? 0) > (before.artifacts?.length ?? 0)
     ) {
       steps += 1;
-      // T-107.7 (W33 lane L2): the per-phase commit just landed — snapshot it
+      // T-107.7 (W33 lane L2): the per-phase commit just landed â€” snapshot it
       // (guarded no-op without a dir; see commitRunCheckpoint).
       commitRunCheckpoint(opts.checkpointDir, p);
     }
     if (r.stopped) break;
   }
-  // A4-E2(a) / Decision D2(a): the opt-in ADVISORY TAIL — after a red P6 the
-  // hard block stops the advance, so P7–P12 stay `locked` and the run never
+  // A4-E2(a) / Decision D2(a): the opt-in ADVISORY TAIL â€” after a red P6 the
+  // hard block stops the advance, so P7â€“P12 stay `locked` and the run never
   // reaches its terminal artifacts. When `advisoryTail` is set the tail phases
   // are driven with enforcement temporarily relaxed (EXACTLY the advisory
   // `advanceOnce` semantics), the run's own `enforceDod` flag is restored, and
@@ -1550,7 +1574,7 @@ export async function runUntilGate(
           level: "warn" as const,
           event: "p6.tail.after-red",
           detail:
-            "P6 hard-DoD block is recorded; the ADVISORY TAIL advances P7–P12 with enforcement relaxed (opts.advisoryTail) — the tail artifacts are advisory and the red P6 gate still stands.",
+            "P6 hard-DoD block is recorded; the ADVISORY TAIL advances P7â€“P12 with enforcement relaxed (opts.advisoryTail) â€” the tail artifacts are advisory and the red P6 gate still stands.",
         },
       ].slice(-200),
     };
@@ -1583,15 +1607,15 @@ export async function runUntilGate(
       }
       if (r.stopped) break;
     }
-    // Restore the run's own enforcement intent — the tail relaxes it, it does
+    // Restore the run's own enforcement intent â€” the tail relaxes it, it does
     // not silently flip the project's declared mode.
     p = p.enforceDod === true ? p : { ...p, enforceDod: true };
     tailRan = true;
     events.push(
-      `advisory-tail: P7–P12 driven after a red P6 (p6.tail.after-red); tail phase ${p.currentPhase}`,
+      `advisory-tail: P7â€“P12 driven after a red P6 (p6.tail.after-red); tail phase ${p.currentPhase}`,
     );
   }
-  // T-107.7 (W33 lane L2): a COMPLETE seal is terminal — nothing to resume ⇒
+  // T-107.7 (W33 lane L2): a COMPLETE seal is terminal â€” nothing to resume â‡’
   // the checkpoint is cleared. Parks / caps / errors keep theirs: those ARE the
   // crash-recovery states `resume` exists for.
   if (p.status === "complete") clearRunCheckpoint(opts.checkpointDir);
@@ -1622,8 +1646,8 @@ export async function runUntilGate(
   // L2-on-live-refusal capture (fixes/121 + fixes/126): a keyed P6 whose
   // synthesis refused returns a project carrying a `p6.synthesis.refused` log.
   // That refusal can leave the run parked at "hitl" (awaiting_hitl) rather than
-  // "complete" — and the deterministic-seal L2 site (engine applyPhaseResult)
-  // never fires for a needsHitl phase — so the template-emission lesson is
+  // "complete" â€” and the deterministic-seal L2 site (engine applyPhaseResult)
+  // never fires for a needsHitl phase â€” so the template-emission lesson is
   // minted here from the refusal signal REGARDLESS of the terminal outcome.
   // Idempotent (content-addressed) and advisory-only (never gates the run).
   let finalProject = p;
@@ -1631,9 +1655,9 @@ export async function runUntilGate(
     (l) => l.event === "p6.synthesis.refused" && l.phase === 6,
   );
   if (p6Refused) {
-    // fixes/127 (X3): the old guard read p.lastTest?.ok — TRUE for a refused
+    // fixes/127 (X3): the old guard read p.lastTest?.ok â€” TRUE for a refused
     // keyed P6 (the placeholder self-test passed; only the log shows the
-    // refusal) so it minted unmet=[] → "gate unmet (unknown)" — a content lie.
+    // refusal) so it minted unmet=[] â†’ "gate unmet (unknown)" â€” a content lie.
     // A codegen refusal means the module never shipped: the template-emission
     // criteria are genuinely unmet. Derive from the recorded P6 gate when it
     // exists, else the refusal's own criteria; and dedupe against the
@@ -1643,7 +1667,7 @@ export async function runUntilGate(
       gate && gate.passed === false && Array.isArray(gate.unmet) && gate.unmet.length > 0
         ? gate.unmet
         : ["p6-verified", "p6-brief-fit"];
-    // Record the refusal class (RT_E code · first clause) so the content
+    // Record the refusal class (RT_E code Â· first clause) so the content
     // address + hash differ per failure class and the row is traceable.
     const refusalDetail = (p.logs ?? []).find(
       (l) => l.event === "p6.synthesis.refused" && l.phase === 6,
@@ -1671,13 +1695,13 @@ export async function runUntilGate(
             phase: 6 as PhaseId,
             level: "info" as const,
             event: "lesson.capture",
-            detail: `L2 template-emission ${l2.id} (keyed P6 synthesis refused — red gate on a live run)`,
+            detail: `L2 template-emission ${l2.id} (keyed P6 synthesis refused â€” red gate on a live run)`,
           },
         ].slice(-200),
       };
     }
   }
-  // L5 run-summary capture (fixes/98 §2.3 / 98_make_3 §6): at terminal run
+  // L5 run-summary capture (fixes/98 Â§2.3 / 98_make_3 Â§6): at terminal run
   // completion, mint ONE content-addressed run-summary lesson when the journey
   // carried gate failures / rejections / verify failures (honest digest of what
   // went wrong). Idempotent: the id hashes the digest, and a twin is dropped.
@@ -1724,11 +1748,11 @@ export async function runUntilGate(
   }
   // fixes/144 (M4-1 completion gate): a COMPLETE seal carrying any recorded
   // failed DoD gate is flagged on the RunResult itself (never a byte-identical
-  // clean completion). sealHonesty(engine) is the single census source — the
-  // same one the P12 delivery writer uses — so the CLI gate can branch without
+  // clean completion). sealHonesty(engine) is the single census source â€” the
+  // same one the P12 delivery writer uses â€” so the CLI gate can branch without
   // re-deriving red gates.
   const sealedWithFailures = outcome === "complete" && !sealHonesty(finalProject).clean;
-  // A4-E2(b) / Decision D2(b): stamp the packet on ANY stop — a parked / capped
+  // A4-E2(b) / Decision D2(b): stamp the packet on ANY stop â€” a parked / capped
   // / hard-blocked / errored run reaches its terminal artifact with a packet
   // that describes the record as returned (previously the hard-DoD block
   // returned from `finishPhase` BEFORE `stampPacket`, so the packet kept
@@ -1736,13 +1760,13 @@ export async function runUntilGate(
   // section to the compile for a stop behind a red gate; this call is what
   // makes that section land on every stop.
   finalProject = stampPacket(finalProject);
-  // W46 · 332-2 (L1 / AW45-c06) + W48 · 334-2 (L1/L3): fold this invocation's
+  // W46 Â· 332-2 (L1 / AW45-c06) + W48 Â· 334-2 (L1/L3): fold this invocation's
   // measured session spend and its newest keyed outcome onto the project record
   // so the saved record and the returned `summary` carry the RUN's cost, and a
   // fresh `doctor` can read the last run's key rejection.
   finalProject = foldInvocationEvidence(finalProject, spendBaseline);
-  // W48 · 334-2 (L2): the coded class of a P6 synthesis refusal THIS invocation
-  // appended (never one already on the record at entry) — a P6 401 surfaces as
+  // W48 Â· 334-2 (L2): the coded class of a P6 synthesis refusal THIS invocation
+  // appended (never one already on the record at entry) â€” a P6 401 surfaces as
   // RT_E_LLM_KEY_REJECTED for the console chip (334-5). Absent otherwise.
   const refusalAfter = newestP6Refusal(finalProject);
   const code =
@@ -1786,22 +1810,22 @@ export type ApproveActor =
   | { decidedBy: "human"; seat: "console" }
   | { decidedBy: "autopilot"; seat: "harness" | "autopilot" };
 
-/** The default seat of `approve()` — the harness's own autopilot actor. Named
+/** The default seat of `approve()` â€” the harness's own autopilot actor. Named
  *  so a caller can state the default explicitly; it can never mint
  *  `decidedBy: "human"` (that needs the token path below). */
 export const HARNESS_APPROVE_ACTOR: ApproveActor = { decidedBy: "autopilot", seat: "harness" };
 
 /**
- * 216o (T-107.3 · P0-02 · W6-L2): stamp the policy verdict onto the ledger row
+ * 216o (T-107.3 Â· P0-02 Â· W6-L2): stamp the policy verdict onto the ledger row
  * the approval just minted, as `HitlDecision.decidedVia` (types.ts). The mint
- * itself stays where it always lived (`approveHitl`, engine.ts) — this is the
+ * itself stays where it always lived (`approveHitl`, engine.ts) â€” this is the
  * additive provenance tail for THIS file's path: `approve()` writes every row
  * with the seam verdict that allowed it (action/resource/reason), the seat
- * label in the same `policy.seatLabel` vocabulary the `[seat …]` note tag
+ * label in the same `policy.seatLabel` vocabulary the `[seat â€¦]` note tag
  * uses, and whether the out-of-band token path verified a human seat.
  *
- * Only a FRESHLY appended row is touched — identified by its id not existing
- * on the input project — so a defensive no-op approval (no pending gate, or a
+ * Only a FRESHLY appended row is touched â€” identified by its id not existing
+ * on the input project â€” so a defensive no-op approval (no pending gate, or a
  * drifted edge) and every pre-existing row pass through byte-identical. The
  * field is optional by construction: rows minted elsewhere (engine autopilot
  * steps, store approvals, fixtures) simply never carry it.
@@ -1823,7 +1847,7 @@ function stampDecidedVia(
 
 /** Approve the pending HITL gate on the current edge (pass `force` to override
  *  a forceHuman gate such as a failed P6 sandbox). Throws when there is no
- *  pending gate on the CURRENT edge (store.approve parity — a stale gate must
+ *  pending gate on the CURRENT edge (store.approve parity â€” a stale gate must
  *  fail loudly, never silently no-op).
  *
  *  216 (TA-2 / P0-01): the decision is recorded under an explicit ACTOR SEAT.
@@ -1832,21 +1856,21 @@ function stampDecidedVia(
  *  (`{ decidedBy: "human", seat: "human-cli-i-am-human" }`) additionally
  *  requires the OUT-OF-BAND `RT_HUMAN_SEAT_TOKEN` environment secret to be set
  *  (by the person at the keyboard, in their own shell) and presented here as
- *  `opts.humanSeatToken` — a call claiming the human seat without a matching
+ *  `opts.humanSeatToken` â€” a call claiming the human seat without a matching
  *  token throws instead of minting a human row. Every row's note carries a
  *  `[seat <label>]` tag so the ledger shows which seat decided.
  *
- *  216o (T-107.3 / P0-01·P0-06): the seat/token test above is no longer this
- *  file's own — the decision routes through the ONE policy seam
+ *  216o (T-107.3 / P0-01Â·P0-06): the seat/token test above is no longer this
+ *  file's own â€” the decision routes through the ONE policy seam
  *  (`evaluatePolicy`, src/lib/policy.ts) with `hitl.force` when `force` is set
  *  (a machine may never force past a human gate) and `hitl.approve` otherwise.
  *  A denied verdict throws a coded `RT_E_VALIDATION` refusal naming the
  *  sanctioned fallback; there is no seat combination that can bypass it.
  *
- *  216o (W6-L2 · ledger provenance): an ALLOWED decision also stamps the
+ *  216o (W6-L2 Â· ledger provenance): an ALLOWED decision also stamps the
  *  minted row's optional `decidedVia` field (types.ts) with the allowing
- *  verdict — action, resource, reason, seat label (the `seatLabel` vocabulary),
- *  and the token-path bool — so the ledger records WHERE the decision came
+ *  verdict â€” action, resource, reason, seat label (the `seatLabel` vocabulary),
+ *  and the token-path bool â€” so the ledger records WHERE the decision came
  *  from, not just that it happened; `dod.ts` cross-checks the field against
  *  the row's own tag when present. */
 export function approve(
@@ -1866,19 +1890,19 @@ export function approve(
     // CLI parity: a stale gate is a PHASE_ILLEGAL state refusal, never the
     // exit-4 internal catch-all.
     const err = new Error(
-      `approve: pending gate is for P${project.hitl.phase} but the current edge is P${project.currentPhase} — state drifted; refusing a silent no-op.`,
+      `approve: pending gate is for P${project.hitl.phase} but the current edge is P${project.currentPhase} â€” state drifted; refusing a silent no-op.`,
     ) as Error & { code?: ErrorCode };
     err.code = "RT_E_PHASE_ILLEGAL";
     throw err;
   }
   const actor = opts.actor ?? HARNESS_APPROVE_ACTOR;
-  // 216o (T-107.3 · P0-01/P0-06 · W5-L3): the decision routes through the ONE
+  // 216o (T-107.3 Â· P0-01/P0-06 Â· W5-L3): the decision routes through the ONE
   // policy seam (`evaluatePolicy`, src/lib/policy.ts) instead of this file's
   // ad-hoc seat/token test. Action routing: `force` overrides a forceHuman
-  // gate ⇒ `hitl.force` (Rule B — only a verified human seat may force; the
+  // gate â‡’ `hitl.force` (Rule B â€” only a verified human seat may force; the
   // autopilot seat can never self-approve one); otherwise `hitl.approve` on
   // this edge's gate. The env read stays HERE on purpose: policy.ts is a pure
-  // leaf that never touches `process.env` (its purity test pins that) — the
+  // leaf that never touches `process.env` (its purity test pins that) â€” the
   // out-of-band RT_HUMAN_SEAT_TOKEN is the *expected* side, opts.humanSeatToken
   // the presented side.
   const policyAction = opts.force === true ? "hitl.force" : "hitl.approve";
@@ -1895,27 +1919,27 @@ export function approve(
     // envelope. The verdict's reason names the cause and its fallback the
     // sanctioned alternative (P0-01's mandatory-fallback shape).
     const err = new Error(
-      `approve: the policy seam refused ${policyAction} on ${policyResource} (${verdict.reason}) — sanctioned fallback: ${verdict.fallback}.`,
+      `approve: the policy seam refused ${policyAction} on ${policyResource} (${verdict.reason}) â€” sanctioned fallback: ${verdict.fallback}.`,
     ) as Error & { code?: string };
     err.code = "RT_E_VALIDATION";
     throw err;
   }
-  // The `[seat <label>]` tags are the 216 TA-2 ledger contract — byte-identical
+  // The `[seat <label>]` tags are the 216 TA-2 ledger contract â€” byte-identical
   // to the pre-216o strings (pinned by headless.test.ts TA-2 tests), so the
   // tag keeps naming the seat itself, not the policy label vocabulary.
-  // 346 K3: the token-path branch reads `seatTokenPath` (policy.ts — the ONE
+  // 346 K3: the token-path branch reads `seatTokenPath` (policy.ts â€” the ONE
   // owner of that vocabulary), NOT `decidedBy`. The console's human seat is
   // human-class but UNATTESTED, so it must render an honest "no token path"
   // clause and never the "out-of-band RT_HUMAN_SEAT_TOKEN verified" claim.
   const note = seatTokenPath(actor)
     ? `[seat ${actor.seat}] out-of-band RT_HUMAN_SEAT_TOKEN verified`
     : actor.decidedBy === "human"
-      ? `[seat ${actor.seat}] unattested human seat — no out-of-band token path (never token-verified)`
-      : `[seat ${actor.seat}] autopilot seat — no human decision claimed`;
-  // 216o (T-107.3 · P0-02 · W6-L2 — ledger PROVENANCE): the row this approval
+      ? `[seat ${actor.seat}] unattested human seat â€” no out-of-band token path (never token-verified)`
+      : `[seat ${actor.seat}] autopilot seat â€” no human decision claimed`;
+  // 216o (T-107.3 Â· P0-02 Â· W6-L2 â€” ledger PROVENANCE): the row this approval
   // mints also records the ALLOWING verdict as `decidedVia` (types.ts): the
   // action/resource/reason the seam covered, the seat label in the SAME
-  // `policy.seatLabel` vocabulary the note tag uses, and the token path —
+  // `policy.seatLabel` vocabulary the note tag uses, and the token path â€”
   // branched on the reason id ("human-seat-token-verified"), the documented
   // policy.ts reason contract. The mint itself stays in approveHitl; the
   // stamp is additive and touches only the freshly appended row.
@@ -1931,7 +1955,7 @@ export function approve(
     project,
     decidedVia,
   );
-  // E-02 (store.approve parity): record the just-approved phase's DoD gate —
+  // E-02 (store.approve parity): record the just-approved phase's DoD gate â€”
   // approveHitl sets PhaseRecord.gate inline but the gate artifact + log are
   // recordGateInto's, and the packet is re-stamped after the verdict so its
   // System JSON `gate_passed` is fresh. No-op approvals (no pending gate) come
@@ -1940,9 +1964,9 @@ export function approve(
   return recorded === base ? base : stampPacket(recorded);
 }
 
-/** Reject the pending HITL gate (throws unless ≥12 chars of qualitative note).
+/** Reject the pending HITL gate (throws unless â‰¥12 chars of qualitative note).
  *
- *  322 X1 (F-1): the minted row records an explicit ACTOR SEAT — a machine
+ *  322 X1 (F-1): the minted row records an explicit ACTOR SEAT â€” a machine
  *  caller defaults to the harness's own autopilot seat, so a machine reject
  *  can never mint `decidedBy: "human"` (pre-fix: rejectHitl hardcoded it).
  *  A human seat must be claimed explicitly by the caller (CLI: `--i-am-human`
@@ -1959,7 +1983,7 @@ export function reject(
  *
  *  W61 B3 (recovery door): a failed keyed P6 leaves the project `running` with
  *  the P6 record still `running`/`awaiting_hitl`/`complete` and a red gate,
- *  durable tree trail, or red `lastTest` — there is no `rejected` record for
+ *  durable tree trail, or red `lastTest` â€” there is no `rejected` record for
  *  `unlockRetry` to reopen, so the old retry was a silent no-op on exactly the
  *  state that most needs it. Accept that red-P6 shape too (see
  *  `isRedRunningP6`) and re-open the phase. */
@@ -1969,7 +1993,7 @@ export function retry(project: Project): Project {
   return recoverRedRunningP6(project);
 }
 
-/** W61 B3: the red-P6 stall `retry` must recover — project `running` on P6,
+/** W61 B3: the red-P6 stall `retry` must recover â€” project `running` on P6,
  *  the record not rejected, and a red gate / tree trail / lastTest. Pure. */
 export function isRedRunningP6(project: Project): boolean {
   if (project.status !== "running" || project.currentPhase !== 6) return false;
@@ -1999,7 +2023,7 @@ function recoverRedRunningP6(project: Project): Project {
 /**
  * E-10: a rejected report (validation failure, wrong-phase report, ...) throws
  * this error instead of a bare Error. `project` carries the rejection trail
- * (a `report.rejected` warn log) so a file-backed caller can persist it — the
+ * (a `report.rejected` warn log) so a file-backed caller can persist it â€” the
  * trail survives even though the report itself was never applied.
  */
 export class ReportRejectedError extends Error {
@@ -2022,14 +2046,14 @@ export type IngestResult = {
 
 /**
  * E-09 rich ingest: like `ingest`, but the caller ALSO learns whether the
- * report actually landed — a duplicate retry (lost-ack recovery) returns the
+ * report actually landed â€” a duplicate retry (lost-ack recovery) returns the
  * input project unchanged with applied:false, and an envelope that claims
  * applied:true regardless would be dishonest. Rejection throws
  * ReportRejectedError carrying the trail exactly like `ingest`.
  */
 export function ingestResult(project: Project, rawReport: unknown): IngestResult {
   // E-10 (store.ingestReport parity): phase-check the report against the live
-  // edge — without the currentPhase argument validateReport accepted any
+  // edge â€” without the currentPhase argument validateReport accepted any
   // phase, so a P3 report could land while the project sat on P9.
   const v = validateReport(rawReport, project.currentPhase);
   if (!v.ok) {
@@ -2075,18 +2099,18 @@ export function exportJson(project: Project): string {
 export type PhaseCounts = Partial<Record<PhaseStatus, number>>;
 
 // ---------------------------------------------------------------------------
-// TASK-01 (W16-L2) — the wire-side next action.
+// TASK-01 (W16-L2) â€” the wire-side next action.
 //
 // The 7-arm vocabulary is PINNED by the UI: `NEXT_ACTION_BUTTON` in
 // `src/components/console.tsx` (W16-brief coordinate :382; the symbol is the
-// anchor — L3 edits that file in this same wave, so line numbers drift) whose
+// anchor â€” L3 edits that file in this same wave, so line numbers drift) whose
 // keys are the `UiNextAction["kind"]` union (:251). This block is the wire
 // twin; the arm-parity doc-contract test
 // (`scripts/next-action-arm-parity.test.mjs`) asserts set-equality between
 // `NEXT_ACTION_KINDS`, the console's union, and the console's Record keys, so
 // the envelope and the UI can never drift. Parent decision
-// (taskuniverselog.md:534–538): implement 111's action vocabulary as the wire
-// contract; keep the two computations INDEPENDENT this wave — do not rewire
+// (taskuniverselog.md:534â€“538): implement 111's action vocabulary as the wire
+// contract; keep the two computations INDEPENDENT this wave â€” do not rewire
 // the console onto this field.
 // ---------------------------------------------------------------------------
 
@@ -2103,8 +2127,8 @@ export const NEXT_ACTION_KINDS = [
 
 export type NextActionKind = (typeof NEXT_ACTION_KINDS)[number];
 
-/** Wire mirror of the console's `UiNextAction` (the 111 §3.4 `kind · cmd ·
- *  phase · why` shape). `cmd` names the CLI verb that performs the action —
+/** Wire mirror of the console's `UiNextAction` (the 111 Â§3.4 `kind Â· cmd Â·
+ *  phase Â· why` shape). `cmd` names the CLI verb that performs the action â€”
  *  the UI shows the same word next to its button (one vocabulary, two
  *  computations). */
 export type NextAction = {
@@ -2114,17 +2138,17 @@ export type NextAction = {
   why: string;
 };
 
-/** Documented generic sentence — only ever used by the `unknown` arm; never a
+/** Documented generic sentence â€” only ever used by the `unknown` arm; never a
  *  fabricated specific claim (mirrors console.tsx `GENERIC_NEXT_WHY`). */
-const GENERIC_NEXT_WHY = "Nothing is waiting on you — run the next phase to move the build forward.";
+const GENERIC_NEXT_WHY = "Nothing is waiting on you â€” run the next phase to move the build forward.";
 
 /**
- * TASK-01 (W16-L2) — the ONE next action for the summary envelope: a faithful
+ * TASK-01 (W16-L2) â€” the ONE next action for the summary envelope: a faithful
  * transcription of the console's `uiNextAction` branch order (console.tsx:311)
  * over the PERSISTED project state. Most urgent fact wins, exactly as in the
- * console: empty phases → running → hitl → blocked → complete → failed gate →
- * rejected → default run. The console additionally folds in its in-flight
- * latch; the wire reads the recorded phase status — the honest floor.
+ * console: empty phases â†’ running â†’ hitl â†’ blocked â†’ complete â†’ failed gate â†’
+ * rejected â†’ default run. The console additionally folds in its in-flight
+ * latch; the wire reads the recorded phase status â€” the honest floor.
  * The `unknown` arm is mandatory (empty phases returns it BEFORE any phase
  * lookup) so the field can never fabricate a specific claim; every other arm
  * names a real CLI verb (status / gate / approve / retry / emit).
@@ -2134,7 +2158,7 @@ export function nextAction(project: Project): NextAction {
     return { kind: "unknown", cmd: "status", phase: project.currentPhase, why: GENERIC_NEXT_WHY };
   }
   const current = phaseDef(project.currentPhase);
-  // A20: the edge's record is looked up by ID, never by array position — a
+  // A20: the edge's record is looked up by ID, never by array position â€” a
   // sparse/reordered phases array (hand-built or foreign payload) otherwise
   // reads some OTHER phase's status as the current edge's.
   if (project.phases.find((r) => r.id === project.currentPhase)?.status === "running") {
@@ -2142,7 +2166,7 @@ export function nextAction(project: Project): NextAction {
       kind: "running",
       cmd: "gate",
       phase: project.currentPhase,
-      why: `${current.code} is running — wait for it to finish or stop.`,
+      why: `${current.code} is running â€” wait for it to finish or stop.`,
     };
   }
   if (project.hitl) {
@@ -2150,7 +2174,7 @@ export function nextAction(project: Project): NextAction {
       kind: "approve",
       cmd: "approve",
       phase: project.currentPhase,
-      why: `Phase ${current.code} is finished — it's waiting for your approval.`,
+      why: `Phase ${current.code} is finished â€” it's waiting for your approval.`,
     };
   }
   if (project.status === "blocked") {
@@ -2158,7 +2182,7 @@ export function nextAction(project: Project): NextAction {
       kind: "retry",
       cmd: "retry",
       phase: project.currentPhase,
-      why: `${current.code} stopped — read the rejection notes below, then retry the phase.`,
+      why: `${current.code} stopped â€” read the rejection notes below, then retry the phase.`,
     };
   }
   if (project.status === "complete") {
@@ -2166,7 +2190,7 @@ export function nextAction(project: Project): NextAction {
       kind: "done",
       cmd: "emit",
       phase: project.currentPhase,
-      why: `All ${PHASES.length} phases are sealed — the build is complete.`,
+      why: `All ${PHASES.length} phases are sealed â€” the build is complete.`,
     };
   }
   const failedGate = project.phases.find((r) => r.gate && r.gate.passed === false);
@@ -2175,7 +2199,7 @@ export function nextAction(project: Project): NextAction {
       kind: "fix-gate",
       cmd: "gate",
       phase: failedGate.id,
-      why: `A gate check on ${phaseDef(failedGate.id).code} failed — review the gate record before continuing.`,
+      why: `A gate check on ${phaseDef(failedGate.id).code} failed â€” review the gate record before continuing.`,
     };
   }
   if (project.phases.find((r) => r.id === project.currentPhase)?.status === "rejected") {
@@ -2183,14 +2207,14 @@ export function nextAction(project: Project): NextAction {
       kind: "run",
       cmd: "gate",
       phase: project.currentPhase,
-      why: `${current.code} was rejected — run it again after reviewing the notes.`,
+      why: `${current.code} was rejected â€” run it again after reviewing the notes.`,
     };
   }
   return {
     kind: "run",
     cmd: "gate",
     phase: project.currentPhase,
-    why: `Ready when you are — run ${current.code} (${current.title}).`,
+    why: `Ready when you are â€” run ${current.code} (${current.title}).`,
   };
 }
 
@@ -2216,21 +2240,21 @@ export type ProjectSummary = {
   failedGates: { phase: PhaseId; unmet: string[] }[];
   /** fixes/125: true when any complete phase sealed with a failed gate. */
   sealedWithFailures: boolean;
-  /** TASK-01 (W16-L2): the ONE next action (`kind · cmd · phase · why`) drawn
-   *  from the SAME 7-arm vocabulary the console renders — `kind` ∈
+  /** TASK-01 (W16-L2): the ONE next action (`kind Â· cmd Â· phase Â· why`) drawn
+   *  from the SAME 7-arm vocabulary the console renders â€” `kind` âˆˆ
    *  `NEXT_ACTION_KINDS` above, pinned arm-parity by
    *  `scripts/next-action-arm-parity.test.mjs`. A caller never guesses the
    *  next step; `unknown` when nothing specific is knowable. */
   nextAction: NextAction;
-  /** T5.5 (OV-41 spend half, W43 · H6) + W46 · 332-2 (L1 / AW45-c06): the
-   *  spend boundary at summary time. `spent` is the RUN's cumulative cost —
+  /** T5.5 (OV-41 spend half, W43 Â· H6) + W46 Â· 332-2 (L1 / AW45-c06): the
+   *  spend boundary at summary time. `spent` is the RUN's cumulative cost â€”
    *  the project's persisted `tokenUsage` slice when it carries one (written by
    *  runUntilGate across invocations), else the process session ledger, which a
    *  fresh CLI process starts empty. `cap`/`stop_reason` stay the process
-   *  session's (the `RAPIDTOOL_TOKEN_CAP` runaway stop) — persisted spend never
+   *  session's (the `RAPIDTOOL_TOKEN_CAP` runaway stop) â€” persisted spend never
    *  feeds the cap. Always present: the session budget always exists; `cap:
    *  null` states the unmetered default explicitly (never collapsed into an
-   *  absent case — CF-SE2-3a). Read-only — summary() never spends, records, or
+   *  absent case â€” CF-SE2-3a). Read-only â€” summary() never spends, records, or
    *  throws. */
   budget: PacketBudget;
 };
@@ -2256,25 +2280,25 @@ export function summary(project: Project): ProjectSummary {
     (n, round) => n + (round && Array.isArray(round.items) ? round.items.length : 0),
     0,
   );
-  // fixes/125 (W1 #2): a clean 'complete' must never hide failed DoD gates —
+  // fixes/125 (W1 #2): a clean 'complete' must never hide failed DoD gates â€”
   // surface the census + the honest sealed-with-failures flag.
   const failed = failedGates(project);
-  // T5.5 (OV-41 spend half): the session ledger boundary — packet.ts's ONE
+  // T5.5 (OV-41 spend half): the session ledger boundary â€” packet.ts's ONE
   // reader (F2-04) over the process session accessor. The accessor always
   // returns a budget object (lazily created), so the reader's null arm (no
   // budget at all) is unreachable; the explicit unmetered floor keeps the
-  // envelope key ALWAYS PRESENT instead of absent — same key, same triple.
+  // envelope key ALWAYS PRESENT instead of absent â€” same key, same triple.
   const sessionBudget: PacketBudget = packetBudgetBoundary(sessionTokenBudget()) ?? {
     spent: 0,
     cap: null,
     stop_reason: null,
   };
-  // W46 · 332-2 (L1 / AW45-c06): `spent` is the RUN's cumulative cost. Every
+  // W46 Â· 332-2 (L1 / AW45-c06): `spent` is the RUN's cumulative cost. Every
   // CLI invocation is a fresh process whose session ledger starts empty, so a
-  // bare session read reported the last call (measured `446 → 0 → 77654`);
+  // bare session read reported the last call (measured `446 â†’ 0 â†’ 77654`);
   // when the project carries a persisted `tokenUsage` slice (written by
   // runUntilGate), it is the run total. `cap`/`stop_reason` stay the PROCESS
-  // session's — the session cap is what stops a runaway — so a project with no
+  // session's â€” the session cap is what stops a runaway â€” so a project with no
   // persisted slice keeps the byte-identical session triple.
   const budget: PacketBudget = isMeasuredSpend(project.tokenUsage)
     ? {
@@ -2286,7 +2310,7 @@ export function summary(project: Project): ProjectSummary {
   return {
     name: project.name,
     currentPhase: project.currentPhase,
-    // A4-E2(c)/A4-E3: a dirty seal must NOT render as a plain `complete` — the
+    // A4-E2(c)/A4-E3: a dirty seal must NOT render as a plain `complete` â€” the
     // summary is the surface the CLI and the console read for the status chip.
     status: terminalStatusOf(project),
     phaseCounts,
@@ -2297,9 +2321,9 @@ export function summary(project: Project): ProjectSummary {
     vaultReady: vaultModuleAvailable() && (memoryCount > 0 || (project.artifacts?.length ?? 0) > 0),
     failedGates: failed,
     sealedWithFailures: failed.length > 0,
-    // TASK-01 (W16-L2): the ONE next action — same 7-arm vocabulary as the UI.
+    // TASK-01 (W16-L2): the ONE next action â€” same 7-arm vocabulary as the UI.
     nextAction: nextAction(project),
-    // T5.5 (OV-41): the spend half — measured from the real session ledger, never estimated.
+    // T5.5 (OV-41): the spend half â€” measured from the real session ledger, never estimated.
     budget,
   };
 }
@@ -2308,7 +2332,7 @@ export function summary(project: Project): ProjectSummary {
 export const filename = slugName;
 
 // ---------------------------------------------------------------------------
-// Vault (dynamic import of src/lib/vault.ts — sibling-owned module; its header
+// Vault (dynamic import of src/lib/vault.ts â€” sibling-owned module; its header
 // freezes the EXACT export surface this section compiles against):
 //
 //   buildVaultNotes(project) -> VaultNote[]   (atomic notes, hub note first)
@@ -2320,7 +2344,7 @@ export const filename = slugName;
 // vault.ts may not exist yet when this file is typechecked (it was built in
 // parallel), so every reference below is a RUNTIME dynamic import through a
 // non-literal specifier. When the module is absent the import throws and
-// callers surface a clean { ok:false, error } — never a crash mid-JSON.
+// callers surface a clean { ok:false, error } â€” never a crash mid-JSON.
 // ---------------------------------------------------------------------------
 
 /** Structural mirror of vault.ts's frozen VaultNote contract. */
@@ -2341,10 +2365,10 @@ type VaultModule = {
   searchVault(notes: unknown[], query: string): unknown[];
 };
 
-/** This file's directory — vault.ts sits beside headless.ts. */
+/** This file's directory â€” vault.ts sits beside headless.ts. */
 const LIB_DIR = dirname(fileURLToPath(import.meta.url));
 
-/** True when src/lib/vault.ts exists on disk (module present → vault usable). */
+/** True when src/lib/vault.ts exists on disk (module present â†’ vault usable). */
 export function vaultModuleAvailable(): boolean {
   try {
     return existsSync(join(LIB_DIR, "vault.ts"));
@@ -2371,7 +2395,7 @@ function loadVaultModule(): Promise<VaultModule> {
         // Sibling-module contract drift is an INTERNAL wiring failure, one
         // class for every dynamic-import seam below (vault/design/diagram).
         const err = new Error(
-          `vault module (src/lib/vault.ts) is missing its "${name}" export — contract drift.`,
+          `vault module (src/lib/vault.ts) is missing its "${name}" export â€” contract drift.`,
         ) as Error & { code?: ErrorCode };
         err.code = "RT_E_INTERNAL";
         throw err;
@@ -2404,11 +2428,11 @@ export async function vaultIndex(project: Project): Promise<string> {
 
 // ---------------------------------------------------------------------------
 // Per-note files are split out of vaultMarkdown's concatenated export on the
-// /^---\ntitle:/m block boundary vault.ts documents — the CLI never hand-rolls
+// /^---\ntitle:/m block boundary vault.ts documents â€” the CLI never hand-rolls
 // note markdown, so UI/CLI/vault.ts can't drift (multiagent pitfall 4).
 // ---------------------------------------------------------------------------
 
-/** Boundary between two vaultMarkdown blocks: a line-start `---\ntitle: "…"`. */
+/** Boundary between two vaultMarkdown blocks: a line-start `---\ntitle: "â€¦"`. */
 const BLOCK_START = /(?=^---\ntitle: ")/m;
 
 /** Split vaultMarkdown output into its per-note blocks (1:1 with the note order). */
@@ -2417,7 +2441,7 @@ export function splitVaultBlocks(markdown: string): string[] {
   return blocks.map((b) => b.trimEnd()).filter((b) => b.trim().length > 0);
 }
 
-/** Parse `title: "…"` out of a block's frontmatter (vaultMarkdown quotes titles). */
+/** Parse `title: "â€¦"` out of a block's frontmatter (vaultMarkdown quotes titles). */
 function blockTitle(block: string): string {
   const m = /^---\ntitle: "((?:[^"\\]|\\.)*)"/m.exec(block);
   return m ? m[1].replace(/\\(["\\])/g, "$1") : "";
@@ -2426,7 +2450,7 @@ function blockTitle(block: string): string {
 /** Filename-safe stand-in for "/" (illegal in file names; Obsidian treats it as
  *  a folder separator). Kept visually close so links stay greppable. */
 const SAFE_SLASH = "\u2215"; // division slash
-// C0 control chars (0x00–0x1F) + Windows-illegal filename chars. The control
+// C0 control chars (0x00â€“0x1F) + Windows-illegal filename chars. The control
 // range is injected via String.fromCharCode so the no-control-regex rule
 // (escape-based static analysis) stays satisfied.
 const CONTROL_RE = new RegExp(
@@ -2434,7 +2458,7 @@ const CONTROL_RE = new RegExp(
   "g",
 );
 
-/** Rewrite every [[wikilink]] target through `map` (title → safe file name). */
+/** Rewrite every [[wikilink]] target through `map` (title â†’ safe file name). */
 function rewriteLinks(text: string, map: ReadonlyMap<string, string>): string {
   return text.replace(/\[\[([^\]|#]+)((?:#[^\]|]*)?(?:\|[^\]|]*)?)\]\]/g, (whole, raw: string, rest: string) => {
     const target = raw.trim();
@@ -2460,7 +2484,7 @@ function nameForTitle(title: string, index: number, used: Set<string>): string {
   return candidate;
 }
 
-/** Map every note title → its authoritative filesystem stem (deduped in note
+/** Map every note title â†’ its authoritative filesystem stem (deduped in note
  *  order). Titles survive verbatim unless they contain path-illegal characters
  *  (e.g. "/", "?") or collide with an already-claimed stem. */
 function titleNameMap(blocks: string[]): Map<string, string> {
@@ -2494,14 +2518,14 @@ export type WriteVaultResult = {
  * Materialize the vault on disk: one `.md` file per atomic note (content
  * straight from vaultMarkdown's per-note blocks) plus an `_index.md` MOC
  * (vaultIndex output), inside `dir` (created recursively). Deterministic:
- * same project in ⇒ same files out.
+ * same project in â‡’ same files out.
  *
  * Wikilinks stay non-dangling on disk: vault.ts writes [[targets]] by bare
  * title, so when a title contains path-illegal characters (e.g. "UI/UX") the
- * file gets a safe name and every [[target]] — in note bodies AND _index.md —
+ * file gets a safe name and every [[target]] â€” in note bodies AND _index.md â€”
  * is rewritten to that name (only such titles are affected).
  */
-/** 216 (T-07 / F-07): the bounded red-tree reference an emit result carries —
+/** 216 (T-07 / F-07): the bounded red-tree reference an emit result carries â€”
  *  the refusal's cause (`ok: false`) or the banner's trail (`ok: true`). */
 export type RedTreeRef = { failures: number; lastFailure: string };
 
@@ -2514,20 +2538,20 @@ export type EmitProjectResult = {
   /** A7: leftover files deleted this emit (ghost specs + byte-identical extras). */
   wiped: string[];
   /** A7: leftover files kept because `--force` (foreign user files). R11-f08:
-   *  a forced emit no longer KEEPS them — it quarantines them (below), so this
+   *  a forced emit no longer KEEPS them â€” it quarantines them (below), so this
    *  is always empty on a successful emit (kept for envelope compatibility). */
   survivors: string[];
   /** R11-f08: emit-dir-relative foreign files MOVED into quarantine this emit
    *  (`<dir>/.rapidtool-quarantine/<stamp>/<rel>`). Empty when nothing was
    *  foreign. Recoverable, never deleted. */
   quarantined: string[];
-  /** R11-f08: `<dir>/.rapidtool-quarantine/<stamp>` — null when nothing moved. */
+  /** R11-f08: `<dir>/.rapidtool-quarantine/<stamp>` â€” null when nothing moved. */
   quarantineDir: string | null;
   /** R11-f08: requested foreign paths that were already gone (unreachable on
-   *  the emit path — reported, never a silent drop). */
+   *  the emit path â€” reported, never a silent drop). */
   quarantineMissing?: string[];
   /** 216 (T-07 / F-07): true when the emitted `README.md` carries the red-tree
-   *  banner — the artifact's own declaration that the phase rail below it is a
+   *  banner â€” the artifact's own declaration that the phase rail below it is a
    *  RECORD, not a passing build (`redTree: "banner"` policy only). */
   redTreeBanner?: boolean;
   /** 216 (T-07 / F-07): the uncleared red-tree trail behind the banner, or
@@ -2536,7 +2560,7 @@ export type EmitProjectResult = {
   redTree?: RedTreeRef | null;
   /** R2-01 (W352): the recorded below-floor refusal this emit shipped THROUGH
    *  (`underProduced: "banner"` only). Its presence means the emitted tree is a
-   *  real but below-floor PARTIAL carrying the caution banner — never a silent
+   *  real but below-floor PARTIAL carrying the caution banner â€” never a silent
    *  pass. Absent when the emitted plan is at/above the floor. */
   underProduced?: { code: "RT_E_PLAN_UNDERPRODUCED"; detail: string } | null;
 } | {
@@ -2544,17 +2568,17 @@ export type EmitProjectResult = {
   error: string;
   code?: string;
   foreign?: string[];
-  /** R11-f08: moves that threw — the tree still holds these files. */
+  /** R11-f08: moves that threw â€” the tree still holds these files. */
   quarantineFailed?: QuarantineFailure[];
   /** R11-f08: set when a failed quarantine move suppressed a caller's judging
-   *  legs (`--verify-kind`/`--check`/`--run`) — the tree is still mixed. */
+   *  legs (`--verify-kind`/`--check`/`--run`) â€” the tree is still mixed. */
   judgingSkipped?: string;
   /** 216 (T-07 / F-07): the uncleared red-tree trail behind an
    *  `RT_E_TREE_RUN_FAILED` refusal. */
   redTree?: RedTreeRef | null;
 };
 
-// R11-f08 (W42 · L4/E4): `.rapidtool-quarantine` joins the skip set — the CLI
+// R11-f08 (W42 Â· L4/E4): `.rapidtool-quarantine` joins the skip set â€” the CLI
 // emit wire moves forced-emit survivors there (src/lib/quarantine.ts), and a
 // repeat emit over the same dir must never re-judge them as foreign leftovers.
 const EMIT_SKIP_DIRS = new Set(["node_modules", ".git", ".vercel", ".rapidtool-quarantine"]);
@@ -2586,7 +2610,7 @@ function walkEmitRel(root: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// 216 (T-07 / F-07) — the red-tree emit guard. The engine logged a red tree
+// 216 (T-07 / F-07) â€” the red-tree emit guard. The engine logged a red tree
 // three times and shipped the artifact anyway, with the phase rail reading P6
 // `complete` (the phase RECORD is written independently of the tree verdict).
 // `emitProject` therefore consults the durable tree-verdict trail BEFORE it
@@ -2596,15 +2620,15 @@ function walkEmitRel(root: string): string[] {
 
 /** The tree-verdict trail read off the project's own log rows (216 T-07).
  *
- *  Red   = `p6.tree.failure` — one failed tree-run, carrying the bounded tail
+ *  Red   = `p6.tree.failure` â€” one failed tree-run, carrying the bounded tail
  *          the journey/repair driver stamped.
  *  Green = `p6.journey.converged` (a green journey verdict),
- *          `p6.tree.tested` (minted ONLY after a green tree-run — codegen
+ *          `p6.tree.tested` (minted ONLY after a green tree-run â€” codegen
  *          `mintTreeRunTested`), or `p6.tree.tested.skipped` (a green run that
- *          executed no specs — still a green run, explicitly labelled).
+ *          executed no specs â€” still a green run, explicitly labelled).
  *
- *  Anything else — DoD/gate rows, synthesis refusals, a `p6.journey.failed`
- *  after a GREEN tree with a failed gate — is not a tree verdict and never
+ *  Anything else â€” DoD/gate rows, synthesis refusals, a `p6.journey.failed`
+ *  after a GREEN tree with a failed gate â€” is not a tree verdict and never
  *  clears a red row. The LAST row wins, so a tree repaired to green by a later
  *  run emits clean: the guard blocks an uncleared red tree, not a bad history. */
 export type TreeRunTrail = {
@@ -2614,7 +2638,7 @@ export type TreeRunTrail = {
   failures: number;
   /** The most recent failure tail, bounded like the journey's own log rows. */
   lastFailure: string;
-  /** The most recent green row's detail, bounded — "" when there is none. */
+  /** The most recent green row's detail, bounded â€” "" when there is none. */
   lastGreen: string;
 };
 
@@ -2650,7 +2674,7 @@ export function treeRunTrail(project: Project): TreeRunTrail {
 
 /** 216 (T-07): the unmissable banner stamped at the TOP of the emitted
  *  `README.md` under the `banner` policy. It states only what the engine knows
- *  — it never claims a pass, and it names the phase rail below it as the
+ *  â€” it never claims a pass, and it names the phase rail below it as the
  *  phase RECORD it is (F-07: `complete` is written independently of the tree
  *  verdict). Plain-text + GitHub alert syntax, so it renders unmissably in a
  *  terminal, an editor and on GitHub alike. */
@@ -2659,11 +2683,11 @@ export function redTreeBanner(trail: TreeRunTrail): string {
   const tail = trail.lastFailure.trim().replace(/\r?\n/g, " ").replace(/`/g, "'");
   return [
     "> [!CAUTION]",
-    "> ## RED TREE-RUN — THIS ARTIFACT IS NOT VERIFIED (RapidTool T-07 / F-07)",
+    "> ## RED TREE-RUN â€” THIS ARTIFACT IS NOT VERIFIED (RapidTool T-07 / F-07)",
     ">",
     `> The last machine tree-run over this project's generated tree FAILED: ${failed} on the`,
     "> project's own log trail (see `logs` in the run JSON), with **no green tree-run since**.",
-    "> Any phase rail below that reads P6 `complete` is the engine's phase RECORD — it is",
+    "> Any phase rail below that reads P6 `complete` is the engine's phase RECORD â€” it is",
     "> written independently of the tree verdict and is NOT evidence of a passing build.",
     tail.length > 0 ? `> Last failure: \`${tail}\`` : "> The failure tail was empty on the record.",
     ">",
@@ -2675,10 +2699,10 @@ export function redTreeBanner(trail: TreeRunTrail): string {
 
 /** R2-01 (W352): the unmissable banner stamped at the TOP of the emitted
  *  `README.md` when a REAL-but-below-floor partial ships under
- *  `underProduced: "banner"`. It states the recorded refusal — never a pass —
+ *  `underProduced: "banner"`. It states the recorded refusal â€” never a pass â€”
  *  so the artifact cannot be read as a complete build. */
 export function underProducedBanner(detail: string): string {
-  const reason = String(detail ?? "").trim().replace(/^RT_E_PLAN_UNDERPRODUCED\s*·\s*/, "");
+  const reason = String(detail ?? "").trim().replace(/^RT_E_PLAN_UNDERPRODUCED\s*Â·\s*/, "");
   const tail = reason.replace(/\r?\n/g, " ").replace(/`/g, "'");
   return [
     "> [!CAUTION]",
@@ -2698,7 +2722,7 @@ export function underProducedBanner(detail: string): string {
 /** 216 (T-07 / F-07): what `emitProject` does when the project's tree-verdict
  *  trail is an UNCLEARED red (`p6.tree.failure` with no green run since).
  *  - `refuse` (default): return a coded `RT_E_TREE_RUN_FAILED` refusal BEFORE
- *    anything is written — an uncleared red tree is never emitted silently.
+ *    anything is written â€” an uncleared red tree is never emitted silently.
  *  - `banner`: emit anyway, prepending `redTreeBanner` to the emitted
  *    `README.md` and stamping `redTreeBanner: true` + `redTree` on the result
  *    (the eval driver's policy: the benchmark completes, and the artifact
@@ -2708,7 +2732,7 @@ export type EmitProjectOptions = {
   force?: boolean;
   redTree?: "refuse" | "banner" | "probe";
   /** R2-01 parity (W352): a REAL-but-below-floor partial (`scaffoldProject`'s
-   *  `underProductionRefusalOf`) is refused BEFORE any write by default — the
+   *  `underProductionRefusalOf`) is refused BEFORE any write by default â€” the
    *  ship path never materializes a below-floor plan. `banner` opts INTO
    *  materializing the partial (scaffold's `allowUnderProduced`), stamps the
    *  below-floor caution banner at the top of the emitted `README.md`, and
@@ -2719,21 +2743,21 @@ export type EmitProjectOptions = {
   underProduced?: "refuse" | "banner";
 };
 
-/** W-03 (fixes/271 · §R3-f01 + AMENDMENT): CJS residue the emit-time
- *  materializer exists to rewrite — `module.exports` anywhere, or a bare
+/** W-03 (fixes/271 Â· Â§R3-f01 + AMENDMENT): CJS residue the emit-time
+ *  materializer exists to rewrite â€” `module.exports` anywhere, or a bare
  *  `exports.`/`exports =` assignment head (never `xexports.`/`reexports.`
  *  look-alikes). The GUARD IS RESIDUE-BASED, deliberately NOT a byte-diff:
  *  `materializeImportableTree` is NOT idempotent (proved live on the W29 E1
- *  lane — a recompute-and-compare guard would re-rewrite endlessly), while
+ *  lane â€” a recompute-and-compare guard would re-rewrite endlessly), while
  *  clean ESM bytes carry no residue and must pass through VERBATIM (the
  *  scaffold.test.ts verbatim pin + the 2-file fixture). */
 const CJS_RESIDUE_RE = /module\.exports|(?:^|[^\w$.])exports\s*(?:\.|=[^=])/;
 
 /**
- * W-03 (fixes/271 · §R3-f01 PROVEN REPAIR): emit-time materialization. A
+ * W-03 (fixes/271 Â· Â§R3-f01 PROVEN REPAIR): emit-time materialization. A
  * stored tree that still carries CJS residue is rewritten through codegen's
  * materializeImportableTree into real ESM (chunk file(s) + the
- * TREE_ENTRY_PATH barrel) BEFORE the scaffold runs — so BOTH the emitted tree
+ * TREE_ENTRY_PATH barrel) BEFORE the scaffold runs â€” so BOTH the emitted tree
  * files AND the `.rapidtool/project.json` record (exportProjectJson inside
  * scaffoldProject) carry the SAME materialized bytes, and the emitted
  * `"type":"module"` tenant can actually import them (the old verbatim push
@@ -2744,13 +2768,13 @@ const CJS_RESIDUE_RE = /module\.exports|(?:^|[^\w$.])exports\s*(?:\.|=[^=])/;
  * toGeneratedTreeFile (fnv1a hash + preserved attempt) so the stored row never
  * disagrees with the emitted bytes. Returns the SAME project reference when
  * there is no materializable residue (exact current bytes); a seam-load
- * failure also returns the project untouched — never a half-materialized tree.
+ * failure also returns the project untouched â€” never a half-materialized tree.
  *
- * T1 (331-3 · fixes/330 §6.1): a LONE generatedSource (zero tree rows) is the
- * legacy host path — the scaffold writes it verbatim at the first job node.
+ * T1 (331-3 Â· fixes/330 Â§6.1): a LONE generatedSource (zero tree rows) is the
+ * legacy host path â€” the scaffold writes it verbatim at the first job node.
  * The pre-331 guard early-returned on zero rows, so a `module.exports` body
  * that reached an imported/stale record was never materialized and shipped
- * unloadable into the `"type":"module"` package (330 Fix A then refused it —
+ * unloadable into the `"type":"module"` package (330 Fix A then refused it â€”
  * safe, but the path never CONVERTED). Treat that lone source as a
  * single-row tree plan at TREE_ENTRY_PATH and run it through the SAME
  * materializeImportableTree seam, so the path now converts: ESM chunk +
@@ -2786,7 +2810,7 @@ async function materializeEmitTree(project: Project): Promise<Project> {
 }
 
 /**
- * fixes/126 (W2 #1): the CODE → RUNNABLE-APP path. A7: never silently merge
+ * fixes/126 (W2 #1): the CODE â†’ RUNNABLE-APP path. A7: never silently merge
  * leftover tests/*.spec.ts (treeRun would execute ghost specs). Snapshot the
  * dir, write the scaffold, wipe ghost specs + byte-identical leftovers, refuse
  * other foreign files unless `force`.
@@ -2802,8 +2826,8 @@ export async function emitProject(
   dir: string,
   opts: EmitProjectOptions = {},
 ): Promise<EmitProjectResult> {
-  // 216 (T-07 / F-07): the trail read + refusal come FIRST — before the
-  // scaffold compile, the target dir, the lock and every write — so a refused
+  // 216 (T-07 / F-07): the trail read + refusal come FIRST â€” before the
+  // scaffold compile, the target dir, the lock and every write â€” so a refused
   // emit cannot leave a partial tree (not even an empty emit dir) behind.
   // `probe` opts out of the trail read entirely (result fields stay unset).
   const redTreePolicy = opts.redTree ?? "refuse";
@@ -2813,7 +2837,7 @@ export async function emitProject(
     return {
       ok: false,
       error:
-        `emit refused: the project's tree-run trail is RED (${runs}, no green run since) — ` +
+        `emit refused: the project's tree-run trail is RED (${runs}, no green run since) â€” ` +
         `reach a green tree-run (rapidtool tree-run) or emit with redTree:"banner" to ship the ` +
         `unmissable banner. Last failure: ${trail.lastFailure.slice(0, 300)}`,
       code: "RT_E_TREE_RUN_FAILED",
@@ -2822,14 +2846,14 @@ export async function emitProject(
   }
   const scaffold = await import("./scaffold.ts");
   const underProducedPolicy = opts.underProduced ?? "refuse";
-  // W-03 (fixes/271 · §R3-f01 + AMENDMENT): emit-time materialization — a
+  // W-03 (fixes/271 Â· Â§R3-f01 + AMENDMENT): emit-time materialization â€” a
   // stored tree that still carries CJS residue is rewritten to importable ESM
   // BEFORE the scaffold runs (so the tree files AND the exported
   // `.rapidtool/project.json` record carry the same bytes). Clean / no-tree
   // projects return the same reference: byte-identical emits.
   const emitProjectInput = await materializeEmitTree(project);
-  // R2-01 (W352) · W356 cross-lane contract: the caller's RESOLVED under-produced
-  // policy is forwarded EXPLICITLY on every path — an absent option must never be
+  // R2-01 (W352) Â· W356 cross-lane contract: the caller's RESOLVED under-produced
+  // policy is forwarded EXPLICITLY on every path â€” an absent option must never be
   // read as a silent default again. `"banner"` maps to scaffold's `"partial"`
   // materialization (+ the legacy `allowUnderProduced` opt-in it still honors);
   // `"refuse"` is passed as the literal `"refuse"`, which scaffold honors by
@@ -2837,7 +2861,7 @@ export async function emitProject(
   //
   // W356 report gap: the recorded refusal is resolved on EVERY path (not only
   // `"banner"`), so a landed partial can never ship without `underProduced` on
-  // the result — the "never a silent partial" contract is the report's, not the
+  // the result â€” the "never a silent partial" contract is the report's, not the
   // caller's, to keep.
   const underProducedDetail = scaffold.underProductionRefusalOf(emitProjectInput);
   const result = scaffold.scaffoldProject(emitProjectInput, {
@@ -2861,7 +2885,7 @@ export async function emitProject(
   }
   // 216 (T-07): under the `banner` policy the banner is prepended to the
   // README.md body BEFORE the lock and the file loop below, so it lands
-  // atomically with — and cannot drift from — the rest of the emit.
+  // atomically with â€” and cannot drift from â€” the rest of the emit.
   const redBanner =
     trail !== null && trail.last === "red" && redTreePolicy === "banner" ? redTreeBanner(trail) : null;
   // W356: the below-floor banner is stamped only for the caller policy that
@@ -2893,11 +2917,11 @@ export async function emitProject(
     };
   }
   // 310 B3 (M7-02, fixes/310_b3_boundary.md): mkdir is a boundary the emit
-  // CONTRACT owns — a parent-is-a-FILE target (ENOTDIR) or an unwritable
+  // CONTRACT owns â€” a parent-is-a-FILE target (ENOTDIR) or an unwritable
   // parent (EPERM/EACCES) used to THROW straight through `{ok:false}` and the
   // CLI collapsed it to exit 4 `RT_E_INTERNAL` while every other emit failure
-  // is coded. Catch → the coded-refusal shape (classifyError: ENOTDIR →
-  // RT_E_PATH_KIND_MISMATCH, EPERM → RT_E_PERMISSION_DENIED — the CLI's own
+  // is coded. Catch â†’ the coded-refusal shape (classifyError: ENOTDIR â†’
+  // RT_E_PATH_KIND_MISMATCH, EPERM â†’ RT_E_PERMISSION_DENIED â€” the CLI's own
   // mapping).
   try {
     mkdirSync(target, { recursive: true });
@@ -2907,14 +2931,14 @@ export async function emitProject(
   }
   const lockPath = join(target, ".rapidtool-emit.lock");
   let fd: number | null = null;
-  // fixes/310 (B1 · M6-01): stale-aware claim — an SIGKILLed emit's stranded
+  // fixes/310 (B1 Â· M6-01): stale-aware claim â€” an SIGKILLed emit's stranded
   // lock is reclaimed; a live writer still refuses RT_E_BUSY, and `--force`
   // (foreign-files) semantics are unchanged: it never bypasses the lock.
   try {
     fd = acquireExclusiveLock(lockPath);
   } catch (err) {
     // 310 B3 (M7-03): a non-EEXIST lock failure (EPERM on a read-only target
-    // dir, …) is the same coded refusal — the API-level throw bypassed the
+    // dir, â€¦) is the same coded refusal â€” the API-level throw bypassed the
     // emit contract (the CLI already classified EPERM as RT_E_PERMISSION_DENIED).
     const msg = err instanceof Error ? err.message : String(err);
     return {
@@ -2931,7 +2955,7 @@ export async function emitProject(
     files.map((f) => f.path),
   );
   try {
-    // W352 (R-18): one atomic batch — each file staged (temp + rename) and the
+    // W352 (R-18): one atomic batch â€” each file staged (temp + rename) and the
     // whole set guarded by the reclaimable write-set lock, so a kill mid-emit
     // cannot leave a torn file, and a stranded lock marks a possibly-partial set
     // for the next emit to reclaim. `applyWrites` rolls the set back on throw
@@ -2947,13 +2971,13 @@ export async function emitProject(
         /* leftover already gone */
       }
     }
-    // 346 E1 · L1-F4: `includes("")` is always true, so a project with no
+    // 346 E1 Â· L1-F4: `includes("")` is always true, so a project with no
     // generated module claimed `moduleEmbedded: true`. Require real bytes.
     const embeddedSource = typeof emitProjectInput.generatedSource === "string" ? emitProjectInput.generatedSource : "";
     const moduleEmbedded = embeddedSource.length > 0 && files.some((f) => f.body.includes(embeddedSource));
     // R11-f08 (lifted from the CLI's emit arm): a forced emit MOVES the
     // foreign files aside into `<target>/.rapidtool-quarantine/<stamp>/` and
-    // reports them — so EVERY forced caller quarantines, not just the CLI, and
+    // reports them â€” so EVERY forced caller quarantines, not just the CLI, and
     // a later tree-run never judges bytes the factory never authored (A1-f07).
     // A failed move means the tree is STILL mixed, so the emit refuses
     // (`ok:false`, RT_E_FOREIGN_FILES) and names `judgingSkipped`: a caller
@@ -2971,13 +2995,13 @@ export async function emitProject(
         return {
           ok: false,
           error:
-            "emit: forced foreign files could not be quarantined — " +
+            "emit: forced foreign files could not be quarantined â€” " +
             moved.failed.map((f) => `${f.path} (${f.error})`).join(", "),
           code: "RT_E_FOREIGN_FILES",
           foreign: moved.failed.map((f) => f.path),
           quarantineFailed: moved.failed,
           judgingSkipped:
-            "foreign files could not be quarantined — --verify-kind/--check/--run did not run (the tree is still mixed; R11-f08 · A1-f07)",
+            "foreign files could not be quarantined â€” --verify-kind/--check/--run did not run (the tree is still mixed; R11-f08 Â· A1-f07)",
         };
       }
     }
@@ -2988,7 +3012,7 @@ export async function emitProject(
       summary: result.summary,
       moduleEmbedded,
       wiped,
-      // R11-f08: the foreign files no longer survive in place — they moved
+      // R11-f08: the foreign files no longer survive in place â€” they moved
       // into quarantine (reported below). Kept for envelope compatibility.
       survivors: [],
       quarantined,
@@ -3003,7 +3027,7 @@ export async function emitProject(
             redTree: redBanner === null ? null : { failures: trail.failures, lastFailure: trail.lastFailure },
           }),
       // R2-01 (W352): the recorded below-floor refusal this PARTIAL shipped
-      // through — its presence is the machine-readable "never a silent pass".
+      // through â€” its presence is the machine-readable "never a silent pass".
       ...(underProducedDetail !== null
         ? { underProduced: { code: "RT_E_PLAN_UNDERPRODUCED" as const, detail: underProducedDetail } }
         : {}),
@@ -3027,10 +3051,10 @@ export async function emitProject(
 }
 
 // ---------------------------------------------------------------------------
-// fixes/343_3 · the delivery tail (CLI `emit --git`). headless IS the CLI's
+// fixes/343_3 Â· the delivery tail (CLI `emit --git`). headless IS the CLI's
 // bare-Node host, so the land seam is mounted here: the CLI hands the just-
 // emitted manifest + the project, and the REAL git mechanics live in
-// git.server.ts's `gitLandEmitted` (see its §6b doctrine — emitted-product
+// git.server.ts's `gitLandEmitted` (see its Â§6b doctrine â€” emitted-product
 // only, manifest-only staging, the host repo structurally refused, idempotent).
 // The dynamic import keeps git.server.ts's node:child_process seam off every
 // eager path, the same discipline this file's other server-only mounts follow.
@@ -3051,7 +3075,7 @@ async function verifyEmittedDirBeforeCommit(dir: string): Promise<TreeRunOutcome
 }
 
 /** Land an EMITTED tree as one Conventional-Commits delivery commit (fixes/343_3).
- *  W352 (R-19): re-verify the tree immediately before landing — a commit must
+ *  W352 (R-19): re-verify the tree immediately before landing â€” a commit must
  *  be evidence of a VERIFIED tree, so a non-green re-run refuses and issues no
  *  commit (the emitted tree stays on disk; delivery is withheld). */
 export async function landEmittedTree(
@@ -3073,7 +3097,7 @@ export async function landEmittedTree(
       error:
         "git delivery refused: the emitted tree did not re-verify green immediately before the commit" +
         (detail ? ` (${detail.slice(0, 300)})` : "") +
-        " — a commit is evidence of a verified tree, so no commit was issued; the emitted tree is kept on disk.",
+        " â€” a commit is evidence of a verified tree, so no commit was issued; the emitted tree is kept on disk.",
       dir: resolve(dir),
     } as unknown as GitLandResult<GitLandEmittedOk>;
   }
@@ -3082,13 +3106,13 @@ export async function landEmittedTree(
 }
 
 // ---------------------------------------------------------------------------
-// fixes/144 (M4-2) — the P6 journey driver: a bounded produce→run→repair loop
+// fixes/144 (M4-2) â€” the P6 journey driver: a bounded produceâ†’runâ†’repair loop
 // around keyed P6. Each cycle calls the SAME live-layer synthesis seam the
-// headless run loop uses today (runUntilGate → runReady → runPhase(live) →
+// headless run loop uses today (runUntilGate â†’ runReady â†’ runPhase(live) â†’
 // engine.liveLayer for phase 6); when the synthesized project carries a
 // generatedTree the tree verdict is taken by compile-check.server's treeRun
 // over an emitted temp dir. Converge = green tree-run (the P6 DoD gate is then
-// recorded honestly — never force-green). Budget exhausted = an honest FAILED
+// recorded honestly â€” never force-green). Budget exhausted = an honest FAILED
 // outcome with the deterministic floor standing. KEYLESS = no-op passthrough
 // (byte-identical same reference). Deps are injectable so unit tests run
 // deterministic fakes with no key, no fs and no runner.
@@ -3105,76 +3129,76 @@ export type P6JourneyCycleContext = {
    *  the next cycle's synthesis deps as a bounded deps.synthesisRefusal
    *  excerpt (fixes/153 P2) and named on the exhausted verdict. */
   refusal?: string;
-  /** fixes/326 F1b: the ONE bounded gate-repair cycle's context — the recorded
+  /** fixes/326 F1b: the ONE bounded gate-repair cycle's context â€” the recorded
    *  unmet P6 DoD requirements (criteria + missing lists) from a green
    *  tree-run/red-gate cycle, fed to the next synthesis as deps.gateRepair.
    *  Present ONLY on a diverted repair cycle (at most one per journey). */
   gateRepair?: string;
-  /** T4 (112 §4.4 / 216g): the caller's resolved cross-project proven lesson
+  /** T4 (112 Â§4.4 / 216g): the caller's resolved cross-project proven lesson
    *  rows (`knowledge.provenRowsFromStore(...).rows`), supplied once through
    *  the run options and carried on EVERY cycle so the synthesis prompt ranks
-   *  them with the project's own memory lessons. Absent/empty ⇒
+   *  them with the project's own memory lessons. Absent/empty â‡’
    *  `p6CycleLiveDeps` materializes no key and the call is byte-identical. */
   proven?: readonly RankableLessonRow[];
   /** W45 (parent keyed finding D): the repo-relative file path(s) the previous
-   *  tree-run NAMED as failing (`treeRunFailureFiles` — the generated-core
+   *  tree-run NAMED as failing (`treeRunFailureFiles` â€” the generated-core
    *  LOAD shape included). `repairCycleLiveDeps` folds them into
    *  `deps.treeFailure` as an explicit "Repair target file(s)" directive, so a
    *  repair cycle targets the file it was told to fix instead of repairing
-   *  around it. Absent/empty ⇒ the directive is byte-identical to the legacy
+   *  around it. Absent/empty â‡’ the directive is byte-identical to the legacy
    *  tail. Set only by the repair drivers. */
   repairTargets?: readonly string[];
   /** PR-16 (I7, BF-2): the previous cycle's ACCEPTED chunks, carried so a
    *  repair cycle can REUSE them instead of re-buying every chunk (baker
-   *  florist-orders burned 419k tokens re-synthesizing from zero — O-01).
-   *  Absent/empty ⇒ `p6CycleLiveDeps` materializes no key and the synthesis
+   *  florist-orders burned 419k tokens re-synthesizing from zero â€” O-01).
+   *  Absent/empty â‡’ `p6CycleLiveDeps` materializes no key and the synthesis
    *  call is byte-identical to legacy. Consumer: codegen liveP6Synthesis
    *  (lane S, I7); the D-side only threads it. */
   resumeAccepted?: readonly { path: string; source: string; exports: string[] }[];
 };
 
-/** fixes/153 (P2): deps.synthesisRefusal cap — the bounded refusal excerpt a
- *  refused cycle feeds the next (the refusal class — RT_E_* code · first
- *  clause — plus the model's reason, up to this cap, mirroring the 1500-char
+/** fixes/153 (P2): deps.synthesisRefusal cap â€” the bounded refusal excerpt a
+ *  refused cycle feeds the next (the refusal class â€” RT_E_* code Â· first
+ *  clause â€” plus the model's reason, up to this cap, mirroring the 1500-char
  *  treeFailure tail cap: a long/hostile reason can never blow the next cycle's
- *  prompt budget). Raised 200 → 1200 by the 339 wave so the oracle/case reason
+ *  prompt budget). Raised 200 â†’ 1200 by the 339 wave so the oracle/case reason
  *  reaches the next cycle instead of being clipped out. */
 const P6_JOURNEY_REFUSAL_MAX = 1200;
 
 /** fixes/147 (E2) + fixes/153 (P2) + fixes/328 F1: map a journey cycle's
- *  context onto engine.liveLayer's additive P6 deps (LiveLayerDeps) — which
+ *  context onto engine.liveLayer's additive P6 deps (LiveLayerDeps) â€” which
  *  the engine forwards verbatim into codegen liveP6Synthesis as
  *  deps.treeFailure (the bounded repair re-prompts' tree-failure reader) and
  *  deps.synthesisRefusal (the previous cycle's refusal class + bounded
- *  reason — read by codegen's PRIMARY-prompt reader
+ *  reason â€” read by codegen's PRIMARY-prompt reader
  *  withSynthesisRefusalContext; fixes/328 F1 closed the reader fixes/153 P2
- *  deferred) and deps.proven (T4 · 112 §4.4: the caller's cross-project
+ *  deferred) and deps.proven (T4 Â· 112 Â§4.4: the caller's cross-project
  *  lesson rows, ranked by codegen's lesson sites alongside project memory).
- *  An absent/empty context ⇒ undefined ⇒
+ *  An absent/empty context â‡’ undefined â‡’
  *  the legacy byte-identical liveLayer(p, 6) call (zero behavior change);
- *  a tree-failure-only ctx yields exactly { treeFailure } — no
- *  synthesisRefusal key — byte-identical to fixes/147. Exported so the
+ *  a tree-failure-only ctx yields exactly { treeFailure } â€” no
+ *  synthesisRefusal key â€” byte-identical to fixes/147. Exported so the
  *  driver's default synthesize seam and its tests share ONE mapping. */
 export type P6CycleLiveDepsShape = {
   treeFailure?: string;
   /** Bounded refusal context from the previous cycle (fixes/153 P2). Present
-   *  ONLY when the previous cycle's synthesis refused — the refusal class
+   *  ONLY when the previous cycle's synthesis refused â€” the refusal class
    *  (RT_E_* code) + the model's reason, up to P6_JOURNEY_REFUSAL_MAX (1200). */
   synthesisRefusal?: string;
-  /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level —
+  /** T-107.1 (216r Â· W7-L1): the opt-in patch (str_replace) repair level â€”
    *  set ONLY by `repairCycleLiveDeps` (the repair drivers). `p6CycleLiveDeps`
    *  never sets it, so the journey mapping stays byte-identical to fixes/153. */
   patchRepairs?: boolean;
   /** fixes/326 F1b: bounded unmet-requirements context for the ONE
    *  gate-repair cycle (see P6JourneyCycleContext.gateRepair). */
   gateRepair?: string;
-  /** T4 (112 §4.4 / 216g): the caller's cross-project proven lesson rows,
-   *  carried verbatim onto engine.LiveLayerDeps.proven ⇒ codegen's lesson
+  /** T4 (112 Â§4.4 / 216g): the caller's cross-project proven lesson rows,
+   *  carried verbatim onto engine.LiveLayerDeps.proven â‡’ codegen's lesson
    *  sites. Present ONLY when the campaign supplied at least one row. */
   proven?: readonly RankableLessonRow[];
   /** PR-16 (I7): the previous cycle's accepted chunks (see
    *  P6JourneyCycleContext.resumeAccepted). Present ONLY when a repair cycle
-   *  supplied them — absent ⇒ the deps object is byte-identical to legacy. */
+   *  supplied them â€” absent â‡’ the deps object is byte-identical to legacy. */
   resumeAccepted?: readonly { path: string; source: string; exports: string[] }[];
 };
 
@@ -3202,7 +3226,7 @@ export function p6CycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShap
   return deps;
 }
 /**
- * T-107.1 (216r · W7-L1): the repair drivers' ctx→deps mapping — the journey
+ * T-107.1 (216r Â· W7-L1): the repair drivers' ctxâ†’deps mapping â€” the journey
  * mapping (fixes/153 P2) PLUS the opt-in patch (str_replace) repair level. A
  * repair cycle is exactly where a bounded per-file delta beats a whole-module
  * re-emit: codegen applies a returned delta against the module it just
@@ -3216,15 +3240,15 @@ export function repairCycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDeps
   const deps: P6CycleLiveDepsShape = { ...base, patchRepairs: true };
   // W45 (parent keyed finding D): the failure tail NAMES the file, but codegen
   // only appends `treeFailure` to a repair prompt that some OTHER defect
-  // triggered — so the named file can be repaired around. Pin it as an
+  // triggered â€” so the named file can be repaired around. Pin it as an
   // explicit directive block on the SAME `treeFailure` seam codegen already
   // forwards (no new deps key, nothing dead). Capped so the prompt stays
-  // bounded; empty ⇒ byte-identical legacy deps.
+  // bounded; empty â‡’ byte-identical legacy deps.
   const targets = Array.isArray(ctx.repairTargets)
     ? ctx.repairTargets.filter((p): p is string => typeof p === "string" && p.length > 0).slice(0, 8)
     : [];
   if (targets.length > 0) {
-    const block = `Repair target file(s) named by the failure — fix these first:\n${targets.join("\n")}`;
+    const block = `Repair target file(s) named by the failure â€” fix these first:\n${targets.join("\n")}`;
     deps.treeFailure = base.treeFailure ? `${base.treeFailure}\n\n${block}` : block;
   }
   return deps;
@@ -3233,24 +3257,24 @@ export function repairCycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDeps
 /** Injectable seams. The defaults ARE the production seams; fakes only replace
  *  them in unit tests (deterministic, no key / fs / runner). */
 export type P6JourneyDeps = {
-  /** Produce/repair seam — one synthesis attempt. Default: the live-layer P6
+  /** Produce/repair seam â€” one synthesis attempt. Default: the live-layer P6
    *  synthesis seam the headless loop uses today (engine.liveLayer for phase
    *  6, which applies the deterministic floor then runs codegen
    *  liveP6Synthesis when keyed). The cycle context reaches codegen through
    *  liveLayer's additive deps param (engine forwards the object verbatim):
-   *  treeFailure (fixes/147 E2), synthesisRefusal (fixes/153 P2 · 328 F1),
-   *  gateRepair (fixes/326 F1b) and proven (T4 · 330); the `p6.tree.failure`
+   *  treeFailure (fixes/147 E2), synthesisRefusal (fixes/153 P2 Â· 328 F1),
+   *  gateRepair (fixes/326 F1b) and proven (T4 Â· 330); the `p6.tree.failure`
    *  log is the durable record trail. */
   synthesize: (project: Project, ctx: P6JourneyCycleContext) => Promise<Project>;
   /** Tree verdict seam. Default: emit the generatedTree to a temp dir
-   *  (emitProject — the M2/M3 tree emission path) and run it via
+   *  (emitProject â€” the M2/M3 tree emission path) and run it via
    *  compile-check.server's treeRun; the dir is removed afterwards unless the
    *  caller passed `workDir`. */
   runTree: (project: Project) => Promise<TreeRunOutcome>;
-  /** P6 DoD gate-recording seam — fixes/159 (F4): the convergence decision
+  /** P6 DoD gate-recording seam â€” fixes/159 (F4): the convergence decision
    *  reads `gate.passed` from THIS record, so the seam is injectable exactly
    *  like synthesize/runTree (fakes only in unit tests). Default: the real
-   *  recordGateInto over phase 6 (real probes, never force-green — a fake
+   *  recordGateInto over phase 6 (real probes, never force-green â€” a fake
    *  tree can never buy a green verdict). */
   recordGate?: (project: Project) => Project;
 };
@@ -3268,7 +3292,7 @@ export type P6JourneyResult = {
   /** Last codegen refusal detail seen (p6.synthesis.refused), if any. */
   refusal: string | null;
   /** Recorded P6 DoD gate after convergence (null unless the P6 record is
-   *  complete and was re-recorded — the verdict is the honest one, never
+   *  complete and was re-recorded â€” the verdict is the honest one, never
    *  force-green). */
   gate: { passed: boolean; unmet: string[]; evidenceHash: string } | null;
   /** Machine-readable cycle trail for CLI/reporting envelopes. */
@@ -3281,10 +3305,10 @@ export const P6_JOURNEY_DEFAULT_BUDGET = 3;
  *  (parity with compile-check.server's VERDICT_TAIL_MAX). */
 const P6_JOURNEY_TAIL_MAX = 1500;
 /** fixes/326 F1b: cap for the one-shot gate-repair context (parity with the
- *  refusal cap discipline — a long unmet list can never blow the prompt). */
+ *  refusal cap discipline â€” a long unmet list can never blow the prompt). */
 const P6_JOURNEY_GATE_REPAIR_MAX = 700;
 
-/** Direct DeepSeek env probe (the same probe codegen.server relies on —
+/** Direct DeepSeek env probe (the same probe codegen.server relies on â€”
  *  process.env.DEEPSEEK_API_KEY, not the server-fn llmStatus that always
  *  reports unconfigured under bare Node). */
 async function p6JourneyIsKeyed(): Promise<boolean> {
@@ -3297,12 +3321,12 @@ async function p6JourneyIsKeyed(): Promise<boolean> {
 }
 
 /**
- * T-107.7 (W33 lane L2): the key state a checkpoint records as `run.mode` —
+ * T-107.7 (W33 lane L2): the key state a checkpoint records as `run.mode` â€”
  * and the exact probe `checkpointAdmits` compares on resume (a keyed snapshot
  * never resumes keyless, and vice versa). Plain sync env read with
  * `engine.keyedDeepSeekConfigured` (:1820) / `deepseek.server.isDeepSeekConfigured`
  * trim semantics. Bare-Node hosts only; a browser host never reaches a
- * checkpoint write (no dir — see commitRunCheckpoint).
+ * checkpoint write (no dir â€” see commitRunCheckpoint).
  */
 export function runModeFor(): "keyless" | "keyed" {
   try {
@@ -3331,7 +3355,7 @@ function p6JourneyLog(project: Project, level: "info" | "warn" | "error", event:
   };
 }
 
-/** fixes/326 F1b PREP: the bounded context for the ONE gate-repair cycle —
+/** fixes/326 F1b PREP: the bounded context for the ONE gate-repair cycle â€”
  *  the recorded unmet criteria + the concrete missing lists already on the
  *  record (latest p6.synthesis.refused / dod.reqtrace rows). Recorded
  *  evidence only; the engine adds no requirement the brief never had. */
@@ -3347,7 +3371,7 @@ function gateRepairContextOf(project: Project, unmet: readonly string[]): string
   }
   return [
     `P6 DoD unmet: ${unmet.join(" | ")}`,
-    scraped.length > 0 ? `Recorded missing requirements: ${scraped.join(" · ")}` : "",
+    scraped.length > 0 ? `Recorded missing requirements: ${scraped.join(" Â· ")}` : "",
   ]
     .filter(Boolean)
     .join("\n")
@@ -3355,35 +3379,35 @@ function gateRepairContextOf(project: Project, unmet: readonly string[]): string
 }
 
 /** First ~tail of a red TreeRunOutcome: top-level error, then the first
- *  failing spec, then (216 · T-18) a declared project script that ran red,
+ *  failing spec, then (216 Â· T-18) a declared project script that ran red,
  *  then the entry verdict. Never empty on a !ok outcome. */
 function treeRunFailureTail(o: TreeRunOutcome): string {
   if (typeof o.error === "string" && o.error.trim().length > 0) return o.error;
   const spec = (o.tests ?? []).find((t) => t.run !== "pass");
   if (spec) {
-    return `${spec.file}: ${spec.run}${spec.detail ? ` — ${spec.detail}` : ""}`;
+    return `${spec.file}: ${spec.run}${spec.detail ? ` â€” ${spec.detail}` : ""}`;
   }
   // 216 (T-18): the emitted project's own declared script can be the ONLY red
-  // (every spec leg green) — it must be named, or the repair prompt would
+  // (every spec leg green) â€” it must be named, or the repair prompt would
   // chase a spec that passed. `error` normally carries this too; this branch
   // covers a verdict that reached here without it.
   const script = [o.project?.typecheck, o.project?.test].find(
     (v) => v && (v.run === "fail" || v.run === "timeout" || v.run === "error"),
   );
   if (script) {
-    return `npm run ${script.script}: ${script.run}${script.detail ? ` — ${script.detail}` : ""}`;
+    return `npm run ${script.script}: ${script.run}${script.detail ? ` â€” ${script.detail}` : ""}`;
   }
   if (o.run && o.run.run !== "pass" && o.run.run !== "skip") {
-    return `entry ${o.run.entry ?? o.run.kind}: ${o.run.run}${o.run.detail ? ` — ${o.run.detail}` : ""}`;
+    return `entry ${o.run.entry ?? o.run.kind}: ${o.run.run}${o.run.detail ? ` â€” ${o.run.detail}` : ""}`;
   }
   return "tree-run not ok";
 }
 
 /** W45 (parent keyed finding D): the repo-relative file path(s) a red
  *  tree-run NAMES as its failing subject. The generated-core LOAD failure
- *  (`o.core`, the UI-shell shape) is read EXPLICITLY — it is distinct from the
+ *  (`o.core`, the UI-shell shape) is read EXPLICITLY â€” it is distinct from the
  *  per-spec test failure shape (`o.tests`) and from the emitted project's own
- *  `npm run` leg — plus non-pass compile rows, a non-pass entry smoke, and the
+ *  `npm run` leg â€” plus non-pass compile rows, a non-pass entry smoke, and the
  *  offender files a red DECLARED script (typecheck/test/build) names in its
  *  toolchain tail. Used
  *  by `repairTreeDir` to (a) put the named file into the repair directive so a
@@ -3395,7 +3419,7 @@ export function treeRunFailureFiles(o: TreeRunOutcome): string[] {
   const add = (p: unknown): void => {
     if (typeof p !== "string" || p.length === 0) return;
     if (p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) return;
-    // A `..` segment escapes the emitted tree — never a repair target. Kept in
+    // A `..` segment escapes the emitted tree â€” never a repair target. Kept in
     // the shared guard so every caller (core entry, compile rows, spec, script
     // tail) benefits, not only the regex-tail path below.
     if (p.split("/").includes("..")) return;
@@ -3411,11 +3435,11 @@ export function treeRunFailureFiles(o: TreeRunOutcome): string[] {
   const spec = (o.tests ?? []).find((t) => t.run !== "pass");
   if (spec) add(spec.file);
   // 341-1: a red DECLARED script (typecheck/test/build) names its offender
-  // files in the toolchain tail as `path(line,col): error …`. Without this the
+  // files in the toolchain tail as `path(line,col): error â€¦`. Without this the
   // repair directive gets no target on a typecheck-only red (a compiler-only
   // failure has no compile-row/entry/spec row to name), so the cycle cannot
   // aim at the file the compiler blamed. The regex requires a real boundary
-  // before the path — not a path char, `/`, `\` or drive `:` — so a SUFFIX of
+  // before the path â€” not a path char, `/`, `\` or drive `:` â€” so a SUFFIX of
   // a Windows-separated or absolute path (`tests\oracle.spec.ts`, `/etc/x.ts`,
   // `C:\tmp\x.ts`) is never captured in the first place; `add` still filters
   // reserved / absolute / `..` tokens.
@@ -3430,22 +3454,22 @@ export function treeRunFailureFiles(o: TreeRunOutcome): string[] {
   return out;
 }
 
-/** Default produce/repair seam — the live-layer P6 synthesis the headless run
+/** Default produce/repair seam â€” the live-layer P6 synthesis the headless run
  *  loop uses today. engine.liveLayer(project, 6) applies the deterministic
  *  applyPhaseResult floor and, when DeepSeek is configured, upgrades it via
  *  codegen liveP6Synthesis (fixes/116 made that branch bare-Node-safe). The
  *  caller already ran the keyless short-circuit, so this is the keyed path.
  *  The tree-failure tail is BOTH stamped onto the project record BEFORE
- *  synthesis (deduped against the last row — a durable `p6.tree.failure` trail
+ *  synthesis (deduped against the last row â€” a durable `p6.tree.failure` trail
  *  on the record) AND threaded as deps.treeFailure through liveLayer's
  *  additive deps param (fixes/147 E2); a previous-cycle refusal rides the
- *  same additive param as deps.synthesisRefusal — a bounded excerpt of the
+ *  same additive param as deps.synthesisRefusal â€” a bounded excerpt of the
  *  refusal class + model reason, read by codegen's PRIMARY-prompt reader
  *  withSynthesisRefusalContext (fixes/328 F1). codegen liveP6Synthesis reads
  *  deps?.treeFailure for tree-repair re-prompts. p6CycleLiveDeps is the
- *  single ctx→deps mapping. */
+ *  single ctxâ†’deps mapping. */
 /** The shared cycle-synthesis core: floor stamping + the live-layer call. The
- *  two defaults below differ ONLY in the ctx→deps mapping they pass. */
+ *  two defaults below differ ONLY in the ctxâ†’deps mapping they pass. */
 async function synthesizeCycle(
   project: Project,
   ctx: P6JourneyCycleContext,
@@ -3470,7 +3494,7 @@ async function defaultP6Synthesize(project: Project, ctx: P6JourneyCycleContext)
   return synthesizeCycle(project, ctx, p6CycleLiveDeps(ctx));
 }
 
-/** T-107.1 (216r · W7-L1): the `repairTreeDir` default synthesis seam —
+/** T-107.1 (216r Â· W7-L1): the `repairTreeDir` default synthesis seam â€”
  *  `defaultP6Synthesize` with the patch-repair level ON (a repair cycle is
  *  exactly where a per-file delta beats a whole-module re-emit). Everything
  *  else is identical: same floor, same refusal passthrough, same log
@@ -3480,14 +3504,14 @@ async function defaultRepairSynthesize(project: Project, ctx: P6JourneyCycleCont
 }
 
 /** Default tree verdict seam: emit the generatedTree to a dir (workDir when
- *  provided — kept for evidence — else a temp dir that is removed afterwards)
+ *  provided â€” kept for evidence â€” else a temp dir that is removed afterwards)
  *  and run it under compile-check.server's treeRun. An emission failure is a
  *  red outcome with the honest error, never a fabricated pass. */
 async function defaultP6RunTree(project: Project, workDir?: string): Promise<TreeRunOutcome> {
   const dir = workDir ?? mkdtempSync(join(tmpdir(), "rapidtool-p6-"));
   try {
     // 216 (T-07) parent audit (R2 flagged this site): this is the INTERNAL
-    // candidate emit — it runs on every P6 repair cycle to produce the tree the
+    // candidate emit â€” it runs on every P6 repair cycle to produce the tree the
     // verdict then judges, so it must NEVER gate on the trail (a red trail from
     // cycle N would refuse cycle N+1's candidate and kill the repair loop).
     // `redTree: "probe"` = no trail read; the refuse/banner guard stays on the
@@ -3528,7 +3552,7 @@ async function defaultP6RunTree(project: Project, workDir?: string): Promise<Tre
 }
 
 /**
- * W2 · 348: persist the tree-run verdict the pipeline computed onto the project
+ * W2 Â· 348: persist the tree-run verdict the pipeline computed onto the project
  * record, additively. The acceptance reader (acceptance.readMachineEvidence)
  * reads `treeRun.verdictHash`, and the pipeline review reads `treeRun` +
  * `substance`; before this seam both reported an honest `unknown` because
@@ -3536,7 +3560,7 @@ async function defaultP6RunTree(project: Project, workDir?: string): Promise<Tre
  * factual: `ok`/`verdict` mirror the TreeRunOutcome, `verdictHash` is carried
  * only when the run minted one, and `substance.verdict` is the census label
  * only when the run produced a census. Absent on legacy records (unknown stays
- * honest) — a value is never invented. This seam is reached only for a GREEN
+ * honest) â€” a value is never invented. This seam is reached only for a GREEN
  * tree-run (the tested stamp is never minted for red), so a present `ok` is
  * always the run's own verdict.
  */
@@ -3555,14 +3579,14 @@ function withTreeRunVerdict(project: Project, verdict: TreeRunOutcome): Project 
   } as Project;
 }
 
-/** fixes/147 (E2): the tested-equivalent mint for a CONVERGED tree-run —
+/** fixes/147 (E2): the tested-equivalent mint for a CONVERGED tree-run â€”
  *  delegates to codegen.server's mintTreeRunTested (the same seam run-eval's
  *  single-synthesis flow consumes), which mints lastTest {label:"tested"} ONLY
  *  when the tree-run actually executed specs; a UI-shell/no-spec green run
  *  falls back to the honest current state + a coded `p6.tree.tested.skipped`
- *  note. A codegen import failure degrades to the synthesized project — the
+ *  note. A codegen import failure degrades to the synthesized project â€” the
  *  P6 DoD gate is then recorded honestly (red p6-verified), never faked.
- *  W2 · 348: the applied verdict is also persisted (withTreeRunVerdict) so the
+ *  W2 Â· 348: the applied verdict is also persisted (withTreeRunVerdict) so the
  *  record carries `treeRun`/`substance` instead of an honest-but-empty unknown. */
 async function applyTreeRunTestedMint(project: Project, verdict: TreeRunOutcome): Promise<Project> {
   let minted = project;
@@ -3573,7 +3597,7 @@ async function applyTreeRunTestedMint(project: Project, verdict: TreeRunOutcome)
     if (typeof codegen.mintTreeRunTested === "function") minted = codegen.mintTreeRunTested(project, verdict);
   } catch (err) {
     // A4-E18 (P3): this catch used to swallow a codegen import/exec failure with
-    // NO coded row — a silent-skip region that read exactly like "the mint
+    // NO coded row â€” a silent-skip region that read exactly like "the mint
     // declined". Stamp the coded warn row (the deterministic floor still
     // stands; the P6 DoD gate is then recorded red, never faked).
     minted = {
@@ -3585,7 +3609,7 @@ async function applyTreeRunTestedMint(project: Project, verdict: TreeRunOutcome)
           phase: 6 as PhaseId,
           level: "warn" as const,
           event: "p6.tree.tested.mint_failed",
-          detail: `${classifyError(err)} · tree-run tested mint unavailable (${(err instanceof Error ? err.message : String(err)).slice(0, 240)}) — no "tested" stamp minted; the P6 gate is recorded from the current state, never faked`,
+          detail: `${classifyError(err)} Â· tree-run tested mint unavailable (${(err instanceof Error ? err.message : String(err)).slice(0, 240)}) â€” no "tested" stamp minted; the P6 gate is recorded from the current state, never faked`,
         },
       ].slice(-200),
     };
@@ -3594,15 +3618,15 @@ async function applyTreeRunTestedMint(project: Project, verdict: TreeRunOutcome)
 }
 
 /**
- * T9.3 promotion (W44 · G3 · applied from fixes/319_f3_promote §C): a genuinely
+ * T9.3 promotion (W44 Â· G3 Â· applied from fixes/319_f3_promote Â§C): a genuinely
  * GREEN tree-run over an EMITTED dir promotes the dir's OWN
  * `.rapidtool/project.json` record to the tested stamp + evidence hash the run
- * just earned — the same self-guarded mint the journeys use (mintTreeRunTested:
- * outcome.ok AND ≥1 executed assertion). A red run, an ok run that executed no
+ * just earned â€” the same self-guarded mint the journeys use (mintTreeRunTested:
+ * outcome.ok AND â‰¥1 executed assertion). A red run, an ok run that executed no
  * spec, or a dir that carries no record writes NOTHING into the dir (absence is
  * honest; a stamp is never fabricated or downgraded). A re-run over an
  * already-`tested` project writes nothing when the verdict is unchanged, and
- * DOES promote when this verdict refreshed a stale hash (fixes/336 · 336-2) —
+ * DOES promote when this verdict refreshed a stale hash (fixes/336 Â· 336-2) â€”
  * the refreshed record's packet is recompiled before it is written, so the
  * emitted record never describes a different verification state.
  */
@@ -3615,7 +3639,7 @@ export async function promoteEmittedTreeTested(
   const minted = await applyTreeRunTestedMint(project, outcome);
   const afterLabel = (minted.lastTest as { label?: string } | null | undefined)?.label ?? null;
   const afterHash = (minted.lastTest as { evidenceHash?: string } | null | undefined)?.evidenceHash ?? null;
-  // Promote when THIS verdict produced (or REFRESHED — fixes/336 · 336-2) the
+  // Promote when THIS verdict produced (or REFRESHED â€” fixes/336 Â· 336-2) the
   // stamp the record must carry; a same-verdict re-run (hash unchanged) writes
   // nothing (no churn), and an already-`tested` project whose recorded hash was
   // stale is now promoted so the emitted record never keeps a hash from a
@@ -3639,14 +3663,14 @@ export async function promoteEmittedTreeTested(
 }
 
 /**
- * fixes/323 FIX-2c (T9.3 repair-dir variant · fixes/319_f3_promote §C4/§D.1) —
+ * fixes/323 FIX-2c (T9.3 repair-dir variant Â· fixes/319_f3_promote Â§C4/Â§D.1) â€”
  * the repair arm's dir promotion. `repairTreeDir` mints the tested stamp onto
  * the LEDGER inside its own `recordGreen` before the CLI layer ever sees the
  * result, so `promoteEmittedTreeTested`'s `before === "tested"` early return
- * can never write the emitted dir's own `.rapidtool/project.json` — the T9.3
+ * can never write the emitted dir's own `.rapidtool/project.json` â€” the T9.3
  * promotion would never fire for the repair arm (adjudicated in
  * fixes/323_f2_register.md). Here the CALLER attests the fresh mint from THIS
- * invocation's own evidence (`result.minted` — set only when this repair run
+ * invocation's own evidence (`result.minted` â€” set only when this repair run
  * flipped the label to "tested"; never a pre-existing label, never a red or
  * no-spec run). Keep this self-guarded: the write still requires the attested
  * fresh `tested` label AND an existing dir record; a red run, a no-spec green
@@ -3674,34 +3698,34 @@ export function promoteRepairedDirTested(
 }
 
 /**
- * fixes/144 (M4-2): bounded produce→run→repair journey for keyed P6.
+ * fixes/144 (M4-2): bounded produceâ†’runâ†’repair journey for keyed P6.
  *
  * Contract: `project` is positioned at the P6 live edge (priors sealed, the P6
  * record deterministic or awaiting). Each cycle (budget N, default 3):
- *   1. synthesize — one attempt through the live-layer P6 synthesis seam (or
+ *   1. synthesize â€” one attempt through the live-layer P6 synthesis seam (or
  *      an injected fake), receiving the previous cycle's failure tail/refusal
  *      as context;
  *   2. when the result carries a generatedTree, run the tree verdict (emit +
  *      compile-check treeRun, or an injected fake);
- *   3. green tree-run → the P6 DoD gate is recorded honestly (recordGateInto
- *      — real probes, never force-green) and gate.passed DECIDES the outcome:
- *      green tree-run AND gate.passed → CONVERGED (the tested-equivalent
- *      lastTest is minted when the run honestly executed specs — fixes/147 E2
- *      — codegen mintTreeRunTested; a UI-shell/no-spec green run is never
- *      stamped); green tree-run but a RED (or absent) gate → FAILED naming
- *      the gate — fixes/159 (F4): a journey whose own P6 gate is red must
- *      never return a bare "converged" (fixes/155 §6/§8 links 14/15);
- *      red tree-run → the failure tail is stamped on the project
+ *   3. green tree-run â†’ the P6 DoD gate is recorded honestly (recordGateInto
+ *      â€” real probes, never force-green) and gate.passed DECIDES the outcome:
+ *      green tree-run AND gate.passed â†’ CONVERGED (the tested-equivalent
+ *      lastTest is minted when the run honestly executed specs â€” fixes/147 E2
+ *      â€” codegen mintTreeRunTested; a UI-shell/no-spec green run is never
+ *      stamped); green tree-run but a RED (or absent) gate â†’ FAILED naming
+ *      the gate â€” fixes/159 (F4): a journey whose own P6 gate is red must
+ *      never return a bare "converged" (fixes/155 Â§6/Â§8 links 14/15);
+ *      red tree-run â†’ the failure tail is stamped on the project
  *      (`p6.tree.failure` warn log) and becomes the next cycle's context.
- * Budget exhausted → an honest FAILED outcome: full evidence on the project
+ * Budget exhausted â†’ an honest FAILED outcome: full evidence on the project
  * record (refusal + p6.journey.exhausted) and the deterministic floor
- * standing — no silent seal. The exhausted verdict names the LAST refusal
+ * standing â€” no silent seal. The exhausted verdict names the LAST refusal
  * text (result.refusal + the exhausted log/event excerpt) so the caller/eval
- * sees the model's final reason. KEYLESS (no injected synthesize + no key) →
+ * sees the model's final reason. KEYLESS (no injected synthesize + no key) â†’
  * no-op passthrough returning the SAME project reference, byte-identical.
  */
 /**
- * W61 B2 / PR-07 (BF-2, closes the C-04 interface) — the best-tree comparator.
+ * W61 B2 / PR-07 (BF-2, closes the C-04 interface) â€” the best-tree comparator.
  *
  * BEHAVIOUR NOTE (this is NOT a thin wrapper over a private helper): before
  * PR-07 the comparator was the module-private `isBetterTree(a, b)` and there
@@ -3723,7 +3747,7 @@ export type BestTreeMetric = { ok: boolean; ts: number; files: number };
 /** PR-07 (BF-2): the exported name the C-04 interface (repair-monotonic) uses. */
 export type TreeVerdictScore = BestTreeMetric;
 
-/** Caps keep the scalar projection EXACT in a JS double (ok-span × ts-span ×
+/** Caps keep the scalar projection EXACT in a JS double (ok-span Ã— ts-span Ã—
  *  files-span < 2^53); ts beyond the cap is treated as equally worst, which is
  *  self-consistent because `isBetterTree` is defined via the same score. */
 const TREE_VERDICT_TS_CAP = 1_000_000;
@@ -3731,8 +3755,8 @@ const TREE_VERDICT_FILES_CAP = 1_000_000;
 const TREE_VERDICT_TS_SPAN = TREE_VERDICT_TS_CAP + 1;
 const TREE_VERDICT_FILES_SPAN = TREE_VERDICT_FILES_CAP + 1;
 
-/** PR-07 (BF-2): the scalar projection of `(ok, -ts, files)` — higher is the
- *  better tree. Pure. `isBetterTree(a, b) ≡ treeVerdictScoreOf(a) > treeVerdictScoreOf(b)`. */
+/** PR-07 (BF-2): the scalar projection of `(ok, -ts, files)` â€” higher is the
+ *  better tree. Pure. `isBetterTree(a, b) â‰¡ treeVerdictScoreOf(a) > treeVerdictScoreOf(b)`. */
 export function treeVerdictScoreOf(metric: TreeVerdictScore): number {
   const ok = metric?.ok === true ? 1 : 0;
   const tsRaw = typeof metric?.ts === "number" && Number.isFinite(metric.ts) ? metric.ts : TREE_VERDICT_TS_CAP;
@@ -3783,7 +3807,7 @@ function bestTreeMetricOf(project: Project, verdict: TreeRunOutcome | null): Bes
 /** PR-07 (BF-2, C-04): the exported scalar comparator. Accepts either a
  *  tree-run outcome (`files` then names the tree file count; defaults to 0 for
  *  the outcome-only caller) or an already-built `TreeVerdictScore` metric
- *  (`{ok, ts, files}`) — the two shapes are discriminated by `compile`, which
+ *  (`{ok, ts, files}`) â€” the two shapes are discriminated by `compile`, which
  *  every TreeRunOutcome carries and a bare metric does not. */
 export function treeVerdictScore(
   outcome: TreeRunOutcome | TreeVerdictScore | null,
@@ -3806,13 +3830,13 @@ export function treeVerdictScore(
   });
 }
 
-/** PR-07 (BF-2): `isBetterTree ≡ treeVerdictScoreOf(a) > treeVerdictScoreOf(b)`. */
+/** PR-07 (BF-2): `isBetterTree â‰¡ treeVerdictScoreOf(a) > treeVerdictScoreOf(b)`. */
 function isBetterTree(a: BestTreeMetric, b: BestTreeMetric): boolean {
   return treeVerdictScoreOf(a) > treeVerdictScoreOf(b);
 }
 
 /** PR-07 (BF-2, C-04): a stable signature of "the SAME failure as last cycle"
- *  — the coded refusal ‖ the failure tail ‖ the sorted offender-file set. The
+ *  â€” the coded refusal â€– the failure tail â€– the sorted offender-file set. The
  *  journey aborts when a cycle reproduces the previous cycle's signature: the
  *  repair carried zero new information, so spending the remaining budget would
  *  re-buy a known-dead end. Pure; order-independent in the offender set. */
@@ -3843,7 +3867,7 @@ function keepBestTree(
   const cur = current ?? bestTreeMetricOf(project, null);
   if (!isBetterTree(best.metric, cur)) return { project, gate };
   events.push(
-    `best-tree-kept: earlier cycle had ${best.metric.ts} diagnostic(s) / ${best.metric.files} file(s) vs ${cur.ts} / ${cur.files} — returning the better tree`,
+    `best-tree-kept: earlier cycle had ${best.metric.ts} diagnostic(s) / ${best.metric.files} file(s) vs ${cur.ts} / ${cur.files} â€” returning the better tree`,
   );
   const kept = p6JourneyLog(
     { ...project, generatedTree: best.project.generatedTree },
@@ -3853,7 +3877,7 @@ function keepBestTree(
   );
   // G5: the graft replaces the tree, but `project`'s phase-6 gate verdict was
   // recorded over the LAST cycle's tree. Recompute it over the tree actually
-  // persisted, so the verdict on disk is the verdict of the tree on disk —
+  // persisted, so the verdict on disk is the verdict of the tree on disk â€”
   // never keep a verdict computed over another tree (bakery-florist-orders:
   // the recorded gate failed p6-arch while the grafted tree passes it).
   // 353: `kept` already carries the emitter surface stamped by codegen at tree
@@ -3874,8 +3898,8 @@ function keepBestTree(
       "warn",
       "p6.journey.gate-recomputed",
       nextGate === null
-        ? "phase-6 gate recomputed over the persisted best tree — no gate record (phase 6 not complete)"
-        : `phase-6 gate recomputed over the persisted best tree — ${nextGate.passed ? "PASS" : `FAIL · ${nextGate.unmet.length} unmet`}`,
+        ? "phase-6 gate recomputed over the persisted best tree â€” no gate record (phase 6 not complete)"
+        : `phase-6 gate recomputed over the persisted best tree â€” ${nextGate.passed ? "PASS" : `FAIL Â· ${nextGate.unmet.length} unmet`}`,
     ),
     gate: nextGate,
   };
@@ -3884,13 +3908,13 @@ function keepBestTree(
 /** PR-16 (I7, O-01): de-materialize ONE chunk of a persisted tree back to the
  *  RAW accepted source + exports codegen's `resumeAccepted` consumer expects.
  *  `materializeImportableTree` prefixes each chunk with cross-file import lines
- *  and appends a single `export { … };` list; both are removed here. The import
+ *  and appends a single `export { â€¦ };` list; both are removed here. The import
  *  strip matches the materializer's OWN specifier (codegen's `relTsImport`) so
  *  a model-authored import is never mistaken for a materializer one. Pure. */
 /** The generated shared-contract prelude's exact header (see codegen
  *  `contractTypePreludeLines`) and a declaration line of its canonical shape. */
 const PRELUDE_HEADER_LINE_1 =
-  "// Generated shared interface contract (single source of truth — the build injects";
+  "// Generated shared interface contract (single source of truth â€” the build injects";
 const PRELUDE_HEADER_LINE_2 = "// these exact aliases; do not redeclare or redefine them).";
 const PRELUDE_DECL_RE = /^type [A-Za-z_$][\w$]* = \{.*\[key: string\]: unknown;?.*\};$/;
 function dematerializeAcceptedChunk(
@@ -3936,14 +3960,14 @@ function dematerializeAcceptedChunk(
 }
 
 /** PR-16 (I7, O-01): rebuild the previous cycle's RAW accepted chunk set from
- *  the ONLY representation a project carries — its persisted (materialized)
- *  `generatedTree` — so `driveP6Journey` can thread it as
+ *  the ONLY representation a project carries â€” its persisted (materialized)
+ *  `generatedTree` â€” so `driveP6Journey` can thread it as
  *  `ctx.resumeAccepted` and codegen reuses the accepted chunks instead of
  *  re-buying every one (bakery-florist-orders burned 419k tokens re-synthesizing
  *  from zero). The barrel/entry file is not a plan chunk and is excluded;
  *  passing the MATERIALIZED bytes straight through would double every import and
  *  export line when codegen re-materializes, so each row is de-materialized
- *  (`dematerializeAcceptedChunk`). Absent/empty tree ⇒ undefined ⇒ no ctx key
+ *  (`dematerializeAcceptedChunk`). Absent/empty tree â‡’ undefined â‡’ no ctx key
  *  (byte-identical legacy journey). Pure/deterministic; the codegen import is
  *  dynamic so headless's module graph is unchanged, and any failure degrades to
  *  undefined rather than perturbing the run. */
@@ -3984,20 +4008,20 @@ export async function driveP6Journey(
     budget?: number;
     deps?: Partial<P6JourneyDeps>;
     workDir?: string;
-    /** T4 (112 §4.4 / 216g): caller-supplied cross-project proven lesson rows
-     *  carried on EVERY cycle's ctx (⇒ p6CycleLiveDeps ⇒ codegen). */
+    /** T4 (112 Â§4.4 / 216g): caller-supplied cross-project proven lesson rows
+     *  carried on EVERY cycle's ctx (â‡’ p6CycleLiveDeps â‡’ codegen). */
     proven?: readonly RankableLessonRow[];
   } = {},
 ): Promise<P6JourneyResult> {
   const budget =
     typeof opts.budget === "number" && opts.budget > 0 ? Math.floor(opts.budget) : P6_JOURNEY_DEFAULT_BUDGET;
-  // T4: normalize once — an absent/empty supply materializes no ctx key, so a
+  // T4: normalize once â€” an absent/empty supply materializes no ctx key, so a
   // journey without rows builds the exact ctx it did before (byte-identity).
   const proven = Array.isArray(opts.proven) && opts.proven.length > 0 ? opts.proven : null;
   const events: string[] = [];
   const usingDefaultSeam = opts.deps?.synthesize === undefined;
   // KEYLESS = no-op passthrough: byte-identical same-reference floor. Only the
-  // DEFAULT seam short-circuits — an injected synthesize owns its key policy.
+  // DEFAULT seam short-circuits â€” an injected synthesize owns its key policy.
   if (usingDefaultSeam && !(await p6JourneyIsKeyed())) {
     return {
       outcome: "keyless",
@@ -4007,12 +4031,12 @@ export async function driveP6Journey(
       treeTail: null,
       refusal: null,
       gate: null,
-      events: ["keyless: no DEEPSEEK_API_KEY — P6 journey is a no-op passthrough (deterministic floor)"],
+      events: ["keyless: no DEEPSEEK_API_KEY â€” P6 journey is a no-op passthrough (deterministic floor)"],
     };
   }
   const synthesize = opts.deps?.synthesize ?? defaultP6Synthesize;
   const runTree = opts.deps?.runTree ?? ((p: Project): Promise<TreeRunOutcome> => defaultP6RunTree(p, opts.workDir));
-  // fixes/159 (F4): the gate verdict seam — default is the REAL recordGateInto
+  // fixes/159 (F4): the gate verdict seam â€” default is the REAL recordGateInto
   // over phase 6 (real probes, never force-green); a fake only replaces it in
   // unit tests, exactly like the synthesize/runTree seams above.
   const recordGate = opts.deps?.recordGate ?? ((p: Project): Project => recordGateInto(p, 6 as PhaseId));
@@ -4022,7 +4046,7 @@ export async function driveP6Journey(
   // fixes/326 F1b: at most ONE gate-repair diversion per journey.
   let gateRepair: string | null = null;
   let gateRepairUsed = false;
-  // W61 B2: the best tree seen so far and the last measured metric — a FAILED
+  // W61 B2: the best tree seen so far and the last measured metric â€” a FAILED
   // journey returns the best tree, never a later regression.
   let bestTree: { project: Project; metric: BestTreeMetric } | null = null;
   let lastMetric: BestTreeMetric | null = null;
@@ -4031,13 +4055,13 @@ export async function driveP6Journey(
   // chunks for zero new information, so reuse instead of spending another call.
   let prevSynthKey: string | null = null;
   let prevSynthProject: Project | null = null;
-  // PR-12 (BF-2, C-04): the previous cycle's failure signature — a repeat means
+  // PR-12 (BF-2, C-04): the previous cycle's failure signature â€” a repeat means
   // the repair carried zero new information, so the journey aborts rather than
   // spending the remaining budget re-buying a known-dead end.
   let prevFailureSig: string | null = null;
   // PR-16 (I7, O-01): the previous cycle's RAW accepted chunks, rebuilt from the
   // tree it sealed. Threaded as ctx.resumeAccepted so codegen reuses the chunks
-  // it already paid for; undefined ⇒ no ctx key ⇒ byte-identical legacy.
+  // it already paid for; undefined â‡’ no ctx key â‡’ byte-identical legacy.
   let resumeAccepted: P6JourneyCycleContext["resumeAccepted"] = undefined;
   for (let cycle = 1; cycle <= budget; cycle++) {
     const ctx: P6JourneyCycleContext = { cycle };
@@ -4056,14 +4080,14 @@ export async function driveP6Journey(
       // model would re-synthesize the same accepted tree (419k tokens for zero
       // convergence). Reuse it; a cycle that carries NEW context still calls.
       synthesized = prevSynthProject;
-      events.push(`cycle ${cycle}: identical repair context — synthesis skipped, accepted tree reused (O-01)`);
+      events.push(`cycle ${cycle}: identical repair context â€” synthesis skipped, accepted tree reused (O-01)`);
     } else {
       try {
         synthesized = await synthesize(p, ctx);
       } catch (err) {
         synthesized = p;
         events.push(
-          `cycle ${cycle}: synthesis seam threw (${err instanceof Error ? err.message : String(err)}) — deterministic floor stands`,
+          `cycle ${cycle}: synthesis seam threw (${err instanceof Error ? err.message : String(err)}) â€” deterministic floor stands`,
         );
       }
       prevSynthProject = synthesized;
@@ -4078,14 +4102,14 @@ export async function driveP6Journey(
     if (ref !== null) refusal = ref;
     const tree = synthesized.generatedTree;
     if (!Array.isArray(tree) || tree.length === 0) {
-      // No runnable tree → the cycle did not converge. The codegen refusal
+      // No runnable tree â†’ the cycle did not converge. The codegen refusal
       // detail (or an honest no-tree note) becomes the next cycle's context.
       treeTail = (refusal ?? `cycle ${cycle}: synthesis produced no generatedTree (deterministic floor)`).slice(
         0,
         P6_JOURNEY_TAIL_MAX,
       );
       events.push(
-        `cycle ${cycle}: no generatedTree after synthesis${refusal ? ` — ${refusal.slice(0, 140)}` : ""}`,
+        `cycle ${cycle}: no generatedTree after synthesis${refusal ? ` â€” ${refusal.slice(0, 140)}` : ""}`,
       );
       p = synthesized;
       continue;
@@ -4108,29 +4132,29 @@ export async function driveP6Journey(
       bestTree = { project: synthesized, metric: lastMetric };
     }
     if (verdict.ok === true) {
-      // GREEN tree-run. Convergence is NOT automatic: fixes/155 §6/§8 (chain
-      // links 14/15) + fixes/157 P0-2(b) — the pre-fixes/159 code recorded the
+      // GREEN tree-run. Convergence is NOT automatic: fixes/155 Â§6/Â§8 (chain
+      // links 14/15) + fixes/157 P0-2(b) â€” the pre-fixes/159 code recorded the
       // P6 DoD gate (honestly red on a stub floor) and then returned
       // "converged" WITHOUT reading gate.passed: a journey could converge
       // while its own gate was red (the recorded-then-ignored gate). Now:
       //  1. record the P6 DoD gate honestly FIRST (recordGateInto runs the
       //     real probes; never force-green);
-      //  2. gate.passed === true → mint tested-equivalent lastTest THEN
-      //     CONVERGED; gate red or absent → FAILED naming the gate, and
-      //     NEVER mint lastTest:"tested" (T0.6 — mint-after-gate).
+      //  2. gate.passed === true â†’ mint tested-equivalent lastTest THEN
+      //     CONVERGED; gate red or absent â†’ FAILED naming the gate, and
+      //     NEVER mint lastTest:"tested" (T0.6 â€” mint-after-gate).
       let finalProject = synthesized;
       let gate: P6JourneyResult["gate"] = null;
       const rec6 = (finalProject.phases ?? []).find((ph) => ph.id === 6);
       if (rec6?.status === "complete") {
         // C-1 (WB-1 defusal, 2026-09-24): mint the tested-equivalent from THIS
         // cycle's genuinely green tree-run BEFORE recording the gate. T0.6's
-        // intent is preserved untouched — the mint is still never forced:
-        // mintTreeRunTested() self-guards on `outcome.ok === true` AND ≥1
+        // intent is preserved untouched â€” the mint is still never forced:
+        // mintTreeRunTested() self-guards on `outcome.ok === true` AND â‰¥1
         // executed assertion, and a non-executed green run mints nothing
         // (p6.tree.tested.skipped). Only the ORDER changes: the old order made
-        // p6-verified — which requires the mint's lastTest — a precondition of
+        // p6-verified â€” which requires the mint's lastTest â€” a precondition of
         // gate.passed, which gated the mint. Circular: every chunked keyed tree
-        // could never converge (223 §4 C-1; RED-first test added in
+        // could never converge (223 Â§4 C-1; RED-first test added in
         // headless.test.ts "C-1 (WB-1)"). The post-gate mint below is idempotent
         // (mintTreeRunTested returns early when already tested) and stays.
         finalProject = await applyTreeRunTestedMint(finalProject, verdict);
@@ -4144,8 +4168,8 @@ export async function driveP6Journey(
           };
         }
       }
-      // fixes/336 · 336-2: the mint and the DoD/gate record just changed this
-      // project's verification state — recompile the packet (the SAME builder
+      // fixes/336 Â· 336-2: the mint and the DoD/gate record just changed this
+      // project's verification state â€” recompile the packet (the SAME builder
       // every other stamp site uses) so the record's OWN packet describes the
       // stamp and gate it now carries. Without this the persisted record ships
       // a packet whose P6 line / DoD section predate the mint (the live
@@ -4164,9 +4188,9 @@ export async function driveP6Journey(
               finalProject,
               "error",
               "p6.journey.failed",
-              `tree-run ok + P6 gate green but fixtures pending (${pending.join(", ") || fx.length}) — never auto-approve`,
+              `tree-run ok + P6 gate green but fixtures pending (${pending.join(", ") || fx.length}) â€” never auto-approve`,
             );
-            events.push(`cycle ${cycle}: fixtures pending — P6 journey FAILED`);
+            events.push(`cycle ${cycle}: fixtures pending â€” P6 journey FAILED`);
             const kept = keepBestTree(finalProject, bestTree, lastMetric, events, gate);
             return { outcome: "failed", project: kept.project, cycles: cycle, budget, treeTail: null, refusal, gate: kept.gate, events };
           }
@@ -4177,9 +4201,9 @@ export async function driveP6Journey(
               finalProject,
               "error",
               "p6.journey.failed",
-              `approved fixtures did not pass under treeRun — ${why}`,
+              `approved fixtures did not pass under treeRun â€” ${why}`,
             );
-            events.push(`cycle ${cycle}: fixtures red under treeRun — P6 journey FAILED`);
+            events.push(`cycle ${cycle}: fixtures red under treeRun â€” P6 journey FAILED`);
             const kept = keepBestTree(finalProject, bestTree, lastMetric, events, gate);
             return { outcome: "failed", project: kept.project, cycles: cycle, budget, treeTail: null, refusal, gate: kept.gate, events };
           }
@@ -4191,21 +4215,21 @@ export async function driveP6Journey(
           "p6.journey.converged",
           `tree-run ok after ${cycle}/${budget} cycle(s) + P6 gate green (${gate.evidenceHash.slice(0, 8)})`,
         );
-        // Re-stamp LAST (fixes/336 · 336-2): the converged log is the final
-        // record mutation, so compile the packet AFTER it — the returned
+        // Re-stamp LAST (fixes/336 Â· 336-2): the converged log is the final
+        // record mutation, so compile the packet AFTER it â€” the returned
         // record's own packet is then byte-identical to a fresh compile of the
         // record, and never lags the verification state it describes.
         finalProject = stampPacket(finalProject);
-        events.push(`cycle ${cycle}: tree-run ok + P6 gate passed — P6 journey converged`);
+        events.push(`cycle ${cycle}: tree-run ok + P6 gate passed â€” P6 journey converged`);
         return { outcome: "converged", project: finalProject, cycles: cycle, budget, treeTail: null, refusal, gate, events };
       }
       // Green tree-run but the journey's OWN P6 gate is red (or was never
-      // recorded) — this is a recorded failure, never convergence. The
+      // recorded) â€” this is a recorded failure, never convergence. The
       // evidence names the failed gate + its unmet criteria (the honest
       // qualifier: the treeRun being green is what the DoD gate just weighed
-      // and found wanting — "converged" would hide it).
+      // and found wanting â€” "converged" would hide it).
       // fixes/326 F1b: ONE bounded gate-repair cycle. A green tree-run with a
-      // red fit-class gate is REPAIRABLE within the existing budget — the
+      // red fit-class gate is REPAIRABLE within the existing budget â€” the
       // artifact runs; the red criteria name the brief's own unmet
       // vocabulary/capabilities. Spend exactly one cycle re-synthesizing WITH
       // those recorded requirements as context. Honesty is untouched: the
@@ -4218,33 +4242,33 @@ export async function driveP6Journey(
           finalProject,
           "warn",
           "p6.journey.gate-repair",
-          `tree-run ok but P6 gate FAIL (${gate.unmet.length} unmet) — one bounded gate-repair cycle with the unmet requirements as context`,
+          `tree-run ok but P6 gate FAIL (${gate.unmet.length} unmet) â€” one bounded gate-repair cycle with the unmet requirements as context`,
         );
         events.push(
-          `cycle ${cycle}: tree-run ok but P6 gate FAIL — one bounded gate-repair cycle (unmet requirements fed as context)`,
+          `cycle ${cycle}: tree-run ok but P6 gate FAIL â€” one bounded gate-repair cycle (unmet requirements fed as context)`,
         );
         continue;
       }
       const gateReason =
         gate === null
-          ? "no P6 DoD gate record (phase 6 not complete) — converged cannot be asserted without a gate verdict"
-          : `P6 gate FAIL · ${gate.unmet.length} unmet · ${gate.evidenceHash.slice(0, 8)}${
-              gate.unmet.length > 0 ? ` — ${gate.unmet[0]!.slice(0, 120)}` : ""
+          ? "no P6 DoD gate record (phase 6 not complete) â€” converged cannot be asserted without a gate verdict"
+          : `P6 gate FAIL Â· ${gate.unmet.length} unmet Â· ${gate.evidenceHash.slice(0, 8)}${
+              gate.unmet.length > 0 ? ` â€” ${gate.unmet[0]!.slice(0, 120)}` : ""
             }`;
       finalProject = p6JourneyLog(
         finalProject,
         "error",
         "p6.journey.failed",
-        `tree-run ok after ${cycle}/${budget} cycle(s) but ${gateReason} — journey FAILED, not converged (converged requires treeRun ok AND gate.passed)`,
+        `tree-run ok after ${cycle}/${budget} cycle(s) but ${gateReason} â€” journey FAILED, not converged (converged requires treeRun ok AND gate.passed)`,
       );
-      events.push(`cycle ${cycle}: tree-run ok but ${gateReason} — P6 journey FAILED (converged requires gate.passed)`);
+      events.push(`cycle ${cycle}: tree-run ok but ${gateReason} â€” P6 journey FAILED (converged requires gate.passed)`);
       const kept = keepBestTree(finalProject, bestTree, lastMetric, events, gate);
       return { outcome: "failed", project: kept.project, cycles: cycle, budget, treeTail: null, refusal, gate: kept.gate, events };
     }
     treeTail = treeRunFailureTail(verdict).slice(0, P6_JOURNEY_TAIL_MAX);
     p = p6JourneyLog(synthesized, "warn", "p6.tree.failure", treeTail);
     // PR-12 (BF-2, C-04): a cycle that reproduces the previous cycle's failure
-    // signature carried no new information. Abort honestly — do not spend the
+    // signature carried no new information. Abort honestly â€” do not spend the
     // remaining budget re-buying the same dead end.
     const failSig = failureSignature({
       refusal,
@@ -4252,26 +4276,26 @@ export async function driveP6Journey(
       offenderFiles: treeRunFailureFiles(verdict),
     });
     if (prevFailureSig !== null && failSig === prevFailureSig) {
-      const detail = `no progress: cycle ${cycle} reproduced cycle ${cycle - 1}'s failure signature (${failSig}) — aborting with ${budget - cycle} cycle(s) unspent`;
+      const detail = `no progress: cycle ${cycle} reproduced cycle ${cycle - 1}'s failure signature (${failSig}) â€” aborting with ${budget - cycle} cycle(s) unspent`;
       p = p6JourneyLog(p, "error", "p6.journey.no-progress", detail);
       events.push(detail);
       const kept = keepBestTree(p, bestTree, lastMetric, events, null);
       return { outcome: "failed", project: kept.project, cycles: cycle, budget, treeTail, refusal, gate: kept.gate, events };
     }
     prevFailureSig = failSig;
-    events.push(`cycle ${cycle}: tree-run fail — ${treeTail.slice(0, 140)}`);
+    events.push(`cycle ${cycle}: tree-run fail â€” ${treeTail.slice(0, 140)}`);
   }
-  // Budget exhausted → honest FAILED outcome; the deterministic floor (the
+  // Budget exhausted â†’ honest FAILED outcome; the deterministic floor (the
   // project the seam last left, with its refusal/tree-failure evidence) stands.
   p = p6JourneyLog(
     p,
     "error",
     "p6.journey.exhausted",
-    `${budget} cycle(s) without a green tree-run${refusal ? ` — last refusal: ${refusal.slice(0, 180)}` : ""}`,
+    `${budget} cycle(s) without a green tree-run${refusal ? ` â€” last refusal: ${refusal.slice(0, 180)}` : ""}`,
   );
   events.push(
-    `budget exhausted after ${budget} cycle(s) — P6 journey FAILED, deterministic floor stands${
-      refusal !== null ? ` — last refusal: ${refusal.slice(0, 180)}` : ""
+    `budget exhausted after ${budget} cycle(s) â€” P6 journey FAILED, deterministic floor stands${
+      refusal !== null ? ` â€” last refusal: ${refusal.slice(0, 180)}` : ""
     }`,
   );
   const kept = keepBestTree(p, bestTree, lastMetric, events, null);
@@ -4279,11 +4303,11 @@ export async function driveP6Journey(
 }
 
 /**
- * W-02 (fixes/271 · §R1-f02 + §W27-A — the ONE P6-edge seam): phase 6's keyed
- * path for run / gate / wild / console-live. Wraps driveP6Journey — keyless
- * (no injected synthesize + no key) ⇒ the deterministic floor, byte-identical
+ * W-02 (fixes/271 Â· Â§R1-f02 + Â§W27-A â€” the ONE P6-edge seam): phase 6's keyed
+ * path for run / gate / wild / console-live. Wraps driveP6Journey â€” keyless
+ * (no injected synthesize + no key) â‡’ the deterministic floor, byte-identical
  * to today's liveLayer(p, 6). The "failed" branch is decided explicitly: a
- * journey that RAN but did not converge returns j.project — its synthesis/
+ * journey that RAN but did not converge returns j.project â€” its synthesis/
  * gate/mint evidence (including the failed-with-fixtures shape) must reach the
  * caller (repair/journey parity); only "keyless" (nothing ran) swaps back to
  * the floor, so a failed cycle is never silently hidden behind it.
@@ -4291,7 +4315,7 @@ export async function driveP6Journey(
 export async function runP6Edge(
   project: Project,
   deps?: Partial<P6JourneyDeps>,
-  /** T4 (112 §4.4 / 216g): caller-supplied proven lesson rows for P6. */
+  /** T4 (112 Â§4.4 / 216g): caller-supplied proven lesson rows for P6. */
   proven?: readonly RankableLessonRow[],
 ): Promise<Project> {
   const j = await driveP6Journey(project, {
@@ -4302,29 +4326,29 @@ export async function runP6Edge(
 }
 
 // ---------------------------------------------------------------------------
-// fixes/149 P0-1 (150-G1) — the emit→edit→re-emit continuation seam.
+// fixes/149 P0-1 (150-G1) â€” the emitâ†’editâ†’re-emit continuation seam.
 //
 // The emitted dir is a first-class ARTIFACT; the project JSON is the LEDGER.
-//   importTreeDir  — reads the dir's tree files back into project.generatedTree
-//                    (path→content, per-file fnv1a hash — a NEW hash means the
+//   importTreeDir  â€” reads the dir's tree files back into project.generatedTree
+//                    (pathâ†’content, per-file fnv1a hash â€” a NEW hash means the
 //                    edit is real). Refused/missing paths are WARNINGS, never
 //                    silent drops (scaffold.ts treePathRefusal parity).
-//   repairTreeDir  — bounded repair cycle AGAINST the dir, reusing the
-//                    driveP6Journey seam pieces above: treeRun(dir) → red tail
-//                    → one bounded synthesis repair call whose ctx reaches
-//                    codegen as deps.treeFailure (p6CycleLiveDeps) → the
-//                    repaired tree files are applied onto the dir IN PLACE →
-//                    re-import (disk truth back into the ledger) → treeRun
-//                    again. Green → the tested-equivalent mint
+//   repairTreeDir  â€” bounded repair cycle AGAINST the dir, reusing the
+//                    driveP6Journey seam pieces above: treeRun(dir) â†’ red tail
+//                    â†’ one bounded synthesis repair call whose ctx reaches
+//                    codegen as deps.treeFailure (p6CycleLiveDeps) â†’ the
+//                    repaired tree files are applied onto the dir IN PLACE â†’
+//                    re-import (disk truth back into the ledger) â†’ treeRun
+//                    again. Green â†’ the tested-equivalent mint
 //                    (applyTreeRunTestedMint) + the honest P6 gate record.
-//                    Budget exhausted → honest FAILED + deterministic floor.
-// emitProject is NEVER called here — the dir is never re-emitted over; only
+//                    Budget exhausted â†’ honest FAILED + deterministic floor.
+// emitProject is NEVER called here â€” the dir is never re-emitted over; only
 // tree rows whose content changed are written back (that write IS the repair).
 // ---------------------------------------------------------------------------
 
 /** scaffold.ts treePathRefusal parity: the allowed repo-relative roots a tree
  *  file may live at (src/ subdir families + tests/). Mirrored here because
- *  scaffold.ts is not this seam's file — keep in sync (single discipline). */
+ *  scaffold.ts is not this seam's file â€” keep in sync (single discipline). */
 const REPAIR_TREE_ALLOWED_ROOTS = [
   "src/api/",
   "src/domain/",
@@ -4335,29 +4359,29 @@ const REPAIR_TREE_ALLOWED_ROOTS = [
   "tests/",
 ];
 
-/** scaffold.ts TREE_ALLOWED_FILES parity — exact repo-relative paths a tree
+/** scaffold.ts TREE_ALLOWED_FILES parity â€” exact repo-relative paths a tree
  *  row may claim even though they sit outside every allowed root prefix.
  *  `codegen.TREE_ENTRY_PATH` is `src/generated.ts` (the ESM barrel EVERY
  *  materialized tree lands at): the emitter writes it, so the repair
- *  re-import/apply discipline MUST admit it too — pre-331 the mirror lacked
+ *  re-import/apply discipline MUST admit it too â€” pre-331 the mirror lacked
  *  this exact-file allowance, so the tree's own barrel was refused on both the
  *  read (import) and write (apply) sides and could never round-trip. Exact
  *  match (never a prefix) so a look-alike like `src/generated.ts.bak` stays
  *  refused, exactly as scaffold.ts declares. */
 const REPAIR_TREE_ALLOWED_FILES = new Set(["src/generated.ts"]);
 
-/** scaffold.ts TREE_RESERVED parity — scaffold-owned files a tree row may
+/** scaffold.ts TREE_RESERVED parity â€” scaffold-owned files a tree row may
  *  never claim (tests/oracle.spec.ts is the machine-verified acceptance
  *  contract, always emitted by the scaffold itself). */
 const REPAIR_TREE_RESERVED = new Set(["tests/oracle.spec.ts"]);
 
-/** A single safe path segment — the same charset the emitter's own paths use. */
+/** A single safe path segment â€” the same charset the emitter's own paths use. */
 const REPAIR_TREE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 
-/** Validate one tree path for dir re-import/apply — null when safe, else a
+/** Validate one tree path for dir re-import/apply â€” null when safe, else a
  *  human refusal reason. Mirrors scaffold.ts treePathRefusal (traversal,
  *  absolute, reserved, unsafe-segment and outside-root rows are refused
- *  loudly — a hostile row can never read/write outside the emitted dir). */
+ *  loudly â€” a hostile row can never read/write outside the emitted dir). */
 function repairTreePathRefusal(raw: unknown): string | null {
   if (typeof raw !== "string" || !raw) return "path is not a non-empty string";
   const p = raw;
@@ -4386,7 +4410,7 @@ export type ImportTreeDirResult = {
   project: Project;
   /** Tree paths whose on-disk content was read back into the ledger. */
   imported: string[];
-  /** Imported rows byte-identical to the ledger row (same hash — untouched). */
+  /** Imported rows byte-identical to the ledger row (same hash â€” untouched). */
   unchanged: string[];
   /** Imported rows whose on-disk hash differs from the ledger row (real edit). */
   changed: string[];
@@ -4398,11 +4422,11 @@ export type ImportTreeDirResult = {
 };
 
 /**
- * fixes/149 P0-1: hash-checked dir→ledger re-import. For every
+ * fixes/149 P0-1: hash-checked dirâ†’ledger re-import. For every
  * project.generatedTree row, read the file at its own path inside `dir` and
- * rebuild the row from the on-disk bytes (fnv1a hash — a hash that differs
+ * rebuild the row from the on-disk bytes (fnv1a hash â€” a hash that differs
  * from the ledger row's is a REAL edit). Pure read: no file is written, no row
- * is silently dropped — a refused path (traversal/absolute/reserved/outside
+ * is silently dropped â€” a refused path (traversal/absolute/reserved/outside
  * root, scaffold.ts discipline) or a missing file keeps the ledger row and is
  * listed in `warnings`. The returned project is the honest ledger state.
  */
@@ -4427,7 +4451,7 @@ export function importTreeDir(project: Project, dir: string): ImportTreeDirResul
     });
     if (!path) {
       refused.push("<no-path>");
-      warnings.push("generatedTree:refused:<no-path>:row is not a file record — kept in the ledger, never read from the dir");
+      warnings.push("generatedTree:refused:<no-path>:row is not a file record â€” kept in the ledger, never read from the dir");
       out.push(keep());
       continue;
     }
@@ -4435,7 +4459,7 @@ export function importTreeDir(project: Project, dir: string): ImportTreeDirResul
     if (refusal !== null) {
       refused.push(path);
       warnings.push(
-        `generatedTree:refused:${JSON.stringify(path)}:${refusal} — row kept in the ledger, never read from the dir`,
+        `generatedTree:refused:${JSON.stringify(path)}:${refusal} â€” row kept in the ledger, never read from the dir`,
       );
       out.push(keep());
       continue;
@@ -4450,7 +4474,7 @@ export function importTreeDir(project: Project, dir: string): ImportTreeDirResul
     if (body === null) {
       missing.push(path);
       warnings.push(
-        `generatedTree:missing:${JSON.stringify(path)}:no readable file in ${target} — ledger row kept (the artifact lost the file); tree-run will surface the break`,
+        `generatedTree:missing:${JSON.stringify(path)}:no readable file in ${target} â€” ledger row kept (the artifact lost the file); tree-run will surface the break`,
       );
       out.push(keep());
       continue;
@@ -4476,8 +4500,8 @@ export function importTreeDir(project: Project, dir: string): ImportTreeDirResul
   };
 }
 
-/** T-107.1 (216r · W7-L1): one landed patch (str_replace) delta as the repair
- *  result reports it — the structured half of the `p6.repair.delta` record
+/** T-107.1 (216r Â· W7-L1): one landed patch (str_replace) delta as the repair
+ *  result reports it â€” the structured half of the `p6.repair.delta` record
  *  codegen writes (`codegen.server.ts patchDeltaLogEntry`; keep the two in
  *  step). */
 export type RepairDeltaRecord = {
@@ -4492,7 +4516,7 @@ export type RepairDeltaRecord = {
 };
 
 /** Read the patch-repair records a synthesis cycle wrote onto the project:
- *  `p6.repair.delta` (structured JSON detail — the codegen codec) and
+ *  `p6.repair.delta` (structured JSON detail â€” the codegen codec) and
  *  `p6.repair.patch.refused` (coded refusal details). Pure and total: a
  *  malformed record is skipped, never thrown, and non-string details are
  *  ignored. */
@@ -4522,7 +4546,7 @@ export function repairPatchRecords(project: Project): { deltas: RepairDeltaRecor
           });
         }
       } catch {
-        /* malformed record — skipped, never thrown */
+        /* malformed record â€” skipped, never thrown */
       }
     } else if (entry.event === "p6.repair.patch.refused") {
       refusals.push(entry.detail);
@@ -4531,16 +4555,16 @@ export function repairPatchRecords(project: Project): { deltas: RepairDeltaRecor
   return { deltas, refusals };
 }
 
-/** One repair-cycle synthesis/run seam pair — the dir-based sibling of
+/** One repair-cycle synthesis/run seam pair â€” the dir-based sibling of
  *  P6JourneyDeps. Defaults are the PRODUCTION seams (live-layer P6 synthesis
  *  + compile-check treeRun over the dir); fakes replace them in unit tests
  *  only (deterministic, no key / network). */
 export type RepairTreeDeps = {
-  /** Produce/repair seam — one bounded synthesis attempt. Default: the SAME
+  /** Produce/repair seam â€” one bounded synthesis attempt. Default: the SAME
    *  defaultP6Synthesize driveP6Journey uses (liveLayer phase 6; the red tail
    *  reaches codegen as deps.treeFailure via p6CycleLiveDeps). */
   synthesize: (project: Project, ctx: P6JourneyCycleContext) => Promise<Project>;
-  /** Tree verdict seam over the ARTIFACT dir (never an emit — the dir is the
+  /** Tree verdict seam over the ARTIFACT dir (never an emit â€” the dir is the
    *  artifact). Default: compile-check.server's dir-based treeRun. */
   runTree: (dir: string) => Promise<TreeRunOutcome>;
 };
@@ -4562,7 +4586,7 @@ export type RepairTreeResult = {
   /** Last codegen refusal detail seen (p6.synthesis.refused), if any. */
   refusal: string | null;
   /** Recorded P6 DoD gate after convergence (null unless the P6 record is
-   *  complete and was re-recorded — the honest verdict, never force-green). */
+   *  complete and was re-recorded â€” the honest verdict, never force-green). */
   gate: { passed: boolean; unmet: string[]; evidenceHash: string } | null;
   /** Final tree verdict (the run that decided converge/fail). */
   treeRun: TreeRunOutcome | null;
@@ -4573,7 +4597,7 @@ export type RepairTreeResult = {
   import: ImportTreeDirResult;
   /** Repair writes performed onto the dir (union across cycles). `refused`
    *  carries two honest kinds, each with its reason in `warnings`: a row the
-   *  applier refused (path discipline / parse gate), and — W45 finding D — a
+   *  applier refused (path discipline / parse gate), and â€” W45 finding D â€” a
    *  file the tree-run NAMED as its failure that the cycle neither wrote nor
    *  refused, so a silently-skipped failing file can never look like progress. */
   applied: {
@@ -4581,11 +4605,11 @@ export type RepairTreeResult = {
     unchanged: string[];
     refused: string[];
     warnings: string[];
-    /** T-107.1 (216r): the patch (str_replace) deltas the cycles LANDED —
+    /** T-107.1 (216r): the patch (str_replace) deltas the cycles LANDED â€”
      *  structured + unified, read back from the p6.repair.delta records the
      *  codegen repair wrote onto the project's log ledger. */
     deltas: RepairDeltaRecord[];
-    /** Coded patch refusals (p6.repair.patch.refused) — each is a delta that
+    /** Coded patch refusals (p6.repair.patch.refused) â€” each is a delta that
      *  did NOT land and whose legacy full-rewrite repair ran. */
     patchRefusals: string[];
   };
@@ -4593,7 +4617,7 @@ export type RepairTreeResult = {
 };
 
 /** Default repair runTree seam: compile-check.server's dir-based treeRun. An
- *  unavailable seam is a red outcome with the honest error — never a pass. */
+ *  unavailable seam is a red outcome with the honest error â€” never a pass. */
 async function defaultRepairRunTree(dir: string): Promise<TreeRunOutcome> {
   try {
     const ccSpec = "./compile-check." + "server.ts";
@@ -4622,14 +4646,14 @@ async function defaultRepairRunTree(dir: string): Promise<TreeRunOutcome> {
 }
 
 /** 216 (T-02): the set of `generatedTree` paths whose source does NOT parse,
- *  resolved through the SAME string-computed dynamic seam `treeRun` uses —
+ *  resolved through the SAME string-computed dynamic seam `treeRun` uses â€”
  *  because `typescript` is a devDependency and must never enter this module's
  *  static graph. Refusing to write a non-parsing row is the whole point: the
  *  checker already existed, it just sat off the write path.
  *
  *  Deliberately fail-OPEN when the seam is unavailable: in exactly that case the
  *  tree-run verdict over the same artifact is unavailable too, so no cycle can
- *  reach a green verdict by bypassing this gate — there is no false pass to
+ *  reach a green verdict by bypassing this gate â€” there is no false pass to
  *  protect against, and refusing every write would break runs (e.g. a
  *  production install without devDependencies) that the tree lane already
  *  reports honestly as unverifiable. Never throws. */
@@ -4650,15 +4674,15 @@ async function parseGateTreeRows(synthesized: Project): Promise<ReadonlySet<stri
       if (v.verdict !== "pass") out.add(path);
     }
   } catch {
-    /* seam unavailable — see the fail-open note above */
+    /* seam unavailable â€” see the fail-open note above */
   }
   return out;
 }
 
 /** Write the tree rows of a synthesized project onto the artifact dir IN
- *  PLACE — only rows whose on-disk content differs are written (hash-checked
+ *  PLACE â€” only rows whose on-disk content differs are written (hash-checked
  *  per file against the disk), never deleting files, never touching non-tree
- *  files (README/DEPLOY/package.json/.rapidtool survive untouched — this is
+ *  files (README/DEPLOY/package.json/.rapidtool survive untouched â€” this is
  *  NOT a re-emit). Refused rows are warnings, never silent. */
 function applySynthesizedTreeToDir(
   synthesized: Project,
@@ -4677,13 +4701,13 @@ function applySynthesizedTreeToDir(
     const path = typeof row?.path === "string" ? row.path : "";
     if (!path || typeof row?.source !== "string") {
       refused.push(path || "<no-path>");
-      warnings.push("repair:apply:refused:<no-path>:row is not a file record — nothing written");
+      warnings.push("repair:apply:refused:<no-path>:row is not a file record â€” nothing written");
       continue;
     }
     const refusal = repairTreePathRefusal(path);
     if (refusal !== null) {
       refused.push(path);
-      warnings.push(`repair:apply:refused:${JSON.stringify(path)}:${refusal} — nothing written`);
+      warnings.push(`repair:apply:refused:${JSON.stringify(path)}:${refusal} â€” nothing written`);
       continue;
     }
     const full = join(target, path);
@@ -4695,12 +4719,12 @@ function applySynthesizedTreeToDir(
     }
     // 216 (T-02): a row whose source does not parse never reaches the disk.
     // Previously the checker existed but sat OFF the write path, so corruption
-    // (the `module.exports = {…}` strip leaving a dangling `};`) landed in the
+    // (the `module.exports = {â€¦}` strip leaving a dangling `};`) landed in the
     // artifact and was only discovered afterwards.
     if (refuseNonParsing !== undefined && refuseNonParsing.has(path)) {
       refused.push(path);
       warnings.push(
-        `repair:apply:refused:${JSON.stringify(path)}:source does not parse — nothing written (216 T-02 parse gate)`,
+        `repair:apply:refused:${JSON.stringify(path)}:source does not parse â€” nothing written (216 T-02 parse gate)`,
       );
       continue;
     }
@@ -4710,7 +4734,7 @@ function applySynthesizedTreeToDir(
     }
     // 216 (T-03): write temp + rename, so a crash mid-write can never leave a
     // TRUNCATED file in the artifact. The product is the deliverable, so it is
-    // now written at least as carefully as the bookkeeping — saveProject has
+    // now written at least as carefully as the bookkeeping â€” saveProject has
     // used tmp+rename (+ an O_EXCL lock) since 174-13. Cleanup is best-effort.
     const tmp = `${full}.tmp-${process.pid}-${Date.now()}`;
     try {
@@ -4725,7 +4749,7 @@ function applySynthesizedTreeToDir(
         /* best-effort temp cleanup */
       }
       warnings.push(
-        `repair:apply:failed:${JSON.stringify(path)}:${err instanceof Error ? err.message : String(err)} — nothing written`,
+        `repair:apply:failed:${JSON.stringify(path)}:${err instanceof Error ? err.message : String(err)} â€” nothing written`,
       );
     }
   }
@@ -4736,20 +4760,20 @@ function applySynthesizedTreeToDir(
  * fixes/149 P0-1: bounded repair cycle AGAINST an emitted dir. Contract: the
  * project ledger whose generatedTree was emitted to `dir` (the artifact), and
  * an agent (human or machine) has EDITED files inside that dir. Steps:
- *   1. importTreeDir — hash-checked re-import (a new hash = a real edit);
- *   2. treeRun(dir) — green ⇒ the edit already fixed it: converged with the
+ *   1. importTreeDir â€” hash-checked re-import (a new hash = a real edit);
+ *   2. treeRun(dir) â€” green â‡’ the edit already fixed it: converged with the
  *      tested-equivalent mint (applyTreeRunTestedMint) + the honest P6 gate
  *      record (driveP6Journey green-branch parity), 0 synthesis cycles;
- *      red ⇒ the failure tail becomes cycle-1 context;
+ *      red â‡’ the failure tail becomes cycle-1 context;
  *   3. each cycle (budget N, default P6_JOURNEY_DEFAULT_BUDGET): one bounded
  *      synthesis repair call (ctx.treeFailureTail rides deps.treeFailure into
- *      codegen via p6CycleLiveDeps — the same seam driveP6Journey uses), the
+ *      codegen via p6CycleLiveDeps â€” the same seam driveP6Journey uses), the
  *      repaired tree rows are applied onto the dir IN PLACE, the dir is
  *      re-imported (ledger = disk truth), and treeRun(dir) decides:
- *      green ⇒ mint + gate + converged; red ⇒ tail feeds the next cycle.
- * Budget exhausted ⇒ honest FAILED (p6.tree.failure + p6.journey.exhausted on
+ *      green â‡’ mint + gate + converged; red â‡’ tail feeds the next cycle.
+ * Budget exhausted â‡’ honest FAILED (p6.tree.failure + p6.journey.exhausted on
  * the record), deterministic floor standing, no silent seal. NEVER re-emits
- * over the dir — emitProject is not part of this seam.
+ * over the dir â€” emitProject is not part of this seam.
  */
 export async function repairTreeDir(
   project: Project,
@@ -4757,12 +4781,12 @@ export async function repairTreeDir(
   opts: {
     budget?: number;
     deps?: Partial<RepairTreeDeps>;
-    /** W51/337-1 (336-2 §9.4): the project's working dir. When present, the
+    /** W51/337-1 (336-2 Â§9.4): the project's working dir. When present, the
      *  repair refreshes the run checkpoint beside `.rapidtool/` (or clears it
      *  on a terminal seal) so a later `resume` re-enters the repaired ledger
-     *  instead of rewinding it — the repair path mutates generatedTree/lastTest
+     *  instead of rewinding it â€” the repair path mutates generatedTree/lastTest
      *  without necessarily growing a bounded array, which the supersession
-     *  growth axis alone cannot prove. Absent ⇒ no-op (the pre-wiring bytes). */
+     *  growth axis alone cannot prove. Absent â‡’ no-op (the pre-wiring bytes). */
     checkpointDir?: string;
   } = {},
 ): Promise<RepairTreeResult> {
@@ -4770,23 +4794,23 @@ export async function repairTreeDir(
   const budget =
     typeof opts.budget === "number" && opts.budget > 0 ? Math.floor(opts.budget) : P6_JOURNEY_DEFAULT_BUDGET;
   const events: string[] = [];
-  // W48 · 334-2 (L3): snapshot the session ledger at entry and fold this
-  // repair's synthesis spend onto the returned ledger — a repair verb is a
+  // W48 Â· 334-2 (L3): snapshot the session ledger at entry and fold this
+  // repair's synthesis spend onto the returned ledger â€” a repair verb is a
   // drive verb, and its cost must survive the process like `run`/`gate` spend.
   const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   const finish = (r: RepairTreeResult): RepairTreeResult => {
     const project = foldInvocationEvidence(r.project, spendBaseline);
-    // T-107.7 (W33 · N2) · W51/337-1: every post-work exit refreshes the run
+    // T-107.7 (W33 Â· N2) Â· W51/337-1: every post-work exit refreshes the run
     // checkpoint with the repaired ledger; a complete seal clears it (nothing to
-    // resume) — exactly runUntilGate's terminal policy. Guarded no-op without a
+    // resume) â€” exactly runUntilGate's terminal policy. Guarded no-op without a
     // dir, so the browser/in-process/test paths keep their exact bytes.
     if (project.status === "complete") clearRunCheckpoint(opts.checkpointDir);
     else commitRunCheckpoint(opts.checkpointDir, project);
     return { ...r, project };
   };
-  // T-107.1 (216r · W7-L1): the dir repair runs its cycles with the patch
+  // T-107.1 (216r Â· W7-L1): the dir repair runs its cycles with the patch
   // (str_replace) repair level ON (defaultRepairSynthesize). A custom
-  // deps.synthesize seam replaces it verbatim — the caller owns the level then.
+  // deps.synthesize seam replaces it verbatim â€” the caller owns the level then.
   const synthesize = opts.deps?.synthesize ?? defaultRepairSynthesize;
   const runTree = opts.deps?.runTree ?? defaultRepairRunTree;
   const base = {
@@ -4818,7 +4842,7 @@ export async function repairTreeDir(
   if (!existsSync(target)) return fail(`repair: dir ${target} is not readable`);
   const treeRows = Array.isArray(project.generatedTree) ? project.generatedTree : [];
   if (treeRows.length === 0) {
-    return fail("repair: the project carries no generatedTree — emit the tree to the dir first (the project is the ledger, the dir is the artifact)");
+    return fail("repair: the project carries no generatedTree â€” emit the tree to the dir first (the project is the ledger, the dir is the artifact)");
   }
   // 1. Hash-checked re-import of the EDITED dir into the ledger.
   const imported = importTreeDir(project, target);
@@ -4828,11 +4852,11 @@ export async function repairTreeDir(
   );
   const recordGreen = async (candidate: Project, verdict: TreeRunOutcome): Promise<{ project: Project; gate: RepairTreeResult["gate"]; minted: boolean }> => {
     const before = candidate.lastTest as { label?: string } | null | undefined;
-    // C-1 (WB-1 defusal, 2026-09-24) — same fix as the journey seam: mint the
+    // C-1 (WB-1 defusal, 2026-09-24) â€” same fix as the journey seam: mint the
     // tested-equivalent from the green tree-run FIRST, then record the gate.
     // The old "gate FIRST; mint only when it passed" order was the deadlock:
     // p6-verified needs the mint, and the mint needed gate.passed. The mint is
-    // self-guarded (mintTreeRunTested: outcome.ok + ≥1 executed assertion), so
+    // self-guarded (mintTreeRunTested: outcome.ok + â‰¥1 executed assertion), so
     // "never mint on red / never mint unexecuted" is unchanged.
     let finalProject = candidate;
     let gate: RepairTreeResult["gate"] = null;
@@ -4852,14 +4876,14 @@ export async function repairTreeDir(
     if (gate !== null && gate.passed === true) {
       finalProject = await applyTreeRunTestedMint(finalProject, verdict);
     }
-    // fixes/336 · 336-2: the mint/gate pair changed the verification state —
+    // fixes/336 Â· 336-2: the mint/gate pair changed the verification state â€”
     // recompile the packet so the ledger (and the promoted emitted record)
     // describes the stamp it now carries.
     finalProject = stampPacket(finalProject);
     const beforeLt = before as { label?: string; evidenceHash?: string } | null | undefined;
     const afterLt = finalProject.lastTest as { label?: string; evidenceHash?: string } | null | undefined;
     // A FRESH mint OR a REFRESHED stale hash both mean "this run's verdict is
-    // now the recorded one" — either qualifies the caller attestation for the
+    // now the recorded one" â€” either qualifies the caller attestation for the
     // emitted dir's own record.
     const minted =
       afterLt?.label === "tested" &&
@@ -4867,7 +4891,7 @@ export async function repairTreeDir(
         (typeof afterLt.evidenceHash === "string" && afterLt.evidenceHash !== beforeLt?.evidenceHash));
     return { project: finalProject, gate, minted };
   };
-  // 2. First verdict over the untouched dir (read-only — never clobber before
+  // 2. First verdict over the untouched dir (read-only â€” never clobber before
   //    reading: the edit is the whole point of this seam).
   let verdict: TreeRunOutcome;
   try {
@@ -4888,11 +4912,11 @@ export async function repairTreeDir(
     // ok:true / minted tested.
     const green = await recordGreen(p, verdict);
     if (green.gate !== null && green.gate.passed === true) {
-      p = p6JourneyLog(green.project, "info", "p6.journey.converged", "tree-run ok on the first run — dir green after re-import (no synthesis repair needed)");
-      // Re-stamp LAST (fixes/336 · 336-2) — the converged log is the final
+      p = p6JourneyLog(green.project, "info", "p6.journey.converged", "tree-run ok on the first run â€” dir green after re-import (no synthesis repair needed)");
+      // Re-stamp LAST (fixes/336 Â· 336-2) â€” the converged log is the final
       // record mutation, so the packet describes the record as returned.
       p = stampPacket(p);
-      events.push(`cycle 0: tree-run ok over the re-imported dir — converged without synthesis`);
+      events.push(`cycle 0: tree-run ok over the re-imported dir â€” converged without synthesis`);
       return finish({
         ok: true,
         outcome: "converged",
@@ -4914,9 +4938,9 @@ export async function repairTreeDir(
       green.project,
       "error",
       "p6.journey.failed",
-      `tree-run ok on first run but ${green.gate === null ? "no P6 DoD gate record" : "P6 gate FAIL"} — repair FAILED, not converged (converged requires treeRun ok AND gate.passed)`,
+      `tree-run ok on first run but ${green.gate === null ? "no P6 DoD gate record" : "P6 gate FAIL"} â€” repair FAILED, not converged (converged requires treeRun ok AND gate.passed)`,
     );
-    events.push(`cycle 0: tree-run ok but P6 gate not green — repair FAILED`);
+    events.push(`cycle 0: tree-run ok but P6 gate not green â€” repair FAILED`);
     return finish({
       ok: false,
       outcome: "failed",
@@ -4934,9 +4958,9 @@ export async function repairTreeDir(
       events,
     });
   }
-  // 3. Red first run → bounded repair cycle against the dir.
+  // 3. Red first run â†’ bounded repair cycle against the dir.
   let treeTail = treeRunFailureTail(verdict).slice(0, P6_JOURNEY_TAIL_MAX);
-  // W45 (parent keyed finding D): the file(s) the verdict NAMES — carried on
+  // W45 (parent keyed finding D): the file(s) the verdict NAMES â€” carried on
   // each cycle's ctx so the directive explicitly targets them (and, below, so
   // an un-addressed one is refused explicitly rather than silently skipped).
   let failureFiles = treeRunFailureFiles(verdict);
@@ -4962,14 +4986,14 @@ export async function repairTreeDir(
     } catch (err) {
       synthesized = p;
       events.push(
-        `cycle ${cycle}: synthesis seam threw (${err instanceof Error ? err.message : String(err)}) — no repair applied`,
+        `cycle ${cycle}: synthesis seam threw (${err instanceof Error ? err.message : String(err)}) â€” no repair applied`,
       );
     }
     const ref = p6RefusalDetail(synthesized);
     if (ref !== null) refusal = ref;
     const tree = synthesized.generatedTree;
     if (!Array.isArray(tree) || tree.length === 0) {
-      // The seam produced no tree (codegen refusal / floor) — nothing to
+      // The seam produced no tree (codegen refusal / floor) â€” nothing to
       // apply; the dir is unchanged so a re-run would be a guaranteed repeat
       // of the same verdict. Feed the refusal/note forward (journey parity).
       treeTail = (refusal ?? `cycle ${cycle}: synthesis produced no generatedTree (deterministic floor)`).slice(
@@ -4977,19 +5001,19 @@ export async function repairTreeDir(
         P6_JOURNEY_TAIL_MAX,
       );
       events.push(
-        `cycle ${cycle}: no generatedTree after synthesis${refusal ? ` — ${refusal.slice(0, 140)}` : ""} — nothing applied to the dir`,
+        `cycle ${cycle}: no generatedTree after synthesis${refusal ? ` â€” ${refusal.slice(0, 140)}` : ""} â€” nothing applied to the dir`,
       );
       p = synthesized;
       continue;
     }
-    // T-107.1 (216r · W7-L1): read back the patch-repair records the cycle's
-    // synthesis wrote onto the project's log ledger — the structured deltas it
+    // T-107.1 (216r Â· W7-L1): read back the patch-repair records the cycle's
+    // synthesis wrote onto the project's log ledger â€” the structured deltas it
     // LANDED and the coded refusals whose legacy full-rewrite repair ran.
     const patchRecords = repairPatchRecords(synthesized);
     for (const d of patchRecords.deltas) applied.deltas.push(d);
     for (const r of patchRecords.refusals) if (!applied.patchRefusals.includes(r)) applied.patchRefusals.push(r);
     // 3a. Apply the repaired rows onto the dir IN PLACE (only changed files).
-    // 216 (T-02): parse-gate FIRST — a row whose source does not parse is
+    // 216 (T-02): parse-gate FIRST â€” a row whose source does not parse is
     // refused rather than written, so a corrupted synthesis cannot land in the
     // artifact at all (the class that traced to 431 tsc errors).
     const nonParsing = await parseGateTreeRows(synthesized);
@@ -4997,7 +5021,7 @@ export async function repairTreeDir(
     for (const w of apply.written) if (!applied.written.includes(w)) applied.written.push(w);
     for (const w of apply.warnings) if (!applied.warnings.includes(w)) applied.warnings.push(w);
     for (const r of apply.refused) if (!applied.refused.includes(r)) applied.refused.push(r);
-    // W45 (parent keyed finding D): the tree-run NAMED the file it failed on —
+    // W45 (parent keyed finding D): the tree-run NAMED the file it failed on â€”
     // for the generated-core LOAD shape that is `treeRun.core.entry`. If this
     // cycle neither WROTE nor already refused a named file, record an explicit
     // coded refusal for it: a repair that silently skips the file it was told
@@ -5008,8 +5032,8 @@ export async function repairTreeDir(
       if (!applied.refused.includes(path)) applied.refused.push(path);
       const warning = `repair:apply:refused:${JSON.stringify(path)}:${
         tree.some((r) => r?.path === path)
-          ? "the tree-run failure names this file but the cycle left it unchanged — the repair did not target it"
-          : "the tree-run failure names this file but the cycle produced no tree row for it — the repair did not target it"
+          ? "the tree-run failure names this file but the cycle left it unchanged â€” the repair did not target it"
+          : "the tree-run failure names this file but the cycle produced no tree row for it â€” the repair did not target it"
       }`;
       if (!applied.warnings.includes(warning)) applied.warnings.push(warning);
       events.push(`cycle ${cycle}: failure-named file not addressed by the repair: ${path}`);
@@ -5034,10 +5058,10 @@ export async function repairTreeDir(
       const green = await recordGreen(p, verdict);
       if (green.gate !== null && green.gate.passed === true) {
         p = p6JourneyLog(green.project, "info", "p6.journey.converged", `tree-run ok after ${cycle}/${budget} repair cycle(s)`);
-        // Re-stamp LAST (fixes/336 · 336-2) — the converged log is the final
+        // Re-stamp LAST (fixes/336 Â· 336-2) â€” the converged log is the final
         // record mutation, so the packet describes the record as returned.
         p = stampPacket(p);
-        events.push(`cycle ${cycle}: tree-run ok — repair converged`);
+        events.push(`cycle ${cycle}: tree-run ok â€” repair converged`);
         return finish({
           ok: true,
           outcome: "converged",
@@ -5059,9 +5083,9 @@ export async function repairTreeDir(
         green.project,
         "error",
         "p6.journey.failed",
-        `tree-run ok after ${cycle}/${budget} cycle(s) but ${green.gate === null ? "no P6 DoD gate record" : "P6 gate FAIL"} — repair FAILED, not converged`,
+        `tree-run ok after ${cycle}/${budget} cycle(s) but ${green.gate === null ? "no P6 DoD gate record" : "P6 gate FAIL"} â€” repair FAILED, not converged`,
       );
-      events.push(`cycle ${cycle}: tree-run ok but P6 gate not green — repair FAILED`);
+      events.push(`cycle ${cycle}: tree-run ok but P6 gate not green â€” repair FAILED`);
       return finish({
         ok: false,
         outcome: "failed",
@@ -5084,15 +5108,15 @@ export async function repairTreeDir(
     // the CURRENT failure, not the one the previous cycle started with.
     failureFiles = treeRunFailureFiles(verdict);
     p = p6JourneyLog(p, "warn", "p6.tree.failure", treeTail);
-    events.push(`cycle ${cycle}: tree-run fail — ${treeTail.slice(0, 140)}`);
+    events.push(`cycle ${cycle}: tree-run fail â€” ${treeTail.slice(0, 140)}`);
   }
   p = p6JourneyLog(
     p,
     "error",
     "p6.journey.exhausted",
-    `${budget} repair cycle(s) without a green tree-run over ${target}${refusal ? ` — last refusal: ${refusal.slice(0, 180)}` : ""} — the edited dir stands as-is (never clobbered)`,
+    `${budget} repair cycle(s) without a green tree-run over ${target}${refusal ? ` â€” last refusal: ${refusal.slice(0, 180)}` : ""} â€” the edited dir stands as-is (never clobbered)`,
   );
-  events.push(`budget exhausted after ${budget} repair cycle(s) — repair FAILED, the edited dir stands as-is`);
+  events.push(`budget exhausted after ${budget} repair cycle(s) â€” repair FAILED, the edited dir stands as-is`);
   return finish({
     ok: false,
     outcome: "failed",
@@ -5150,7 +5174,7 @@ function asSearchHit(note: unknown): VaultSearchHit | null {
 }
 
 /**
- * Search the project's vault notes (buildVaultNotes → searchVault: pure
+ * Search the project's vault notes (buildVaultNotes â†’ searchVault: pure
  * case-insensitive substring search over title+body+tags, ranked
  * title > tag > body). Hits are mapped to their agent-facing title/kind/tags,
  * best first, capped at `limit`.
@@ -5173,7 +5197,7 @@ export async function vaultSearch(project: Project, query: string, limit = 10): 
 
 // ---------------------------------------------------------------------------
 // Crew + verify (server-side orchestrators, DYNAMIC imports only so the
-// deterministic headless paths never pull them; both are bare-Node friendly —
+// deterministic headless paths never pull them; both are bare-Node friendly â€”
 // fetch-based backends + the local bounded runner, nothing browser-bound).
 // ---------------------------------------------------------------------------
 
@@ -5183,8 +5207,8 @@ export type CrewRunResultShape =
 
 /**
  * Run the advisory multi-agent crew over the project's current phase
- * (src/lib/crew.server.ts runCrewServer). Config-gated: no DEEPSEEK_API_KEY →
- * { ok:false, reason:"not-configured" } — never fabricated.
+ * (src/lib/crew.server.ts runCrewServer). Config-gated: no DEEPSEEK_API_KEY â†’
+ * { ok:false, reason:"not-configured" } â€” never fabricated.
  */
 export async function runCrew(
   project: Project,
@@ -5206,14 +5230,14 @@ import type { VerifyOutcomeShape } from "./verify.ts";
 
 /**
  * Machine-run verify-fix loop over the project's generated source
- * (src/lib/verify.server.ts verifyAndFixServer; needs DEEPSEEK_API_KEY —
+ * (src/lib/verify.server.ts verifyAndFixServer; needs DEEPSEEK_API_KEY â€”
  * otherwise an honest { status:"not-configured" }). Throws when the project
  * has no generated source yet (codegen phases never ran).
  *
  * Root cause fixed at this seam (audit-46): the P6 engine template
  * (sandbox.ts buildPhase6Module) declares top-level functions but exports
  * nothing, and the verify harness binds oracle expressions via
- * `with(exports)` — so every machine case failed with `X is not defined`.
+ * `with(exports)` â€” so every machine case failed with `X is not defined`.
  * `withCommonJsExports` appends guarded CommonJS export assignments for the
  * source's top-level functions before the loop runs.
  */
@@ -5223,7 +5247,7 @@ export async function verifyGeneratedSource(project: Project): Promise<VerifyOut
   // expressions through a CommonJS `with(exports)` over `generatedSource`)
   // cannot load top-level `import`/`export`, and that runner failure surfaced
   // as an opaque RT_E_UNKNOWN at the CLI. Route tree-mode verify to the REAL
-  // tree-run path — emit the tree to a probe dir and execute its own specs and
+  // tree-run path â€” emit the tree to a probe dir and execute its own specs and
   // entry. A red tree is an honest `failed` verdict; a tree-run seam that could
   // not execute at all is a coded top-level RT_E_RUNNER_FAILED, never
   // RT_E_UNKNOWN.
@@ -5241,7 +5265,7 @@ export async function verifyGeneratedSource(project: Project): Promise<VerifyOut
         .join("; ");
       return { status: "passed", iterations: 0, evidence };
     }
-    // The seam could not RUN the tree (emit failure / missing treeRun) — that
+    // The seam could not RUN the tree (emit failure / missing treeRun) â€” that
     // is a backend runner failure, not a red product. Refuse with the correct
     // top-level code so an agent branches on the class, not on prose.
     if (
@@ -5259,21 +5283,21 @@ export async function verifyGeneratedSource(project: Project): Promise<VerifyOut
     // CLI parity (rapidtool-cli.mjs verify door): "no source yet" is a graph
     // state refusal mapped to PHASE_ILLEGAL, not the exit-4 internal class.
     const err = new Error(
-      "Project has no generatedSource yet — run the codegen phases (P10+) before verify.",
+      "Project has no generatedSource yet â€” run the codegen phases (P10+) before verify.",
     ) as Error & { code?: ErrorCode };
     err.code = "RT_E_PHASE_ILLEGAL";
     throw err;
   }
   const { verifyAndFixServer } = await import("./verify.server.ts");
-  // R4-f03 (W30 · LANE S3): thread the PROCESS session budget into the verify
-  // seam — the same ledger `synthWithBackoff` records into, so the token cap
+  // R4-f03 (W30 Â· LANE S3): thread the PROCESS session budget into the verify
+  // seam â€” the same ledger `synthWithBackoff` records into, so the token cap
   // binds the whole run across codegen + verify (R12-f02). Unmetered (no
-  // RAPIDTOOL_TOKEN_CAP) ⇒ the seam's no-op path, byte-identical.
+  // RAPIDTOOL_TOKEN_CAP) â‡’ the seam's no-op path, byte-identical.
   const { sessionTokenBudget } = await import("./token-ledger.ts");
-  // 346 E1 · A1-04 (E-08 live): seed the case-generation seam with the
+  // 346 E1 Â· A1-04 (E-08 live): seed the case-generation seam with the
   // project's A7 oracle rows + their pinned ids, so a returned case list that
   // drops a pinned row is refused (previously these were never passed here, so
-  // the pinning was dormant — a claimed-but-unwired gate).
+  // the pinning was dormant â€” a claimed-but-unwired gate).
   const oracleRows = Array.isArray(project.oracle) ? project.oracle : [];
   return (await verifyAndFixServer(withCommonJsExports(source), project.brief, {
     budget: sessionTokenBudget(),
@@ -5297,7 +5321,7 @@ export async function verifyGeneratedSource(project: Project): Promise<VerifyOut
 // Neither module may exist yet when this file is typechecked (both are built
 // in parallel), so every reference below is a RUNTIME dynamic import through
 // a non-literal specifier. When the module is absent the import throws and
-// callers surface a clean { ok:false, error } — never a crash mid-JSON.
+// callers surface a clean { ok:false, error } â€” never a crash mid-JSON.
 // ---------------------------------------------------------------------------
 
 /** CLI-facing mirror of design.ts's DesignTokens (opaque, JSON-safe object). */
@@ -5315,7 +5339,7 @@ type DiagramModule = {
   buildDiagram(project: Project, kind: DiagramKind): unknown;
 };
 
-/** True when src/lib/design.ts exists on disk (module present → design usable). */
+/** True when src/lib/design.ts exists on disk (module present â†’ design usable). */
 export function designModuleAvailable(): boolean {
   try {
     return existsSync(join(LIB_DIR, "design.ts"));
@@ -5324,7 +5348,7 @@ export function designModuleAvailable(): boolean {
   }
 }
 
-/** True when src/lib/diagram.ts exists on disk (module present → diagram usable). */
+/** True when src/lib/diagram.ts exists on disk (module present â†’ diagram usable). */
 export function diagramModuleAvailable(): boolean {
   try {
     return existsSync(join(LIB_DIR, "diagram.ts"));
@@ -5349,7 +5373,7 @@ function loadDesignModule(): Promise<DesignModule> {
     for (const name of ["designTokens", "designHtml"]) {
       if (typeof mod[name] !== "function") {
         const err = new Error(
-          `design module (src/lib/design.ts) is missing its "${name}" export — contract drift.`,
+          `design module (src/lib/design.ts) is missing its "${name}" export â€” contract drift.`,
         ) as Error & { code?: ErrorCode };
         err.code = "RT_E_INTERNAL";
         throw err;
@@ -5372,7 +5396,7 @@ function loadDiagramModule(): Promise<DiagramModule> {
     const mod = (await import(spec)) as Record<string, unknown>;
     if (typeof mod.buildDiagram !== "function") {
       const err = new Error(
-        `diagram module (src/lib/diagram.ts) is missing its "buildDiagram" export — contract drift.`,
+        `diagram module (src/lib/diagram.ts) is missing its "buildDiagram" export â€” contract drift.`,
       ) as Error & { code?: ErrorCode };
       err.code = "RT_E_INTERNAL";
       throw err;
@@ -5391,7 +5415,7 @@ export async function designTokens(project: Project): Promise<DesignTokens> {
   const tokens = design.designTokens(project);
   if (tokens === null || typeof tokens !== "object" || Array.isArray(tokens)) {
     const err = new Error(
-      "design module (src/lib/design.ts) returned a non-object from designTokens — contract drift.",
+      "design module (src/lib/design.ts) returned a non-object from designTokens â€” contract drift.",
     ) as Error & { code?: ErrorCode };
     err.code = "RT_E_INTERNAL";
     throw err;
@@ -5409,7 +5433,7 @@ export async function designHtml(project: Project): Promise<string> {
   const html = design.designHtml(project);
   if (typeof html !== "string" || !html.trim()) {
     const err = new Error(
-      "design module (src/lib/design.ts) returned a non-string from designHtml — contract drift.",
+      "design module (src/lib/design.ts) returned a non-string from designHtml â€” contract drift.",
     ) as Error & { code?: ErrorCode };
     err.code = "RT_E_INTERNAL";
     throw err;
@@ -5426,7 +5450,7 @@ export async function designHtml(project: Project): Promise<string> {
 export async function buildDiagram(project: Project, kind: string): Promise<string> {
   if (!(DIAGRAM_KINDS as readonly string[]).includes(kind)) {
     const err = new Error(
-      `buildDiagram: unknown kind "${String(kind)}" — expected one of ${DIAGRAM_KINDS.join(" | ")}.`,
+      `buildDiagram: unknown kind "${String(kind)}" â€” expected one of ${DIAGRAM_KINDS.join(" | ")}.`,
     ) as Error & { code?: ErrorCode };
     err.code = "RT_E_VALIDATION";
     throw err;
@@ -5435,7 +5459,7 @@ export async function buildDiagram(project: Project, kind: string): Promise<stri
   const svg = diagram.buildDiagram(project, kind as DiagramKind);
   if (typeof svg !== "string" || !svg.trim()) {
     const err = new Error(
-      "diagram module (src/lib/diagram.ts) returned a non-string from buildDiagram — contract drift.",
+      "diagram module (src/lib/diagram.ts) returned a non-string from buildDiagram â€” contract drift.",
     ) as Error & { code?: ErrorCode };
     err.code = "RT_E_INTERNAL";
     throw err;
@@ -5444,12 +5468,12 @@ export async function buildDiagram(project: Project, kind: string): Promise<stri
 }
 
 // ---------------------------------------------------------------------------
-// Artifact listing — agent-facing projection over project.artifacts. Pure and
+// Artifact listing â€” agent-facing projection over project.artifacts. Pure and
 // module-free (always available, no dynamic import), so an agent can index
 // every artifact even while the design/diagram modules are still in flight.
 // ---------------------------------------------------------------------------
 
-/** One agent-facing artifact row (body excluded — fetch full JSON via export). */
+/** One agent-facing artifact row (body excluded â€” fetch full JSON via export). */
 export type ArtifactLite = {
   id: string;
   phase: PhaseId;
@@ -5460,7 +5484,7 @@ export type ArtifactLite = {
 };
 
 /**
- * Project artifact index in stored (chronological) order — the row an agent
+ * Project artifact index in stored (chronological) order â€” the row an agent
  * reads to decide which artifact to fetch next. Never throws.
  */
 export function listArtifacts(project: Project): ArtifactLite[] {
@@ -5484,25 +5508,25 @@ export function listArtifacts(project: Project): ArtifactLite[] {
 // ---------------------------------------------------------------------------
 
 export type DoctorStatus = {
-  /** F-5 (W46 · 332-2): `configured` is key PRESENCE only; `keyState` states
+  /** F-5 (W46 Â· 332-2): `configured` is key PRESENCE only; `keyState` states
    *  whether that presence has been validated (`unverified` is the honest floor
-   *  — llm.ts's tap clears on success, so "valid" is never inventable here), and
+   *  â€” llm.ts's tap clears on success, so "valid" is never inventable here), and
    *  `lastKeyed` carries the last keyed failure class + tail-only source when
    *  one is known. Never a key value. */
   llm: { configured: boolean; label: string } & DoctorLlmKey;
   research: { configured: boolean; probed: boolean; label: string };
   runner: { available: boolean; sandbox: false };
   node: string;
-  /** Honest factory bar — agents must not infer "it ships software" from llm.configured.
-   *  210: field-truth via doctor.factoryClaim — never a hardcoded true flip. */
+  /** Honest factory bar â€” agents must not infer "it ships software" from llm.configured.
+   *  210: field-truth via doctor.factoryClaim â€” never a hardcoded true flip. */
   factory: {
     autonomousSoftwareFactory: boolean;
-    /** W53 · 340-2: true only when every machine-fixable conjunct is met and the
+    /** W53 Â· 340-2: true only when every machine-fixable conjunct is met and the
      *  sole remaining gap is the deliberate human acceptance stamp. Derived from
      *  the same evidence as `autonomousSoftwareFactory`; it never flips that
      *  latch and never mints a human stamp. Fail-closed. */
     awaitingHumanAcceptance: boolean;
-    /** PR-31 / §4.8 Option A: the SEPARATE machine-verified acceptance reading
+    /** PR-31 / Â§4.8 Option A: the SEPARATE machine-verified acceptance reading
      *  (acceptance.ts). It never flips `autonomousSoftwareFactory` (the human
      *  door stays byte-untouched) and is grounded only in persisted machine
      *  `lastTest` evidence. */
@@ -5527,7 +5551,7 @@ export type DoctorStatus = {
       real: number;
       files: Array<{ path: string; kind: "stub" | "reexport" | "real" }>;
     } | null;
-    /** OPS-8 (W42 · L4/G9): the caller's measured spend — the session
+    /** OPS-8 (W42 Â· L4/G9): the caller's measured spend â€” the session
      *  budget's ledger by default; honest `measured:false` nulls when unmetered. */
     spend: DoctorSpend;
   };
@@ -5578,7 +5602,7 @@ async function probeTavily(): Promise<boolean> {
 
 /**
  * 214: walk a product tree for leftover job modules (`src/jobs/*.ts`, `jobs/*.ts`).
- * Best-effort, never throws. Does not invent bodies — classifier reads bytes.
+ * Best-effort, never throws. Does not invent bodies â€” classifier reads bytes.
  */
 export function collectJobSources(treeDir: string): Array<{ path: string; source: string }> {
   const out: Array<{ path: string; source: string }> = [];
@@ -5611,13 +5635,13 @@ export function collectJobSources(treeDir: string): Array<{ path: string; source
 // export" predicate. The CLI delivery record (`emittedUiWiring`) and the
 // campaign-invariants UI guard previously disagreed: this seam accepted any
 // non-stub export reachable through the emitted barrel, while the guard's
-// `realModuleSet` counted only the substance census's JOB modules — so the
+// `realModuleSet` counted only the substance census's JOB modules â€” so the
 // guard fired RT_E_UI_UNWIRED on the campaign trees whose console genuinely
 // calls a real `src/generated/*` render export. This predicate is the single
 // definition both seams consume: it walks the emitted barrels to the PROVIDING
 // module and classifies that module with doctor.classifyJobSource (the census's
 // own real/stub/reexport classifier). Read-only; never throws; any ambiguity
-// reads as not-wired with its reason — never a fabricated true.
+// reads as not-wired with its reason â€” never a fabricated true.
 // ---------------------------------------------------------------------------
 
 /** The emitted UI entry modules the predicate scans: every `src/ui/*` source,
@@ -5632,7 +5656,7 @@ function emittedUiEntryFiles(rootAbs: string): string[] {
       }
     }
   } catch {
-    /* unreadable ui dir — treated as no UI files */
+    /* unreadable ui dir â€” treated as no UI files */
   }
   for (const name of ["main.tsx", "main.ts", "main.jsx", "main.js"]) {
     if (existsSync(join(rootAbs, "src", name))) {
@@ -5655,7 +5679,7 @@ function resolveEmittedFile(rootAbs: string, baseAbs: string, spec: string): str
     try {
       if (existsSync(abs) && statSync(abs).isFile()) return abs;
     } catch {
-      /* unreadable candidate — try the next */
+      /* unreadable candidate â€” try the next */
     }
   }
   return null;
@@ -5714,7 +5738,7 @@ function uiImportBindings(source: string): Array<{ ns: string | null; names: str
 }
 
 /** R2-02: the ONE canonical UI-wiring reading every seam consumes. `wired` is
- *  true iff a mounted UI entry CALLS (static call-presence — never behaviour)
+ *  true iff a mounted UI entry CALLS (static call-presence â€” never behaviour)
  *  an export whose providing module classifyJobSource reads as `real`. */
 export type RealGeneratedExportWiring = { wired: boolean; entry: string | null; exports: string[]; reason: string };
 
@@ -5826,7 +5850,7 @@ export function emittedUiWiring(dir: string): { wired: boolean; entry: string | 
 // ---------------------------------------------------------------------------
 // R2-01 (campaign #2): the delivery-time floor seal. codegen journals the
 // under-production refusal (RT_E_PLAN_UNDERPRODUCED) onto the project record,
-// but the emit seal never echoed it — a below-floor tree could be materialized
+// but the emit seal never echoed it â€” a below-floor tree could be materialized
 // (e.g. `--red-tree banner`) and read as a normal artifact. This reads the
 // project's OWN P6 journal and re-derives the floor with codegen's ONE
 // predicate: a project whose record names RT_E_PLAN_UNDERPRODUCED and whose
@@ -5846,7 +5870,7 @@ export type PlanUnderproductionSeal = {
 };
 
 /**
- * fixes/353 — the gate-wiring seam for the drivers: stamp the emitter's own
+ * fixes/353 â€” the gate-wiring seam for the drivers: stamp the emitter's own
  * surface modules onto the project immediately before the P6 gate is recorded.
  * Best-effort and pure: an import/scaffold failure returns the project
  * unchanged, so the criteria stay honestly red rather than passing on a tree
@@ -5896,7 +5920,7 @@ export async function planUnderproductionSeal(project: Project): Promise<PlanUnd
 }
 
 /**
- * C1-10 (KD-8): this PROCESS's measured session spend — the tokens/calls every
+ * C1-10 (KD-8): this PROCESS's measured session spend â€” the tokens/calls every
  * keyed call in this CLI invocation recorded into the one process-scoped
  * session ledger (token-ledger.ts). The cross-process campaign ledger appends
  * this delta per invocation; a fresh process starts at zero, so it measures
@@ -5911,7 +5935,7 @@ export function sessionSpendTotal(): { tokens: number; calls: number } {
   }
 }
 
-/** OPS-8 (W42 · L4/G9): the pre-import floor's honest spend — byte-mirror of
+/** OPS-8 (W42 Â· L4/G9): the pre-import floor's honest spend â€” byte-mirror of
  *  `doctorSpend(null)`'s `empty` envelope (doctor.ts) so the catch-fallback
  *  factory never diverges from the real helper's unmetered shape. */
 const DOCTOR_SPEND_FLOOR: DoctorSpend = {
@@ -5925,14 +5949,14 @@ const DOCTOR_SPEND_FLOOR: DoctorSpend = {
   reasoningTokens: null,
   estimatedCostUsd: null,
   pricesSupplied: false,
-  line: "spend: none measured (no token-ledger sample handed in — keyless/unmetered or pre-synthesis; never estimated)",
+  line: "spend: none measured (no token-ledger sample handed in â€” keyless/unmetered or pre-synthesis; never estimated)",
 };
 
 /**
- * W46 · 332-2 (L1/AW45-c06): the persisted run spend a project record carries.
+ * W46 Â· 332-2 (L1/AW45-c06): the persisted run spend a project record carries.
  * Returns its `tokenUsage` slice ONLY when it is a usable measured spend (both
- * base counts finite and non-negative); anything else — absent file, unreadable,
- * unparsable, a legacy record without the field — returns null so the caller
+ * base counts finite and non-negative); anything else â€” absent file, unreadable,
+ * unparsable, a legacy record without the field â€” returns null so the caller
  * keeps its own honest floor. Read-only; never throws; the file body is never
  * surfaced beyond its token counters.
  */
@@ -5943,23 +5967,23 @@ function persistedSpendAt(recordPath: string): SpendSlice | null {
     const parsed = JSON.parse(readFileSync(recordPath, "utf8")) as { tokenUsage?: unknown } | null;
     return isMeasuredSpend(parsed?.tokenUsage) ? parsed.tokenUsage : null;
   } catch {
-    return null; // unreadable/corrupt record → the caller's honest floor, never a throw
+    return null; // unreadable/corrupt record â†’ the caller's honest floor, never a throw
   }
 }
 
 /** The product tree's scaffold-shipped record: `<treeDir>/.rapidtool/project.json`
- *  (the CLI gate's save target — "the project JSON is the LEDGER"). */
+ *  (the CLI gate's save target â€” "the project JSON is the LEDGER"). */
 function persistedTreeSpend(treeDir: string): SpendSlice | null {
   return treeDir ? persistedSpendAt(join(resolve(treeDir), ".rapidtool", "project.json")) : null;
 }
 
 // ---------------------------------------------------------------------------
-// W48 · 334-2 — the run's keyed outcome + coded failure on the project record
+// W48 Â· 334-2 â€” the run's keyed outcome + coded failure on the project record
 // ---------------------------------------------------------------------------
 
 /** What a project's own P6 log trail says about the LAST keyed model call.
  *  `rejected` is a credential refusal (RT_E_LLM_KEY_REJECTED /
- *  RT_E_LLM_KEY_SHADOWED — doctor.ts's `isKeyUnusableCode` set, ONE definition
+ *  RT_E_LLM_KEY_SHADOWED â€” doctor.ts's `isKeyUnusableCode` set, ONE definition
  *  for writer and reader); `success` is a recorded `ok` synthesis attempt;
  *  `none` is no keyed evidence at all. */
 type KeyedTrailOutcome =
@@ -5980,7 +6004,7 @@ function newestP6Refusal(project: Project): { ts: number; detail: string } | nul
   return null;
 }
 
-/** The `<RT_E code>` a `p6.synthesis.refused` detail names (`<code> · <reason>`),
+/** The `<RT_E code>` a `p6.synthesis.refused` detail names (`<code> Â· <reason>`),
  *  or undefined when the detail carries none. Matches engine.refusalClassOf's
  *  parse of codegen's refusal-log shape. */
 function p6RefusalCode(detail: string | null | undefined): ErrorCode | undefined {
@@ -5990,11 +6014,11 @@ function p6RefusalCode(detail: string | null | undefined): ErrorCode | undefined
 }
 
 /**
- * W48 · 334-2 (L1): read the newest keyed-call outcome from a project's own P6
+ * W48 Â· 334-2 (L1): read the newest keyed-call outcome from a project's own P6
  * trail, newest-first:
- *   - a `p6.synthesis.attempt` ending `· ok` means the last keyed call
- *     SUCCEEDED ⇒ `success` (clears any persisted rejection);
- *   - a `p6.synthesis.refused` whose class is key-unusable ⇒ `rejected`, with
+ *   - a `p6.synthesis.attempt` ending `Â· ok` means the last keyed call
+ *     SUCCEEDED â‡’ `success` (clears any persisted rejection);
+ *   - a `p6.synthesis.refused` whose class is key-unusable â‡’ `rejected`, with
  *     its ts and the tail-only `key source:` label parsed from the reason;
  *   - any other row is skipped: a transient/non-key failure never condemns a
  *     key (F-5's posture).
@@ -6009,7 +6033,7 @@ export function keyedTrailOutcome(project: Project): KeyedTrailOutcome {
     if (!l || typeof l !== "object" || l.phase !== 6) continue;
     if (typeof l.event !== "string" || typeof l.detail !== "string") continue;
     if (l.event === "p6.synthesis.attempt") {
-      if (/·\s*ok\s*$/.test(l.detail)) return { kind: "success" };
+      if (/Â·\s*ok\s*$/.test(l.detail)) return { kind: "success" };
       continue;
     }
     if (l.event === "p6.synthesis.refused") {
@@ -6028,12 +6052,12 @@ export function keyedTrailOutcome(project: Project): KeyedTrailOutcome {
 }
 
 /**
- * W48 · 334-2 (L1): fold the project's newest keyed outcome onto its own record
- * (`Project.lastKeyedOutcome` — the types.ts request): a key-unusable rejection
+ * W48 Â· 334-2 (L1): fold the project's newest keyed outcome onto its own record
+ * (`Project.lastKeyedOutcome` â€” the types.ts request): a key-unusable rejection
  * persists (tail-only), a recorded success clears the field, and no keyed
  * evidence leaves a legacy record untouched. Returns the SAME object when
  * nothing changed, so a keyless run never churns the record. The field is not
- * yet on the `Project` type (unowned types.ts) — the local intersection makes
+ * yet on the `Project` type (unowned types.ts) â€” the local intersection makes
  * the writer compile today and the exact shape is the requested grant.
  */
 function foldLastKeyedOutcome(project: Project): Project {
@@ -6060,9 +6084,9 @@ function foldLastKeyedOutcome(project: Project): Project {
 }
 
 /**
- * W48 · 334-2 (L1/L3): fold THIS invocation's measured session spend and its
+ * W48 Â· 334-2 (L1/L3): fold THIS invocation's measured session spend and its
  * newest keyed-call outcome onto the project record. Shared by every drive verb
- * that can spend and 401 — `runUntilGate` (the `run`/`gate`/`resume` verbs),
+ * that can spend and 401 â€” `runUntilGate` (the `run`/`gate`/`resume` verbs),
  * `repairTreeDir` and the wild macros. A zero-spend invocation leaves any
  * existing persisted spend slice untouched (never a fabricated zero); the keyed
  * fold is idempotent when no keyed evidence exists.
@@ -6077,8 +6101,8 @@ function foldInvocationEvidence(project: Project, spendBaseline: TokenLedger): P
 }
 
 /**
- * W46 · 332-2 (L1/AW45-c06): resolve the measured-spend source the doctor
- * surfaces report — priority: an explicit caller `spend`, then the
+ * W46 Â· 332-2 (L1/AW45-c06): resolve the measured-spend source the doctor
+ * surfaces report â€” priority: an explicit caller `spend`, then the
  * `projectPath` file's persisted `tokenUsage`, then the product tree's
  * `.rapidtool/project.json` record, then the process session ledger (empty at
  * fresh-process start, hence the old `calls: 0`). Never throws; a missing or
@@ -6098,11 +6122,11 @@ export function resolveDoctorSpendSource(opts?: {
 }
 
 /**
- * F-5 (W46 · 332-2): best-effort read of the last keyed outcome from the ONE
- * server status surface (`llm.ts`'s `llmStatus`, C1 · 332-5). Installs nothing,
+ * F-5 (W46 Â· 332-2): best-effort read of the last keyed outcome from the ONE
+ * server status surface (`llm.ts`'s `llmStatus`, C1 Â· 332-5). Installs nothing,
  * makes no provider call. The TanStack server fn cannot run outside a Start
  * context (the same reason `engine.liveLayer` degrades under bare Node), so on
- * a CLI host this resolves to the honest `undefined` — doctor then reports
+ * a CLI host this resolves to the honest `undefined` â€” doctor then reports
  * `unverified`, never an implied green.
  */
 async function readStatusLastKeyed(): Promise<unknown> {
@@ -6116,15 +6140,15 @@ async function readStatusLastKeyed(): Promise<unknown> {
 }
 
 /**
- * F-5 (W46 · 332-2) + W48 · 334-2 (L1): classify the doctor's key state.
+ * F-5 (W46 Â· 332-2) + W48 Â· 334-2 (L1): classify the doctor's key state.
  * `keyedOutcome` is the caller's explicit last keyed outcome (validated by
  * `doctor.doctorLlmKey`, so a hostile/partial payload is dropped). When absent,
  * `recordPath` (the project file or the tree's scaffold-shipped record) is read
- * for the persisted `Project.lastKeyedOutcome` — this is what lets a FRESH
+ * for the persisted `Project.lastKeyedOutcome` â€” this is what lets a FRESH
  * `doctor` process see a prior `gate`/`run` process's key rejection, since the
  * provider tap is process-local. Only then is the process status surface read
  * best-effort (`readStatusLastKeyed`). Pure apart from those reads; never
- * throws — an unavailable doctor module keeps the honest floor.
+ * throws â€” an unavailable doctor module keeps the honest floor.
  */
 export async function resolveDoctorKeyState(
   configured: boolean,
@@ -6147,9 +6171,9 @@ export async function resolveDoctorKeyState(
 }
 
 /**
- * W48 · 334-2 (L1): the persisted last keyed outcome a project record carries
+ * W48 Â· 334-2 (L1): the persisted last keyed outcome a project record carries
  * (`Project.lastKeyedOutcome`, written at the run boundary), or undefined for
- * an absent/unreadable/legacy record. The RAW value is handed back — the same
+ * an absent/unreadable/legacy record. The RAW value is handed back â€” the same
  * `doctor.readLastKeyedOutcome` validation every keyed payload passes, so a
  * hostile field can never mint `rejected`. Read-only; never throws; never
  * surfaces the file body beyond that one field.
@@ -6165,8 +6189,8 @@ function persistedKeyedOutcomeAt(recordPath: string): unknown {
   }
 }
 
-/** W48 · 334-2 (L1): the record a doctor reads the persisted keyed outcome
- *  from — the named project file, else the product tree's scaffold-shipped
+/** W48 Â· 334-2 (L1): the record a doctor reads the persisted keyed outcome
+ *  from â€” the named project file, else the product tree's scaffold-shipped
  *  `.rapidtool/project.json`. Undefined when neither is given. */
 function keyedRecordPath(opts?: { treeDir?: string; projectPath?: string }): string | undefined {
   if (typeof opts?.projectPath === "string" && opts.projectPath) return opts.projectPath;
@@ -6175,10 +6199,10 @@ function keyedRecordPath(opts?: { treeDir?: string; projectPath?: string }): str
 }
 
 /**
- * W52 · 338-3: the persisted project RECORD the doctor derives its factory
- * evidence from — an explicit `projectPath` (the CLI's `--project`), else the
+ * W52 Â· 338-3: the persisted project RECORD the doctor derives its factory
+ * evidence from â€” an explicit `projectPath` (the CLI's `--project`), else the
  * tree's scaffold record `<treeDir>/.rapidtool/project.json`. Parsed object or
- * null; never throws (absent/unreadable/non-object ⇒ null), so the caller's
+ * null; never throws (absent/unreadable/non-object â‡’ null), so the caller's
  * honest floor stands and no fabricated evidence is ever minted.
  */
 function persistedProjectRecord(opts?: { treeDir?: string; projectPath?: string }): unknown | null {
@@ -6194,7 +6218,7 @@ function persistedProjectRecord(opts?: { treeDir?: string; projectPath?: string 
 }
 
 /**
- * E-25: capability pre-flight for agent drivers — what CAN this host do right
+ * E-25: capability pre-flight for agent drivers â€” what CAN this host do right
  * now? Reads process.env through the server modules (never the server-fn
  * status surfaces, which need a Start runtime). The research probe is a real
  * tiny search (1 result, 3 s cap); a failed probe reports configured:false so
@@ -6202,36 +6226,36 @@ function persistedProjectRecord(opts?: { treeDir?: string; projectPath?: string 
  * Never throws.
  *
  * 214: `opts.treeDir` scans `src/jobs/*.ts` (and `jobs/*.ts`) and feeds the
- * leftover-job census into factoryClaim. Absent tree → RAPIDTOOL_FACTORY_EVIDENCE
+ * leftover-job census into factoryClaim. Absent tree â†’ RAPIDTOOL_FACTORY_EVIDENCE
  * (inventory null). Never invents job bodies.
  *
- * W46 · 332-2 (L1/AW45-c06): the spend block used to read the PROCESS session
+ * W46 Â· 332-2 (L1/AW45-c06): the spend block used to read the PROCESS session
  * ledger, which a fresh `doctor` process starts empty (`calls: 0` after a keyed
  * run). `opts.projectPath` (the CLI's `--project`) or `opts.treeDir`'s
  * scaffold-shipped record resolves the run's persisted `Project.tokenUsage`,
- * read read-only and never fabricated. Priority: explicit `opts.spend` →
- * `opts.projectPath` → `treeDir` record → the process session ledger (or the
+ * read read-only and never fabricated. Priority: explicit `opts.spend` â†’
+ * `opts.projectPath` â†’ `treeDir` record â†’ the process session ledger (or the
  * honest `measured:false` floor).
  *
  * F-5 (fixes/333_1_verifier.md): the `llm` block carries `keyState` so a
- * present key never reads as a validated one — `unverified` unless a keyed
+ * present key never reads as a validated one â€” `unverified` unless a keyed
  * outcome was recorded, `rejected` only for a key-unusable coded class, with
  * the tail-only `lastKeyed` when known. Matches the console chip's validity
  * posture (332-5) on the doctor surface.
  *
- * W48 · 334-2 (L1): `opts.projectPath` / `opts.treeDir`'s record is also read
+ * W48 Â· 334-2 (L1): `opts.projectPath` / `opts.treeDir`'s record is also read
  * for the persisted `Project.lastKeyedOutcome`, so a FRESH `doctor` process can
  * see a prior run's key rejection (the provider tap is process-local).
  */
 export async function doctorStatus(opts?: {
   treeDir?: string;
-  /** W46 · 332-2: the project file whose persisted `tokenUsage` is the run's
+  /** W46 Â· 332-2: the project file whose persisted `tokenUsage` is the run's
    *  recorded spend (wins over the `treeDir` record). */
   projectPath?: string;
-  /** OPS-8 (W42 · L4/G9): caller-measured spend; defaults to the process
+  /** OPS-8 (W42 Â· L4/G9): caller-measured spend; defaults to the process
    *  session budget's ledger (`sessionTokenBudget().ledger`). */
   spend?: TokenSpend | TokenLedger | null;
-  /** F-5 (W46 · 332-2): an explicit last keyed outcome, validated by
+  /** F-5 (W46 Â· 332-2): an explicit last keyed outcome, validated by
    *  `doctor.doctorLlmKey` (a hostile/partial payload is dropped). When omitted
    *  the process status surface (`llmStatus`) is read best-effort. */
   keyedOutcome?: DoctorLastKeyed | null;
@@ -6248,11 +6272,11 @@ export async function doctorStatus(opts?: {
       llm.label = `deepseek (${DEEPSEEK_MODEL_IDS.slice(0, 2).join(" | ")})`;
     }
   } catch {
-    /* deepseek module unavailable → honest not-configured */
+    /* deepseek module unavailable â†’ honest not-configured */
   }
-  // F-5 (fixes/333_1_verifier.md): presence ≠ validity. The key state comes
+  // F-5 (fixes/333_1_verifier.md): presence â‰  validity. The key state comes
   // from doctor.ts's ONE vocabulary, fed by the caller's explicit override or
-  // the server status surface (llm.ts's llmStatus, C1 · 332-5) — never a
+  // the server status surface (llm.ts's llmStatus, C1 Â· 332-5) â€” never a
   // provider call, never the key value.
   Object.assign(
     llm,
@@ -6298,13 +6322,13 @@ export async function doctorStatus(opts?: {
     /* keep the inline honest floor */
   }
 
-  // 210: field-truth factory latch — never hardcode true; RapidTool-now is false.
+  // 210: field-truth factory latch â€” never hardcode true; RapidTool-now is false.
   // 214: optional treeDir scan computes leftover/real from actual job files.
   let factory: DoctorStatus["factory"] = {
     autonomousSoftwareFactory: false,
     awaitingHumanAcceptance: false,
     // X follow-up: the machine acceptance reading + fleet metrics/alarms surface
-    // on the doctor envelope (a field pass-through from acceptance.ts — no
+    // on the doctor envelope (a field pass-through from acceptance.ts â€” no
     // logic change). The empty floor refuses, exactly as the aggregate does.
     autonomousFactoryV2: false,
     fleetAcceptance: fleetAcceptanceFromProjects([]),
@@ -6316,10 +6340,10 @@ export async function doctorStatus(opts?: {
     isolation,
     tokenCap: null,
     gaps: [
-      "leftover jobs are reexports or TODO(E-15) stubs — not a multi-job product",
+      "leftover jobs are reexports or TODO(E-15) stubs â€” not a multi-job product",
       'no human-approved fixtures (decidedBy:"human")',
       "no real multi-job product",
-      "product-complete bar not met (skip≠green; stubs≠complete)",
+      "product-complete bar not met (skipâ‰ green; stubsâ‰ complete)",
     ],
     inventory: null,
     spend: DOCTOR_SPEND_FLOOR,
@@ -6327,13 +6351,13 @@ export async function doctorStatus(opts?: {
   try {
     const doctor = await import("./doctor.ts");
     const treeDir = typeof opts?.treeDir === "string" && opts.treeDir.trim() ? opts.treeDir.trim() : "";
-    // OPS-8 (W42 · L4/G9) + W46 · 332-2 (L1/AW45-c06): the measured-spend
-    // source — an explicit `opts.spend` wins, then the product tree's persisted
+    // OPS-8 (W42 Â· L4/G9) + W46 Â· 332-2 (L1/AW45-c06): the measured-spend
+    // source â€” an explicit `opts.spend` wins, then the product tree's persisted
     // `Project.tokenUsage` (the run's recorded cost), then the process session
     // ledger (empty at fresh-process start, hence the old `calls: 0`). Shape
     // lives in doctorSpend.
     const spendSource = resolveDoctorSpendSource({ treeDir, projectPath: opts?.projectPath, spend: opts?.spend });
-    // W52 · 338-3: the factory claim is derived from REAL signals — the tree's
+    // W52 Â· 338-3: the factory claim is derived from REAL signals â€” the tree's
     // job-file census AND the persisted project record (`--project`, else the
     // tree's `.rapidtool/project.json`). Before this the tree path passed no
     // project, so `productComplete` was a constant false and `humanFixtures`
@@ -6344,14 +6368,14 @@ export async function doctorStatus(opts?: {
       const files = collectJobSources(treeDir);
       const inv = doctor.inventoryFromJobSources(files, resolve(treeDir));
       const evidence = doctor.evidenceFromJobInventory(inv, record ? { project: record } : undefined);
-      // The tree scan replaces the factory EVIDENCE, never the measured spend —
+      // The tree scan replaces the factory EVIDENCE, never the measured spend â€”
       // before this, the `factoryClaim` here dropped the spend block entirely
       // (measured:false) even when the tree carried a persisted run record.
       claim = doctor.factoryClaim(evidence, process.env, spendSource);
     } else if (record) {
       // A named record with no tree to scan: productComplete + humanFixtures
       // close on the record, the census fields stay fail-closed (see
-      // doctor.evidenceFromProjectRecord) — never a fabricated real product.
+      // doctor.evidenceFromProjectRecord) â€” never a fabricated real product.
       claim = doctor.factoryClaim(doctor.evidenceFromProjectRecord(record), process.env, spendSource);
     }
     factory = {
@@ -6385,14 +6409,14 @@ export async function doctorStatus(opts?: {
 
 // ---------------------------------------------------------------------------
 // New-pillar bridges (ADDITIVE, pillar wave): thin wrappers over the pillar
-// modules — harvest.ts (Pillar 1), swarm.ts, prompt-engine.ts, bench.ts,
-// ast-mine.ts, knowledge.ts — plus a bounded engine.wildStep macro-run. Each
+// modules â€” harvest.ts (Pillar 1), swarm.ts, prompt-engine.ts, bench.ts,
+// ast-mine.ts, knowledge.ts â€” plus a bounded engine.wildStep macro-run. Each
 // wrapper dynamic-imports its module (bare-Node friendly, same contract style
 // as runCrew/verify/design/diagram) and NEVER mutates the wrapped module.
 // ---------------------------------------------------------------------------
 import type { HarvestOptions, HarvestPacketResult } from "./harvest.ts";
 
-/** Wrapper over harvest.ts: harvestForPacket — bounded live-source harvest rows. */
+/** Wrapper over harvest.ts: harvestForPacket â€” bounded live-source harvest rows. */
 export async function harvest(project: Project, opts?: HarvestOptions): Promise<HarvestPacketResult> {
   const { harvestForPacket } = await import("./harvest.ts");
   return harvestForPacket(project, opts);
@@ -6408,7 +6432,7 @@ export type SwarmPlanShape = {
   refinedPlan: string;
 };
 
-/** Wrapper over swarm.ts: swarmPlan — deterministic advisory critique set. */
+/** Wrapper over swarm.ts: swarmPlan â€” deterministic advisory critique set. */
 export async function swarmPlan(project: Project): Promise<SwarmPlanShape> {
   const { swarmPlan: plan } = await import("./swarm.ts");
   return plan(project) as unknown as SwarmPlanShape;
@@ -6422,9 +6446,17 @@ export type PromptExpandShape =
 export async function promptExpand(project: Project, policies?: readonly string[]): Promise<PromptExpandShape> {
   const { expandBrief } = await import("./prompt-engine.ts");
   const { expandBriefWithBackoff } = await import("./codegen.server.ts");
+  // W359 (thread-kind): the RESOLVED kind rides into the expansion prompt as
+  // `expansionPrompt`'s 4th parameter (W359 lane inject-kind), so a `game` brief
+  // is asked for input/loop/canvas requirements and a `tool` brief for a
+  // `main(argv)` signature â€” without it the six-key envelope stays kind-blind.
+  // `deliveryKindOf` is the ONE resolver, so an unstamped record still sends the
+  // kind the brief implies.
   // fixes/121: the standalone prompt verb timed out 2/2 at the 20s flash-tier
-  // abort — the same bounded-backoff treatment P6's expansion already has.
-  const res = await expandBriefWithBackoff(project.brief, (b) => expandBrief(b, policies));
+  // abort â€” the same bounded-backoff treatment P6's expansion already has.
+  const res = await expandBriefWithBackoff(project.brief, (b) =>
+    expandBrief(b, policies, undefined, deliveryKindOf(project)),
+  );
   return res as unknown as PromptExpandShape;
 }
 
@@ -6482,11 +6514,11 @@ function walkSourceFiles(
     try {
       entries = readdirSync(current, { withFileTypes: true });
     } catch (err) {
-      // Preserve the OS errno family (EACCES→PERMISSION_DENIED,
-      // ENOENT→PROJECT_MISSING, ENOTDIR→PATH_KIND_MISMATCH) on the surfaced
+      // Preserve the OS errno family (EACCESâ†’PERMISSION_DENIED,
+      // ENOENTâ†’PROJECT_MISSING, ENOTDIRâ†’PATH_KIND_MISMATCH) on the surfaced
       // read failure instead of collapsing it to a caller fallback.
       const e = new Error(
-        `mineDir: cannot read "${current}" — ${err instanceof Error ? err.message : String(err)}`,
+        `mineDir: cannot read "${current}" â€” ${err instanceof Error ? err.message : String(err)}`,
       ) as Error & { code?: ErrorCode };
       e.code = classifyError(err, "RT_E_INTERNAL");
       throw e;
@@ -6528,7 +6560,7 @@ function walkSourceFiles(
 
 /**
  * Wrapper over ast-mine.ts: mineCodebase + conventionsMap over a real
- * directory (bounded walk — file count, byte budget, skip dirs, extension
+ * directory (bounded walk â€” file count, byte budget, skip dirs, extension
  * filter; every skip is reported, never silent). Throws on an unreadable dir.
  */
 export async function mineDir(dir: string, opts: { maxFiles?: number; maxBytes?: number } = {}): Promise<MineDirResult> {
@@ -6572,15 +6604,15 @@ export type WildStartShape =
   | { ok: false; reason: "not-wild" | "not-active"; error: string };
 
 /**
- * R13-f02 (W33 lane L2) — the minimal REAL `wild.plan` generation.
+ * R13-f02 (W33 lane L2) â€” the minimal REAL `wild.plan` generation.
  *
- * The seam: `planning.planSteps(goal, context)` — that module's own honesty
- * contract already encodes the key rule (keyed ⇒ one bounded flash JSON call;
- * keyless ⇒ `{ ok: false, reason: "not-configured" }`, never a fabricated
+ * The seam: `planning.planSteps(goal, context)` â€” that module's own honesty
+ * contract already encodes the key rule (keyed â‡’ one bounded flash JSON call;
+ * keyless â‡’ `{ ok: false, reason: "not-configured" }`, never a fabricated
  * plan). This function: returns the stored plan when one exists (idempotent),
  * else asks the planner; a REAL plan lands as `source: "planner"`; every
  * refusal/failure returns `engine.readWildPlan`'s honest empty plan with the
- * reason appended to its note — never invented rows. Lazy computed-specifier
+ * reason appended to its note â€” never invented rows. Lazy computed-specifier
  * import keeps planning.ts (server-only: deepseek.server) out of any static
  * graph.
  *
@@ -6589,7 +6621,7 @@ export type WildStartShape =
  * start/step paths run right after this attaches a plan.
  */
 export async function generateWildPlan(project: Project): Promise<WildPlan> {
-  // W36 N2 (fixes/281): F3-01 residue closed — engine.readWildPlan IS the single source for the
+  // W36 N2 (fixes/281): F3-01 residue closed â€” engine.readWildPlan IS the single source for the
   // stored-plan / honest-empty accessor (record shape-guarded there); this function only appends
   // the planner outcome to its note. No inline copy left to drift.
   const honest: WildPlan = readWildPlan(project);
@@ -6599,9 +6631,13 @@ export async function generateWildPlan(project: Project): Promise<WildPlan> {
       ? project.brief.trim()
       : project.name;
   const context = [
-    `Project: ${project.name} (kind: ${project.kind})`,
-    `Current phase: P${project.currentPhase} — ${phaseDef(project.currentPhase)?.title ?? ""}`.trim(),
-    `Governed phases: ${PHASES.length} (P0–P12)`,
+    // W359 (thread-kind): the RESOLVED kind, never `project.kind` â€” on an
+    // unstamped (keyless) record the stored field is absent and the model was
+    // literally handed `(kind: undefined)`. `deliveryKindOf` is the ONE resolver
+    // (engine.ts) and honours a stored kind when one exists.
+    `Project: ${project.name} (kind: ${deliveryKindOf(project)})`,
+    `Current phase: P${project.currentPhase} â€” ${phaseDef(project.currentPhase)?.title ?? ""}`.trim(),
+    `Governed phases: ${PHASES.length} (P0â€“P12)`,
   ].join("\n");
   try {
     const planningSpec = "./plan" + "ning.ts";
@@ -6624,7 +6660,7 @@ export async function generateWildPlan(project: Project): Promise<WildPlan> {
         source: "planner",
         plannedAt: Date.now(),
         note:
-          "planner rows (R13-f02) — the wild run runs a classifier plan review " +
+          "planner rows (R13-f02) â€” the wild run runs a classifier plan review " +
           "and parks before the first mutation (stageWildPlan)",
       };
     }
@@ -6632,18 +6668,18 @@ export async function generateWildPlan(project: Project): Promise<WildPlan> {
       res.ok === false && res.reason === "not-configured"
         ? "planner not configured (no DEEPSEEK_API_KEY)"
         : `planner failed: ${res.ok === false ? (res.error ?? res.reason) : "no rows returned"}`;
-    return { ...honest, note: `${honest.note} · ${why}` };
+    return { ...honest, note: `${honest.note} Â· ${why}` };
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
-    return { ...honest, note: `${honest.note} · planner import/call failed: ${why}` };
+    return { ...honest, note: `${honest.note} Â· planner import/call failed: ${why}` };
   }
 }
 
 /**
- * R13-f02 (W33 lane L2): attach a REAL planner plan to a wild run when — and
- * only when — the planner is actually configured (keyed). Keyless ⇒ the
+ * R13-f02 (W33 lane L2): attach a REAL planner plan to a wild run when â€” and
+ * only when â€” the planner is actually configured (keyed). Keyless â‡’ the
  * project is returned UNCHANGED (no planner call, no field, no log row: the
- * keyless wild-run bytes stay exactly as they are); keyed + planner refusal ⇒
+ * keyless wild-run bytes stay exactly as they are); keyed + planner refusal â‡’
  * also unchanged (the honest empty plan stays readable via `readWildPlan` but
  * is never written into the record as if it were a plan). A real plan lands
  * with the `wild.plan` ledger row (the event named in the R13-f02 spec).
@@ -6670,17 +6706,17 @@ async function attachWildPlan(project: Project): Promise<Project> {
 }
 
 /** 316 H3 (315 V2 finding #1): the P6 execution edge threaded into every
- *  wild step this module drives — the SAME `runP6Edge` seam run/gate execute
- *  through (W-02: keyed synthesis + the tree-run mint; keyless ⇒ the
+ *  wild step this module drives â€” the SAME `runP6Edge` seam run/gate execute
+ *  through (W-02: keyed synthesis + the tree-run mint; keyless â‡’ the
  *  documented floor passthrough). Both headless wild loops pass it as
  *  `wildStep`'s `p6Edge`, so the agent seal's ONE DoD-repair pass re-runs the
  *  REAL non-floor edge on a production sealed run instead of parking for
- *  want of a seam nobody passed (the repair was production-dead — it read
+ *  want of a seam nobody passed (the repair was production-dead â€” it read
  *  `opts.p6Edge` and both loops passed none).
  *  Keyed-only by construction: `runModeFor()` is the same trim-semantics
- *  probe the engine's own guard reads, and a keyless host threads NOTHING —
+ *  probe the engine's own guard reads, and a keyless host threads NOTHING â€”
  *  its bytes stay exactly the pre-wire floor. `opts.p6Edge` (the explicit
- *  injection seam) wins in ANY key state — the wildStep contract — so a
+ *  injection seam) wins in ANY key state â€” the wildStep contract â€” so a
  *  keyless pin can prove the hop end-to-end. */
 function p6EdgeForWildStep(opts: {
   p6Edge?: (p: Project) => Promise<Project>;
@@ -6690,13 +6726,13 @@ function p6EdgeForWildStep(opts: {
 }
 
 /** W352 (R-20 / 347): the GENERAL keyed execution edge threaded into every wild
- *  step for phases other than 6 and 7 — the SAME `runPhase(..., { live: true })`
+ *  step for phases other than 6 and 7 â€” the SAME `runPhase(..., { live: true })`
  *  live layer the sequential driver and the console bridge run (wild-bridge
  *  `runWildEdgeForBridgeJson` delegates here). Before this, only the console
  *  injected `livePhaseEdge`, so a keyed CLI/headless wild run executed the
  *  deterministic FLOOR for every non-P6/P7 phase.
  *  The injected seam wins in ANY key state (the engine's own contract); keyed
- *  hosts default to the production live layer; keyless hosts thread nothing —
+ *  hosts default to the production live layer; keyless hosts thread nothing â€”
  *  their bytes stay exactly the byte-identical floor. */
 function livePhaseEdgeForWildStep(opts: {
   livePhaseEdge?: (phase: PhaseId, p: Project) => Promise<Project>;
@@ -6708,8 +6744,8 @@ function livePhaseEdgeForWildStep(opts: {
 }
 
 /**
- * Wrapper over engine.wildStep — one bounded macro-run (default 24 steps,
- * clamped 1–48). Stops on any non-"advanced" outcome (paused/completed/noop)
+ * Wrapper over engine.wildStep â€” one bounded macro-run (default 24 steps,
+ * clamped 1â€“48). Stops on any non-"advanced" outcome (paused/completed/noop)
  * and returns the final project; the CLI persists it. Honest refusal when the
  * project has wildMode off or no active wild run.
  */
@@ -6724,44 +6760,44 @@ export async function wildStartHeadless(
      *  the `wild.risk_accepted` row). Mirrors `wildStartRun`. */
     acceptRiskUnderSeal?: string;
     /** 316 H3: injection seam for the P6 edge (mirrors the engine's
-     *  `p6Edge`); production callers omit it — see `p6EdgeForWildStep`. */
+     *  `p6Edge`); production callers omit it â€” see `p6EdgeForWildStep`. */
     p6Edge?: (p: Project) => Promise<Project>;
     /** W352 (R-20 / 347): injection seam for the GENERAL keyed edge (phases
-     *  other than 6/7); production callers omit it — see
+     *  other than 6/7); production callers omit it â€” see
      *  `livePhaseEdgeForWildStep`. The injected seam wins in any key state. */
     livePhaseEdge?: (phase: PhaseId, p: Project) => Promise<Project>;
     /** R13-f02: injection seam for the Auto-Review classifier that reviews a
-     *  stored planner plan (tests); production omits it — `createNodeWildReviewer`
+     *  stored planner plan (tests); production omits it â€” `createNodeWildReviewer`
      *  binds the Node-side classifier, null keyless. */
     reviewer?: WildReviewer;
   } = {},
 ): Promise<WildStartShape> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 24, 1), 48);
   if (project.wildMode !== true) {
-    return { ok: false, reason: "not-wild", error: "Wild mode is not enabled (project.wildMode !== true) — nothing to run." };
+    return { ok: false, reason: "not-wild", error: "Wild mode is not enabled (project.wildMode !== true) â€” nothing to run." };
   }
   if (!project.wildRun || !project.wildRun.active) {
-    return { ok: false, reason: "not-active", error: "No active wild run (project.wildRun.active !== true) — start a wild run first." };
+    return { ok: false, reason: "not-active", error: "No active wild run (project.wildRun.active !== true) â€” start a wild run first." };
   }
-  // W48 · 334-2 (L3): fold this macro-run's measured spend + keyed outcome onto
+  // W48 Â· 334-2 (L3): fold this macro-run's measured spend + keyed outcome onto
   // the returned project, like every other drive verb.
   const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   const { wildStep } = await import("./engine.ts");
-  // R14-f01 (W33 lane F1): bind the reviewer once per macro-run — bare Node +
-  // key ⇒ the classifier actually verdicts; null ⇒ the engine default (the
+  // R14-f01 (W33 lane F1): bind the reviewer once per macro-run â€” bare Node +
+  // key â‡’ the classifier actually verdicts; null â‡’ the engine default (the
   // keyless runs keep their exact bytes).
   const reviewer = opts.reviewer ?? (await createNodeWildReviewer());
-  // 316 H3: resolve the P6 edge ONCE per macro-run (keyed ⇒ the real
-  // runP6Edge; keyless with no injected seam ⇒ undefined — nothing threaded).
+  // 316 H3: resolve the P6 edge ONCE per macro-run (keyed â‡’ the real
+  // runP6Edge; keyless with no injected seam â‡’ undefined â€” nothing threaded).
   const p6Edge = p6EdgeForWildStep(opts);
-  // W352 (R-20): resolve the GENERAL keyed edge once (keyed ⇒ runPhase live;
-  // keyless with no injected seam ⇒ undefined — the byte-identical floor).
+  // W352 (R-20): resolve the GENERAL keyed edge once (keyed â‡’ runPhase live;
+  // keyless with no injected seam â‡’ undefined â€” the byte-identical floor).
   const livePhaseEdge = livePhaseEdgeForWildStep(opts);
   // R13-f02 (W33 lane L2): a keyed host plans before the loop advances; keyless
-  // ⇒ attachWildPlan returns the project unchanged (no field, no log row).
+  // â‡’ attachWildPlan returns the project unchanged (no field, no log row).
   let current = await attachWildPlan(project);
   // R13-f02: review the planner rows and park before the first mutation.
-  // A4-E5 (P1): the AGENT SEAL is threaded INTO `stageWildPlan` — under the seal
+  // A4-E5 (P1): the AGENT SEAL is threaded INTO `stageWildPlan` â€” under the seal
   // a classifier APPROVE is the consent of record, so `stageWildPlan` logs
   // `wild.plan_approved` and returns `staged:false` directly. The previous shape
   // called the reviewer without the seal, which wrote a SPURIOUS
@@ -6783,16 +6819,16 @@ export async function wildStartHeadless(
   let outcome = "advanced";
   let lastError: string | undefined;
   while (steps < maxSteps) {
-    // 308 B-02 (B2): thread the host's telemetry sink into the step — every
+    // 308 B-02 (B2): thread the host's telemetry sink into the step â€” every
     // caller dropped it, so finishStep's wild.step_* emits never fired on this
     // leg. headless has no in-file rt writer; the CALLER's opts.onEvent is the
-    // honest seam (CLI leg: cliLogEvent → NDJSON). Absent ⇒ a no-op default —
+    // honest seam (CLI leg: cliLogEvent â†’ NDJSON). Absent â‡’ a no-op default â€”
     // emission-side only, the project bytes are unchanged (DG-8).
     const res = await wildStep(current, {
       ...(reviewer ? { reviewer } : {}),
       ...(opts.agentSeal ? { agentSeal: true } : {}),
       ...(opts.acceptRiskUnderSeal ? { acceptRiskUnderSeal: opts.acceptRiskUnderSeal } : {}),
-      // 316 H3: the real P6 edge — the seal's DoD-repair pass re-runs it.
+      // 316 H3: the real P6 edge â€” the seal's DoD-repair pass re-runs it.
       ...(p6Edge ? { p6Edge } : {}),
       // W352 (R-20): the general keyed edge for every non-P6/P7 phase.
       ...(livePhaseEdge ? { livePhaseEdge } : {}),
@@ -6807,15 +6843,15 @@ export async function wildStartHeadless(
   if (steps >= maxSteps && outcome === "advanced") {
     lastError = `bounded: reached the ${maxSteps}-step cap with the wild run still advancing`;
   }
-  // 185-H1: ok:true never carries `error` — pause/cap detail is `note`.
+  // 185-H1: ok:true never carries `error` â€” pause/cap detail is `note`.
   return { ok: true, project: foldInvocationEvidence(current, spendBaseline), outcome, steps, ...(lastError ? { note: lastError } : {}) };
 }
 
 // ---------------------------------------------------------------------------
-// Agent-visibility bridges (audit wave W1 — fixes/77, additive only): chat
-// (UI Chat tab → chat.server.ts chatOnceServer — the exact function the
+// Agent-visibility bridges (audit wave W1 â€” fixes/77, additive only): chat
+// (UI Chat tab â†’ chat.server.ts chatOnceServer â€” the exact function the
 // browser POSTs to, so context/caps/honesty cannot drift), deepen (engine
-// E-13 deepenResearch — the UI's own fallback text tells users to "re-run
+// E-13 deepenResearch â€” the UI's own fallback text tells users to "re-run
 // research from the CLI instead", yet no CLI/headless path existed), and the
 // full Wild Mode lifecycle (enable/start/pause/resume/stop). Pre-existing
 // wildStartHeadless can only STEP an already-ACTIVE run; nothing headless
@@ -6823,7 +6859,7 @@ export async function wildStartHeadless(
 // agent-unreachable on any fresh project.
 // ---------------------------------------------------------------------------
 
-/** Structural mirror of chat.server.ts ChatResult (server-owned shape —
+/** Structural mirror of chat.server.ts ChatResult (server-owned shape â€”
  *  kept local so headless compiles even if the server module is mid-flight). */
 export type ChatAskShape =
   | { ok: true; reply: string; grounded: true; provenance: string }
@@ -6831,12 +6867,12 @@ export type ChatAskShape =
       ok: false;
       reason: "not-configured" | "error";
       error?: string;
-      /** Machine-readable failure class (errors.ts) — passthrough verbatim. */
+      /** Machine-readable failure class (errors.ts) â€” passthrough verbatim. */
       code?: string;
     };
 
-/** One grounded copilot turn over the project — chat.server.ts chatOnceServer
- *  passthrough (the UI Chat tab's server side; bare-Node friendly — plain
+/** One grounded copilot turn over the project â€” chat.server.ts chatOnceServer
+ *  passthrough (the UI Chat tab's server side; bare-Node friendly â€” plain
  *  env+fetch, no server-fn invocation). */
 export async function chatAsk(
   project: Project,
@@ -6854,7 +6890,7 @@ export type DeepenShape =
       phase: PhaseId;
       /** False when the engine had nothing to add (identical project). */
       changed: boolean;
-      /** The deepened project (persist this when changed — audit-80 M1 bug). */
+      /** The deepened project (persist this when changed â€” audit-80 M1 bug). */
       project: Project;
       /** True when live research could not run (engine E-13 explained dead-end). */
       liveUnavailable: boolean;
@@ -6864,11 +6900,11 @@ export type DeepenShape =
   | { ok: false; reason: "not-research" | "not-complete"; error: string };
 
 /** E-13 deepen: re-run the LIVE research layer over a COMPLETED research phase
- *  (0/7/11) — appends one deduplicated corpus entry + research artifacts, logs
+ *  (0/7/11) â€” appends one deduplicated corpus entry + research artifacts, logs
  *  research.deepened and re-records the phase gate (fresh evidenceHash). Under
  *  bare Node the live backends cannot run, so the engine honestly stamps
  *  meta.liveUnavailable + a warn log and re-records against the existing
- *  corpus — never fabricated findings, never a silent no-op. Guard arms mirror
+ *  corpus â€” never fabricated findings, never a silent no-op. Guard arms mirror
  *  the engine contract (which silently no-ops elsewhere) so the CLI can exit
  *  with a nameable state error instead of an indistinguishable no-op. */
 export async function deepenPhase(project: Project, phase: PhaseId): Promise<DeepenShape> {
@@ -6884,7 +6920,7 @@ export async function deepenPhase(project: Project, phase: PhaseId): Promise<Dee
     return {
       ok: false,
       reason: "not-complete",
-      error: `P${phase} is not complete (status: ${rec?.status ?? "missing"}) — deepen re-runs live research over a completed research phase.`,
+      error: `P${phase} is not complete (status: ${rec?.status ?? "missing"}) â€” deepen re-runs live research over a completed research phase.`,
     };
   }
   const { deepenResearch } = await import("./engine.ts");
@@ -6915,7 +6951,7 @@ export type WildLifecycleShape =
       changed: boolean;
       outcome?: string;
       steps?: number;
-      /** Informational only on ok:true — never dual-channel `error` (185-H1). */
+      /** Informational only on ok:true â€” never dual-channel `error` (185-H1). */
       note?: string;
     }
   | {
@@ -6925,13 +6961,13 @@ export type WildLifecycleShape =
       code?: string;
     };
 
-/** Enable Wild Mode and BEGIN a bounded macro-run — the missing headless half
- *  of the UI's enable→start flow (store.setWildMode + startWildRun parity):
+/** Enable Wild Mode and BEGIN a bounded macro-run â€” the missing headless half
+ *  of the UI's enableâ†’start flow (store.setWildMode + startWildRun parity):
  *  stamps the canonical active wildRun, logs wild.start, then drives
- *  engine.wildStep up to maxSteps (default 24, clamped 1–48). Refuses only an
- *  ALREADY-ACTIVE run (store.startWildRun parity — a duplicate start must fail
+ *  engine.wildStep up to maxSteps (default 24, clamped 1â€“48). Refuses only an
+ *  ALREADY-ACTIVE run (store.startWildRun parity â€” a duplicate start must fail
  *  loudly, never double-loop). A project already complete is ok:false
- *  (185-H1 — never dual-channel ok:true + error). */
+ *  (185-H1 â€” never dual-channel ok:true + error). */
 export async function wildStartRun(
   project: Project,
   opts: {
@@ -6939,20 +6975,20 @@ export async function wildStartRun(
     onEvent?: (seed: RtEventSeed) => void;
     agentSeal?: boolean;
     /** A4-E11 (P2): the explicit opt-in that ARMS the documented coded machine
-     *  risk-acceptance path under the agent seal — the declared rule id is
+     *  risk-acceptance path under the agent seal â€” the declared rule id is
      *  recorded verbatim on the `wild.risk_accepted` ledger row. Without it the
      *  seam is never armed (test-only) and a persistent classifier reject parks
      *  as before. Only meaningful together with `agentSeal: true`. */
     acceptRiskUnderSeal?: string;
     /** 316 H3: injection seam for the P6 edge (mirrors the engine's
-     *  `p6Edge`); production callers omit it — see `p6EdgeForWildStep`. */
+     *  `p6Edge`); production callers omit it â€” see `p6EdgeForWildStep`. */
     p6Edge?: (p: Project) => Promise<Project>;
     /** W352 (R-20 / 347): injection seam for the GENERAL keyed edge (phases
-     *  other than 6/7); production callers omit it — see
+     *  other than 6/7); production callers omit it â€” see
      *  `livePhaseEdgeForWildStep`. The injected seam wins in any key state. */
     livePhaseEdge?: (phase: PhaseId, p: Project) => Promise<Project>;
     /** R13-f02: injection seam for the Auto-Review classifier that reviews a
-     *  planner plan (tests); production omits it — `createNodeWildReviewer`
+     *  planner plan (tests); production omits it â€” `createNodeWildReviewer`
      *  binds the Node-side classifier, null keyless. */
     reviewer?: WildReviewer;
   } = {},
@@ -6962,26 +6998,26 @@ export async function wildStartRun(
     return {
       ok: false,
       reason: "already-active",
-      error: "A wild run is already active — stop it or let it finish before starting another.",
+      error: "A wild run is already active â€” stop it or let it finish before starting another.",
     };
   }
   if (project.status === "complete") {
     return {
       ok: false,
       reason: "already-complete",
-      error: "Project already complete — no wild run started.",
+      error: "Project already complete â€” no wild run started.",
       code: "RT_E_PHASE_ILLEGAL",
     };
   }
   const { wildStep, wildLog } = await import("./engine.ts");
-  // W48 · 334-2 (L3): fold this driven run's measured spend + keyed outcome onto
+  // W48 Â· 334-2 (L3): fold this driven run's measured spend + keyed outcome onto
   // the returned project (the CLI persists it).
   const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   // R14-f01 (W33 lane F1): bind the Node-side Auto-Review classifier once for
   // the whole driven run (bare Node + key); null keeps the engine default.
   const reviewer = opts.reviewer ?? (await createNodeWildReviewer());
-  // 316 H3: resolve the P6 edge ONCE for the whole driven run (keyed ⇒ the
-  // real runP6Edge; keyless with no injected seam ⇒ undefined).
+  // 316 H3: resolve the P6 edge ONCE for the whole driven run (keyed â‡’ the
+  // real runP6Edge; keyless with no injected seam â‡’ undefined).
   const p6Edge = p6EdgeForWildStep(opts);
   // W352 (R-20): the general keyed edge for every non-P6/P7 phase.
   const livePhaseEdge = livePhaseEdgeForWildStep(opts);
@@ -7006,11 +7042,11 @@ export async function wildStartRun(
     "wild.start",
     `Wild Mode run started at P${started.currentPhase}.`,
   );
-  // R13-f02 (W33 lane L2): plan-before-execute for the keyed journey (keyless ⇒
-  // unchanged bytes — see attachWildPlan).
+  // R13-f02 (W33 lane L2): plan-before-execute for the keyed journey (keyless â‡’
+  // unchanged bytes â€” see attachWildPlan).
   current = await attachWildPlan(current);
   // R13-f02: review the planner rows and park before the first mutation.
-  // A4-E5: same agent-seal threading as `wildStartHeadless` above — an approved
+  // A4-E5: same agent-seal threading as `wildStartHeadless` above â€” an approved
   // plan under the seal executes with NO spurious `wild.paused_plan` row.
   const staged = await stageWildPlan(current, reviewer, { agentSeal: opts.agentSeal === true });
   current = staged.project;
@@ -7028,13 +7064,13 @@ export async function wildStartRun(
   let outcome = "advanced";
   let lastError: string | undefined;
   while (steps < maxSteps) {
-    // 308 B-02 (B2): same sink threading as wildStartHeadless above — the
-    // caller's opts.onEvent is the honest seam; absent ⇒ no-op default.
+    // 308 B-02 (B2): same sink threading as wildStartHeadless above â€” the
+    // caller's opts.onEvent is the honest seam; absent â‡’ no-op default.
     const res = await wildStep(current, {
       ...(reviewer ? { reviewer } : {}),
       ...(opts.agentSeal ? { agentSeal: true } : {}),
       ...(opts.acceptRiskUnderSeal ? { acceptRiskUnderSeal: opts.acceptRiskUnderSeal } : {}),
-      // 316 H3: the real P6 edge — the seal's DoD-repair pass re-runs it.
+      // 316 H3: the real P6 edge â€” the seal's DoD-repair pass re-runs it.
       ...(p6Edge ? { p6Edge } : {}),
       // W352 (R-20): the general keyed edge for every non-P6/P7 phase.
       ...(livePhaseEdge ? { livePhaseEdge } : {}),
@@ -7073,7 +7109,7 @@ export async function wildPauseRun(project: Project): Promise<WildLifecycleShape
   return {
     ok: true,
     // 308 M4-06 (B2): the CLI operator pause stamps its own park record via
-    // wildOperatorPark (its FIRST repo-wide call site — the export was dead):
+    // wildOperatorPark (its FIRST repo-wide call site â€” the export was dead):
     // uncoded ({code:null, unlock:"resume"}), so the pause answers
     // why/what-unlocks/where-resume like every other pause.
     project: wildPause(
@@ -7088,7 +7124,7 @@ export async function wildPauseRun(project: Project): Promise<WildLifecycleShape
   };
 }
 
-/** Resume a PAUSED active wild run (pause → false + wild.resume ledger row).
+/** Resume a PAUSED active wild run (pause â†’ false + wild.resume ledger row).
  *  Idempotent: a run that is not paused returns changed:false. */
 export async function wildResumeRun(project: Project): Promise<WildLifecycleShape> {
   const run = project.wildRun;
@@ -7104,7 +7140,7 @@ export async function wildResumeRun(project: Project): Promise<WildLifecycleShap
     wildRun: {
       ...run,
       pause: false,
-      // 308 B-01 (B2): park is present iff pause — resume clears the record so
+      // 308 B-01 (B2): park is present iff pause â€” resume clears the record so
       // a preserved park can never linger on a live run again.
       park: null,
       lastAutoLog: "Wild run resumed from the CLI.",
@@ -7118,7 +7154,7 @@ export async function wildResumeRun(project: Project): Promise<WildLifecycleShap
   };
 }
 
-/** Stop a wild run (store.stopWildRun parity: active → false, stoppedAt
+/** Stop a wild run (store.stopWildRun parity: active â†’ false, stoppedAt
  *  stamped, pause cleared, wild.stop ledger row). Idempotent: stopping a run
  *  that is already stopped returns changed:false. */
 export async function wildStopRun(project: Project): Promise<WildLifecycleShape> {
@@ -7137,7 +7173,7 @@ export async function wildStopRun(project: Project): Promise<WildLifecycleShape>
       active: false,
       stoppedAt: Date.now(),
       pause: false,
-      // 308 B-01 (B2, C2 completion): park is present iff pause — stop must
+      // 308 B-01 (B2, C2 completion): park is present iff pause â€” stop must
       // CLEAR a preserved park, not let it ride the spread onto a stopped run
       // (the resume/stop family rule; store.stopWildRun parity).
       park: null,

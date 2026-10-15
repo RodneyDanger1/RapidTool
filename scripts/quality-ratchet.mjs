@@ -1,10 +1,11 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// scripts/quality-ratchet.mjs — the W356 quality ratchet (lane `ratchet`).
+// scripts/quality-ratchet.mjs â€” the W356 quality ratchet (lane `ratchet`).
 //
 // WHY THIS EXISTS. The W355 audit proved the failure mode this file prevents is
-// not hypothetical (fixes/355_0_audit_wave.md §2.1): ONE uncommitted reader
-// change made a tree with zero generated product read as real — the substantive
-// tree rate went 6/13 -> 13/13 with no product change — and simultaneously
+// not hypothetical (fixes/355_0_audit_wave.md Â§2.1): ONE uncommitted reader
+// change made a tree with zero generated product read as real â€” the substantive
+// tree rate went 6/13 -> 13/13 with no product change â€” and simultaneously
 // disarmed prevention guard C-06. A "measurement" that can be moved by editing
 // the reader that produces it is not a measurement.
 //
@@ -12,12 +13,12 @@
 // producers, read-only, plus READER CANARIES: structural + discriminating
 // assertions about the readers themselves. A floor may only RISE; breaching it
 // downward (atLeast) or upward (atMost) is a HARD failure. A metric that cannot
-// be produced reports `unavailable` with a coded reason — never a silent pass,
+// be produced reports `unavailable` with a coded reason â€” never a silent pass,
 // never a fabricated number. `estimatedCostUsd` stays null everywhere.
 //
 // It re-derives nothing and re-implements nothing: every reading comes from the
 // command / reader named in `quality-ratchet.floors.json#floors[*].producer`.
-// The only write is none at all — this file is read-only over the repo, with one
+// The only write is none at all â€” this file is read-only over the repo, with one
 // exception outside it: `--tree-tsc` runs the real `treeRun` producer (which is
 // what that producer does) and is opt-in.
 //
@@ -43,7 +44,7 @@ export const SCHEMA = "rapidtool-quality-ratchet/1";
  * The ONLY `RT_E_*` codes this file emits, for two reasons: (1) no new code is
  * minted (this lane's scope is three new files + one additive gate stage, so
  * `src/lib/errors.ts` is not edited), and (2) every code used must already be a
- * real entry in `ERROR_CODE_DOC` — `canary.errorCodes.registered` reads
+ * real entry in `ERROR_CODE_DOC` â€” `canary.errorCodes.registered` reads
  * `src/lib/errors.ts` and fails loudly if one of these stops resolving. Each
  * code names its CAUSE, and the `reason` string names the exact producer.
  */
@@ -51,14 +52,14 @@ export const UNAVAILABLE_CODES = {
   /**
    * The producer was NOT run in this invocation (heavy, or supplied by the gate /
    * the boundary owner). This is a missing INPUT, not a tree failure: it is
-   * reported loudly under `unavailable` and never hard-fails — but the pin's floor
+   * reported loudly under `unavailable` and never hard-fails â€” but the pin's floor
    * is still not met, so it stays visible. The gate's `ratchet` stage always
    * supplies its readings, so inside the boundary these floors ARE checked.
    */
   producerNotRun: "RT_E_RUNNER_UNAVAILABLE",
-  /** The artifact or record the producer must read is ABSENT from disk — fail closed. */
+  /** The artifact or record the producer must read is ABSENT from disk â€” fail closed. */
   artifactAbsent: "RT_E_PROJECT_MISSING",
-  /** A reader's shape changed, so its output cannot be used (the C-06 failure mode) — fail closed. */
+  /** A reader's shape changed, so its output cannot be used (the C-06 failure mode) â€” fail closed. */
   readerShapeInvalid: "RT_E_VALIDATION",
 };
 
@@ -84,9 +85,11 @@ const WALK_SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".outpu
 const TREES_CASSETTE = join(REPO_ROOT, "scripts", "prevention", "cassettes", "trees.json");
 const EVAL_OUT_DIR = join(REPO_ROOT, "research", "eval-out");
 const EVAL_CORPUS_DIR = join(REPO_ROOT, "research", "eval-corpus");
+/** W359 lane `kind-corpus`: the per-kind fixture stamping data (see readKindCorpusStamps). */
+const KIND_CORPUS_STAMPS = join(REPO_ROOT, "testruns", "kind-corpus", "units.json");
 
 // ---------------------------------------------------------------------------
-// Pure helpers — no IO. Exported so the tests can pin them.
+// Pure helpers â€” no IO. Exported so the tests can pin them.
 // ---------------------------------------------------------------------------
 
 /** A blank/failed reading. `value:null` is the only honest shape for "we could not measure". */
@@ -126,7 +129,7 @@ export function isTestSeamPath(path) {
  * (measured in the corpus: `placeholder="sourdough, croissant, cake"` inside a real
  * emitted page), so a false positive here would be as bad as a miss.
  */
-/** `[label, pattern]` rows — typed so `re.test()` is not a `string | RegExp` union. */
+/** `[label, pattern]` rows â€” typed so `re.test()` is not a `string | RegExp` union. */
 /** @type {ReadonlyArray<readonly [string, RegExp]>} */
 const PLACEHOLDER_MARKERS = [
   ["not-implemented", /NOT[\s_]+IMPLEMENTED/i],
@@ -155,9 +158,9 @@ export function importSpecifiers(source) {
  * THE test-double clause of owner rule 1, as ONE rule the two scopes share: a
  * production module may not import a test-double namespace (`__mocks__/`,
  * `__fixtures__/`, `*.mock|fake|stub|dummy.*`) nor call a test-double library API
- * (`vi.mock(`, `jest.fn(`, `mockImplementation`, …). `scanRealProduct` applies it
+ * (`vi.mock(`, `jest.fn(`, `mockImplementation`, â€¦). `scanRealProduct` applies it
  * to the emitted corpus; `scanRepoTestDoubles` applies the SAME function to
- * RapidTool's own `src/**` — one rule, two scopes, so the two readings can never
+ * RapidTool's own `src/**` â€” one rule, two scopes, so the two readings can never
  * drift apart.
  * @param {string} path POSIX, production-relative
  * @param {string} source
@@ -177,7 +180,7 @@ export function testDoubleViolations(path, source) {
 }
 
 /**
- * The `realProductOnly` reader — owner rule 1: NO mock, stub, fake, demo or
+ * The `realProductOnly` reader â€” owner rule 1: NO mock, stub, fake, demo or
  * placeholder code on any production path. Pure over `{path, source}` rows so the
  * selftest can prove it can fail on an injected defect without touching the repo.
  *
@@ -251,10 +254,10 @@ export function resolveRepoSpecifier(spec, fromPath, fileSet) {
 }
 
 /**
- * R-5 · W357 — the owner-rule reader over RapidTool's OWN tree.
+ * R-5 Â· W357 â€” the owner-rule reader over RapidTool's OWN tree.
  *
  * `scanRealProduct` measures the owner's rule over the emitted corpus only, so the
- * repo's own `src/**` — where the repo's own code lives — was outside the reader
+ * repo's own `src/**` â€” where the repo's own code lives â€” was outside the reader
  * enforcing it. This applies the SAME `testDoubleViolations` clause to every code
  * module under `src/**`, plus one repo-only leg: a production module may not import
  * a specifier that RESOLVES to a test seam or to a test-double-named file. Pure
@@ -305,13 +308,13 @@ export function normalizeRequestedKind(raw) {
 }
 
 /**
- * The `kindFit` reader — owner rule 2: the factory must take the requested KIND
+ * The `kindFit` reader â€” owner rule 2: the factory must take the requested KIND
  * into account and deliver the best version of it. Compares the EMITTED artifact
  * against the requested kind on three legs, all read from existing producers:
  *   - entry shape   `scripts/acceptance-run.mjs#resolveTreeEntry(files, pkg, kind)`
  *   - declared scripts (the kind's verification surface, from the tree's own package.json)
  *   - the kind's required surface (`product-quality` `kindSurface` via the fleet reader)
- * A kind with no emitted case is `uncovered` — never `pass`.
+ * A kind with no emitted case is `uncovered` â€” never `pass`.
  */
 export function kindFitOf(units, readers) {
   const { resolveTreeEntry, readProductQuality, fleetProductQualityFromProjects } = readers;
@@ -320,10 +323,32 @@ export function kindFitOf(units, readers) {
     const requestedKind = normalizeRequestedKind(u.requestedKind);
     const files = Array.isArray(u.files) ? u.files : [];
     const pkg = u.pkg && typeof u.pkg === "object" ? u.pkg : {};
+    // The kind the tree's own bytes record as EMITTED, when the corpus entry
+    // carries one (the two re-stamped trees do). null is "unknown", never "fits".
+    const emittedKind = normalizeRequestedKind(u.emittedKind);
     const unmet = [];
     if (requestedKind === null) {
-      unmet.push(`unknown requested kind ${JSON.stringify(u.requestedKind ?? null)}`);
-      rows.push({ ...unitId(u), requestedKind: null, demandedKind: null, entryOk: false, missingScripts: KIND_SCRIPTS.app, surfaceOk: false, fit: false, uncovered: true, unmet });
+      unmet.push(
+        typeof u.skipReason === "string" && u.skipReason !== ""
+          ? u.skipReason
+          : `unknown requested kind ${JSON.stringify(u.requestedKind ?? null)}`,
+      );
+      rows.push({
+        ...unitId(u),
+        requestedKind: null,
+        emittedKind,
+        emittedKindSource: null,
+        restampedFrom: null,
+        misKind: false,
+        demandedKind: null,
+        entryOk: false,
+        missingScripts: KIND_SCRIPTS.app,
+        surfaceOk: false,
+        fit: false,
+        uncovered: true,
+        skipReason: typeof u.skipReason === "string" && u.skipReason !== "" ? u.skipReason : null,
+        unmet,
+      });
       continue;
     }
     const entry = resolveTreeEntry(files.map((f) => f.path), pkg, requestedKind);
@@ -340,14 +365,25 @@ export function kindFitOf(units, readers) {
     if (demandedKind !== KIND_SURFACE[requestedKind]) {
       unmet.push(`demanded surface ${JSON.stringify(demandedKind)} != ${JSON.stringify(KIND_SURFACE[requestedKind])} for a ${requestedKind} request`);
     }
+    // W359: a unit whose own emitted kind disagrees with its requested kind is a
+    // MIS-KIND EMISSION â€” recorded by name, never silently averaged away. It is a
+    // real failure of the request (the `unmet` legs above carry that), and it is
+    // counted separately so the corpus cannot report the ink without the defect.
+    const misKind = emittedKind !== null && emittedKind !== requestedKind;
+    if (misKind) unmet.push(`mis-kind emission: the tree's own bytes record kind ${JSON.stringify(emittedKind)} for a ${requestedKind} request`);
     rows.push({
       ...unitId(u),
       requestedKind,
+      emittedKind,
+      emittedKindSource: typeof u.emittedKindSource === "string" ? u.emittedKindSource : null,
+      restampedFrom: typeof u.restampedFrom === "string" ? u.restampedFrom : null,
+      misKind,
       demandedKind,
       entryOk: entry.ok === true,
       entryMode: entry.mode ?? null,
       missingScripts,
       surfaceOk,
+      skipReason: null,
       fit: unmet.length === 0,
       uncovered: false,
       unmet,
@@ -367,7 +403,19 @@ export function kindFitOf(units, readers) {
       atoms: rowsOfKind,
     };
   }
-  return { rows, byKind, units: rows.length };
+  const misKindRows = rows.filter((r) => r.misKind === true);
+  const skippedRows = rows.filter((r) => typeof r.skipReason === "string" && r.skipReason !== "");
+  return {
+    rows,
+    byKind,
+    units: rows.length,
+    /** Owner rule 2's own defect counter: a corpus emission that is NOT the requested kind. */
+    misKindEmissions: misKindRows.length,
+    misKindAtoms: misKindRows.map((r) => ({ source: r.source, unit: r.unit, requestedKind: r.requestedKind, emittedKind: r.emittedKind })),
+    /** A named corpus entry that is absent from disk â€” recorded, never dropped in silence. */
+    corpusUnitsMissing: skippedRows.length,
+    missingAtoms: skippedRows.map((r) => ({ source: r.source, unit: r.unit, reason: r.skipReason })),
+  };
 }
 
 function unitId(u) {
@@ -377,7 +425,18 @@ function unitId(u) {
   };
 }
 
-/** The SINGLE per-kind surface rule — `fleetProductQualityFromProjects`'s own. */
+/**
+ * The units the owner-rule scan judges: the per-kind corpus's OWN emitted trees,
+ * hydrated only. A named-but-absent corpus entry is counted by
+ * `kindFit.corpusUnitsMissing` â€” never silently included as a 0-stub tree.
+ */
+export function kindFitUnitsForStubScan(units) {
+  return (Array.isArray(units) ? units : []).filter(
+    (u) => u && u.source === "kind-corpus" && u.record !== null && u.record !== undefined && Array.isArray(u.files),
+  );
+}
+
+/** The SINGLE per-kind surface rule â€” `fleetProductQualityFromProjects`'s own. */
 function fleetSurfaceOk(record, files, fleetReader) {
   if (typeof fleetReader !== "function") return false;
   const fleet = fleetReader([{ ...record, emittedSurface: files }]);
@@ -386,11 +445,11 @@ function fleetSurfaceOk(record, files, fleetReader) {
 }
 
 // ---------------------------------------------------------------------------
-// The evaluator — pure. This is where "a floor may only rise" lives.
+// The evaluator â€” pure. This is where "a floor may only rise" lives.
 // ---------------------------------------------------------------------------
 
 /**
- * The floor evaluator — this is where "a floor may only rise" lives.
+ * The floor evaluator â€” this is where "a floor may only rise" lives.
  * @param {{readings?: any, canaries?: any, floors: any}} args
  * @returns {any} the evaluated metrics + the named failure/pending/uncovered sets
  */
@@ -445,7 +504,7 @@ export function evaluate(args) {
     if (verdict === "regressed") {
       regressions.push(`${id} (${spec.direction} floor ${spec.floor}, measured ${reading.value})`);
     }
-    metrics.push({ ...base, result: verdict === "regressed" ? "regressed" : verdict, reason: verdict === "raise" ? "the reading beats the floor — raise the pin (floors may only rise)" : null });
+    metrics.push({ ...base, result: verdict === "regressed" ? "regressed" : verdict, reason: verdict === "raise" ? "the reading beats the floor â€” raise the pin (floors may only rise)" : null });
   }
   const canaryFailures = (canaries ?? []).filter((c) => c.ok !== true).map((c) => `${c.id}: ${c.reason ?? "failed"}`);
   const ok = regressions.length === 0 && canaryFailures.length === 0 && unavailableEnforced.length === 0 && unknownMetricIds.length === 0;
@@ -454,7 +513,7 @@ export function evaluate(args) {
 
 // ---------------------------------------------------------------------------
 // Reader loading + canaries. `runCanaries` takes the readers as an argument so
-// the selftest can inject a MUTATED reader and prove the canary fails — that is
+// the selftest can inject a MUTATED reader and prove the canary fails â€” that is
 // the direct fix for the W355 C-06 failure mode (a guard disarmed by a rename).
 // ---------------------------------------------------------------------------
 
@@ -490,10 +549,10 @@ const SUBSTANCE_VERDICTS = new Set(["real", "mixed", "stub-skeleton", "empty"]);
 export const SUBSTANCE_SCOPES = ["jobScoped", "wholeTree"];
 
 /**
- * R-8 · W357: one named scope must be present and shape-valid on the returned
+ * R-8 Â· W357: one named scope must be present and shape-valid on the returned
  * outcome. `TreeSubstance` DECLARES `jobScoped?` / `wholeTree?` optional ("so
  * hand-built fixture outcomes still satisfy the type") while `treeSubstanceOf`
- * returns both REQUIRED — so any consumer reading `substance.jobScoped.verdict` off
+ * returns both REQUIRED â€” so any consumer reading `substance.jobScoped.verdict` off
  * a hand-built outcome gets `undefined` and the compiler never says a word. The
  * runtime is the only place that contract can be enforced, and this is it: checked
  * over EVERY pinned tree, for BOTH names, and a violation fails closed.
@@ -508,7 +567,7 @@ export function substanceScopeShape(raw, scope) {
   for (const k of ["stubs", "reexports", "real"]) {
     if (!Number.isFinite(s[k])) return `\`${scope}.${k}\` is not a finite number`;
   }
-  if (!SUBSTANCE_VERDICTS.has(s.verdict)) return `\`${scope}.verdict\` is ${JSON.stringify(s.verdict)} — not one of ${[...SUBSTANCE_VERDICTS].join("/")}`;
+  if (!SUBSTANCE_VERDICTS.has(s.verdict)) return `\`${scope}.verdict\` is ${JSON.stringify(s.verdict)} â€” not one of ${[...SUBSTANCE_VERDICTS].join("/")}`;
   if (!Array.isArray(s.files)) return `\`${scope}.files\` is not an array`;
   return null;
 }
@@ -529,10 +588,10 @@ export function censusShape(raw) {
 }
 
 /**
- * R-4/R-8 · W357 — the substantive-tree reading, with its FAIL-CLOSED rule in one
+ * R-4/R-8 Â· W357 â€” the substantive-tree reading, with its FAIL-CLOSED rule in one
  * pure place. A census that cannot be read, carries no rows, or carries ANY row
  * whose two named scopes are not shape-valid yields `RT_E_VALIDATION` on an enforced
- * pin — a hard failure BY NAME. Pre-fix, a renamed `jobScoped` made a row's verdict
+ * pin â€” a hard failure BY NAME. Pre-fix, a renamed `jobScoped` made a row's verdict
  * `undefined`, so the reading silently became 0: still a failure, but reported as a
  * *rate* regression, which reads like evidence of a product change instead of a
  * broken reader. Both named readings are reported per tree in the evidence.
@@ -548,7 +607,7 @@ export function censusRealTreesReading(census) {
       shapeBad.length > 0
         ? `the census reader's shape is invalid on ${shapeBad.length} of ${rows.length} pinned tree(s): ${shapeBad.map((r) => `${r.tree} -> ${r.shapeError}`).join(" | ")}`
         : rows.length === 0
-          ? "the census corpus is empty — the substantive-tree reading cannot be produced"
+          ? "the census corpus is empty â€” the substantive-tree reading cannot be produced"
           : (census?.reason ?? "the census could not be read"),
     );
   }
@@ -581,16 +640,16 @@ export function runCanaries(ctx) {
     add("canary.census.corpus-is-pinned", false, "compile-check.server.ts does not export treeSubstanceOf()", null);
   } else {
     const rows = Array.isArray(censusRows) ? censusRows : [];
-    // R-4 · W357: EVERY pinned tree is checked, not just the first. The pre-fix
+    // R-4 Â· W357: EVERY pinned tree is checked, not just the first. The pre-fix
     // reading was `censusRows[0].raw`, so a shape change on any tree but the first
-    // could not fire this canary at all — a canary that cannot fire on the real
+    // could not fire this canary at all â€” a canary that cannot fire on the real
     // corpus. A row whose shape is broken is named here.
     const shapeBad = rows.filter((r) => censusShape(r?.raw).length > 0);
     add(
       "canary.census.job-scoped-reachable",
       rows.length > 0 && shapeBad.length === 0,
       rows.length === 0
-        ? "the census corpus is empty — the job-scoped reader cannot be exercised"
+        ? "the census corpus is empty â€” the job-scoped reader cannot be exercised"
         : `the reader's shape is invalid on ${shapeBad.length} of ${rows.length} pinned tree(s): ${shapeBad.map((r) => `${r.tree}: ${censusShape(r.raw).join("; ")}`).join(" | ")}`,
       { trees: rows.length, jobScopedVerdicts: rows.map((r) => r.job ?? null) },
     );
@@ -602,7 +661,7 @@ export function runCanaries(ctx) {
       "canary.census.whole-tree-reachable",
       rows.length > 0 && wholeBad.length === 0,
       rows.length === 0
-        ? "the census corpus is empty — the whole-tree reader cannot be exercised"
+        ? "the census corpus is empty â€” the whole-tree reader cannot be exercised"
         : `\`wholeTree\` is absent or shape-invalid on ${wholeBad.length} of ${rows.length} pinned tree(s): ${wholeBad.map((r) => `${r.tree}: ${substanceScopeShape(r.raw, "wholeTree")}`).join(" | ")}`,
       { trees: rows.length, wholeTreeVerdicts: rows.map((r) => r.whole ?? null) },
     );
@@ -613,11 +672,11 @@ export function runCanaries(ctx) {
     add(
       "canary.census.corpus-is-pinned",
       pinnedOk,
-      `the census canaries were handed ${rows.length} tree(s); the cassette pins ${corpusPinned ?? "none"} and the tree.corpusSize floor is ${corpusFloor ?? "none"} — a zero or truncated corpus makes every census canary vacuous`,
+      `the census canaries were handed ${rows.length} tree(s); the cassette pins ${corpusPinned ?? "none"} and the tree.corpusSize floor is ${corpusFloor ?? "none"} â€” a zero or truncated corpus makes every census canary vacuous`,
       { rows: rows.length, pinned: corpusPinned, floor: corpusFloor ?? null },
     );
     // SCOPE canary. The `jobScoped` census must be derived from the job dirs
-    // (`src/jobs/*` + `jobs/*`, top-level .ts/.js/.mjs) — verified against a file
+    // (`src/jobs/*` + `jobs/*`, top-level .ts/.js/.mjs) â€” verified against a file
     // set computed independently from the bytes here. If `jobScoped` were
     // re-pointed at the whole-tree census (the W355 A2-F3 failure mode) its file
     // list would carry non-job files and this fails by name. Comparing it to the
@@ -629,7 +688,7 @@ export function runCanaries(ctx) {
       "canary.census.job-scoped-scope-pinned",
       scopeRows.length > 0 && mismatched.length === 0,
       scopeRows.length === 0
-        ? "the census corpus is empty — the job-scoped reader's scope cannot be verified"
+        ? "the census corpus is empty â€” the job-scoped reader's scope cannot be verified"
         : `the job-scoped census no longer describes the job dirs: ${mismatched.map((r) => `${r.tree} (reader ${(r.raw?.jobScoped?.files ?? []).map((f) => f.path).join(",") || "none"} vs job dirs ${r.jobFiles.join(",") || "none"})`).join("; ")}`,
       { trees: scopeRows.length, mismatched: mismatched.map((r) => r.tree) },
     );
@@ -752,20 +811,20 @@ export function runCanaries(ctx) {
     add("canary.gateReadings.lint-log-is-eslint", true, "", { supplied: false }, "no --gate reading supplied");
     add("canary.gateReadings.test-leg-not-vacuous", true, "", { supplied: false }, "no --gate reading supplied");
   } else {
-    add("canary.gateReadings.results-keys-present", gate.missingKeys.length === 0, `--gate was supplied but these stage keys are absent from its results: ${gate.missingKeys.join(", ")} (fail closed — a missing key is never "no failures")`, { missingKeys: gate.missingKeys });
-    add("canary.gateReadings.typecheck-log-is-tsc", gate.typecheckLogIsTsc, "a non-zero typecheck exit carried no `error TS` line — the log is not a tsc log", { exit: gate.typecheck?.exit ?? null, errors: gate.typecheck?.errors ?? null });
+    add("canary.gateReadings.results-keys-present", gate.missingKeys.length === 0, `--gate was supplied but these stage keys are absent from its results: ${gate.missingKeys.join(", ")} (fail closed â€” a missing key is never "no failures")`, { missingKeys: gate.missingKeys });
+    add("canary.gateReadings.typecheck-log-is-tsc", gate.typecheckLogIsTsc, "a non-zero typecheck exit carried no `error TS` line â€” the log is not a tsc log", { exit: gate.typecheck?.exit ?? null, errors: gate.typecheck?.errors ?? null });
     add("canary.gateReadings.lint-log-is-eslint", gate.lintLogIsEslint, "a non-zero lint exit carried no eslint `N problems` summary line", { exit: gate.lint?.exit ?? null, problems: gate.lint?.problems ?? null });
     add("canary.gateReadings.test-leg-not-vacuous", gate.testLegsNotVacuous, gate.testLegsReason, { scripts: gate.testsScripts ?? null, lib: gate.testsLib ?? null });
   }
 
   // --- the registry cross-check ----------------------------------------------
   add("canary.errorCodes.registered", ctx?.errorsRegistry?.ok === true, ctx?.errorsRegistry?.reason ?? "failed", ctx?.errorsRegistry?.evidence ?? null);
-  // JOB 4 · W357/W358: the ratchet OWED one first-class code — `RT_E_RATCHET_METRIC_UNAVAILABLE`
-  // ("a pinned floor could not be measured") — that only `src/lib/errors.ts` can register, and no
+  // JOB 4 Â· W357/W358: the ratchet OWED one first-class code â€” `RT_E_RATCHET_METRIC_UNAVAILABLE`
+  // ("a pinned floor could not be measured") â€” that only `src/lib/errors.ts` can register, and no
   // lane owned that file in W356/W357. W358 landed the register line; the declaration stays in the
   // floors file as the machine-readable record of the debt, with `status:"registered"` once paid.
   // Two directions, both fail closed: (a) a code still recorded as OWED must never be EMITTED
-  // before the register carries it; (b) a code recorded as PAID must really BE in ERROR_CODES —
+  // before the register carries it; (b) a code recorded as PAID must really BE in ERROR_CODES â€”
   // the recorded payment is verified against the register, never claimed.
   const owedEntries = Object.entries(/** @type {Record<string, any>} */ (ctx?.floors?.owedCodes ?? {}));
   const owedCodes = owedEntries.map(([id]) => id);
@@ -786,8 +845,8 @@ export function runCanaries(ctx) {
     "canary.errorCodes.owed-code-not-emitted",
     premature.length === 0 && paidButUnregistered.length === 0,
     premature.length > 0
-      ? `the ratchet EMITS ${premature.join(", ")} before src/lib/errors.ts registers it — add the owed line to ERROR_CODES + ERROR_CODE_DOC, or stop emitting it; an unregistered code must never ship`
-      : `${paidButUnregistered.join(", ")} is recorded as a PAID debt (owedCodes#status:"registered") but is NOT in ERROR_CODES — a payment cannot be claimed; restore the register line or record the debt as owed again`,
+      ? `the ratchet EMITS ${premature.join(", ")} before src/lib/errors.ts registers it â€” add the owed line to ERROR_CODES + ERROR_CODE_DOC, or stop emitting it; an unregistered code must never ship`
+      : `${paidButUnregistered.join(", ")} is recorded as a PAID debt (owedCodes#status:"registered") but is NOT in ERROR_CODES â€” a payment cannot be claimed; restore the register line or record the debt as owed again`,
     { owed: owedCodes, unpaid, emittedBeforeRegistration: premature, paid, paidButUnregistered, registered: registeredCodes.length },
     owedCodes.length > 0 && premature.length === 0 && paidButUnregistered.length === 0 && unpaid.length > 0
       ? `owed and NOT yet emitted: ${unpaid.join(", ")}`
@@ -802,7 +861,7 @@ export function runCanaries(ctx) {
   // it names the moving sub-leg floor(s) that CAN fire (`subLegs`, each resolving to a
   // pin with floor > 0) or it states why it is structurally non-regressible
   // (`nonRegressible`). A new bare atLeast-0 pin fails here, so the pattern cannot
-  // come back — the direct fix for the cartographer's R-3.
+  // come back â€” the direct fix for the cartographer's R-3.
   const zeroPins = Object.entries(ctx?.floors?.floors ?? {}).filter(([, s]) => {
     const spec = /** @type {any} */ (s);
     return spec?.direction === "atLeast" && spec.floor === 0 && spec.status !== "uncovered";
@@ -820,7 +879,7 @@ export function runCanaries(ctx) {
     "canary.floors.atleast-zero-pins-are-accounted",
     zeroPins.length > 0 && unaccounted.length === 0,
     zeroPins.length === 0
-      ? "no atLeast-0 pin exists — this canary would be vacuous, which is itself the failure"
+      ? "no atLeast-0 pin exists â€” this canary would be vacuous, which is itself the failure"
       : `these atLeast-0 pins can never fire and name neither a moving sub-leg floor nor a non-regressible reason: ${unaccounted.map(([id]) => id).join(", ")}`,
     { zeroPins: zeroPins.map(([id]) => id), accounted: zeroPins.length - unaccounted.length, unaccounted: unaccounted.map(([id]) => id) },
   );
@@ -830,7 +889,7 @@ export function runCanaries(ctx) {
   const implemented = [...out.map((c) => c.id), "canary.registry.complete"];
   const missing = declared.filter((id) => !implemented.includes(id));
   const undeclared = implemented.filter((id) => !declared.includes(id));
-  add("canary.registry.complete", missing.length === 0 && undeclared.length === 0, `canary registry drift — declared-but-unimplemented: [${missing.join(", ")}]; implemented-but-undeclared: [${undeclared.join(", ")}]`, { declared: declared.length, implemented: implemented.length });
+  add("canary.registry.complete", missing.length === 0 && undeclared.length === 0, `canary registry drift â€” declared-but-unimplemented: [${missing.join(", ")}]; implemented-but-undeclared: [${undeclared.join(", ")}]`, { declared: declared.length, implemented: implemented.length });
   return out;
 }
 
@@ -843,7 +902,7 @@ export function samePathSet(filesA, pathsB) {
 
 // ---------------------------------------------------------------------------
 // Producers (read-only). Every one either returns a real reading or an
-// `unreadable(...)` with a coded cause — never a number that was not measured.
+// `unreadable(...)` with a coded cause â€” never a number that was not measured.
 // ---------------------------------------------------------------------------
 
 export function readJsonFile(p) {
@@ -859,7 +918,7 @@ export function readJsonFile(p) {
  * Parse a producer's stdout as ONE JSON object carrying `requiredKeys`. Tries the
  * whole stream first (a pretty-printed verdict), then line-by-line from the end (a
  * one-line verdict beside stderr noise). Returns null when NO candidate carries
- * every required key — "some line parsed" is never accepted as a reading.
+ * every required key â€” "some line parsed" is never accepted as a reading.
  */
 export function parseProducerJson(stdout, requiredKeys) {
   const text = String(stdout ?? "").replace(/^\uFEFF/, "");
@@ -919,7 +978,7 @@ export function walkFiles(root, opts = {}) {
 }
 
 /**
- * The job-dir file set for a tree — the scope `treeSubstanceOf().jobScoped`
+ * The job-dir file set for a tree â€” the scope `treeSubstanceOf().jobScoped`
  * describes (`src/jobs/*` + `jobs/*`, TOP-LEVEL `.ts/.js/.mjs`, POSIX rel paths).
  * Deliberately an independent mirror of the reader's scope rule, used ONLY by the
  * scope canary; it reads bytes, it never trusts the reader's own file list.
@@ -989,7 +1048,7 @@ export function readCensus(readers) {
       whole: raw?.wholeTree?.verdict ?? null,
       raw,
       shapeError: shapeProblems.length > 0 ? shapeProblems.join("; ") : null,
-      // The job-dir file set computed HERE (not read back from the reader) — the
+      // The job-dir file set computed HERE (not read back from the reader) â€” the
       // independent side of the scope canary. Mirrors compile-check's own scope
       // rule deliberately: the point of a scope canary is that it is derived
       // outside the thing it audits.
@@ -1013,8 +1072,45 @@ export function readQualityRecords() {
   return rows;
 }
 
-/** The kindFit corpus: pinned emitted trees + the eval-out emit trees for corpus briefs. */
-export function readKindFitUnits() {
+/**
+ * The per-kind fixture stamping data (lane `kind-corpus`, W359) â€”
+ * `testruns/kind-corpus/units.json`. It carries the per-kind emitted units the
+ * corpus was missing and the tree records whose `kind` is a MIS-STAMP. For a
+ * corpus unit it NEVER carries a `requestedKind`: that is read from the corpus
+ * brief's own `kind:` front-matter, so this file cannot invent the stamp its own
+ * unit is measured against. The one place a kind is stated by hand is a
+ * re-stamped tree, whose evidence is recorded beside it.
+ */
+export function readKindCorpusStamps(path = KIND_CORPUS_STAMPS) {
+  const j = readJsonFile(path);
+  if (!j || j.__parseError) {
+    return { units: [], restamped: [], error: `${relative(REPO_ROOT, path).replace(/\\/g, "/")} is missing or unparseable` };
+  }
+  return {
+    units: Array.isArray(j.units) ? j.units : [],
+    restamped: Array.isArray(j.restampedTrees) ? j.restampedTrees : [],
+    error: null,
+  };
+}
+
+/**
+ * The kind a tree's OWN bytes record as EMITTED: the persisted record's `kind`
+ * when it has one, else the emitted README's `**Kind:**` line. Both are the
+ * tree's own declaration; an absent/unreadable signal is `null` ("unknown"),
+ * never a fabricated kind.
+ */
+function emittedKindOf(dir, record) {
+  const fromRecord = normalizeRequestedKind(record?.kind);
+  if (fromRecord !== null) return { kind: fromRecord, source: ".rapidtool/project.json#kind" };
+  const m = /^-\s*\*\*Kind:\*\*\s*([A-Za-z-]+)/m.exec(safeRead(join(dir, "README.md")));
+  const fromReadme = m ? normalizeRequestedKind(m[1]) : null;
+  return { kind: fromReadme, source: fromReadme === null ? null : "README.md#**Kind:**" };
+}
+
+/** The kindFit corpus: pinned emitted trees + the eval-out emit trees for corpus briefs + the per-kind fixture corpus. */
+export function readKindFitUnits(opts = {}) {
+  const stamps = readKindCorpusStamps(opts.stampsPath ?? KIND_CORPUS_STAMPS);
+  const restamps = new Map(stamps.restamped.filter((r) => r && typeof r.tree === "string").map((r) => [r.tree, r]));
   // Each unit is HYDRATED at construction (files/pkg/record), so the shape is fixed
   // once and never mutated afterwards.
   /** @type {Array<any>} */
@@ -1029,8 +1125,34 @@ export function readKindFitUnits() {
   for (const tree of Array.isArray(trees?.trees) ? trees.trees : []) {
     const dir = join(REPO_ROOT, "testruns", tree.replace(/\//g, "\\"));
     const recPath = join(dir, ".rapidtool", "project.json");
-    if (!existsSync(dir) || !existsSync(recPath)) continue;
-    units.push(hydrate({ source: "testruns", unit: tree, requestedKind: readJsonFile(recPath)?.kind ?? null, dir }));
+    if (!existsSync(dir) || !existsSync(recPath)) {
+      units.push({
+        source: "testruns",
+        unit: tree,
+        requestedKind: null,
+        dir,
+        skipReason: `the pinned tree cassette (scripts/prevention/cassettes/trees.json) lists "${tree}" but no emitted tree with a .rapidtool/project.json record exists on disk â€” a named corpus entry that is absent is recorded, never dropped in silence`,
+      });
+      continue;
+    }
+    const record = readJsonFile(recPath);
+    const emitted = emittedKindOf(dir, record);
+    const restamp = restamps.get(tree);
+    // The requested kind is the EMITTER's own kind unless the tree is a recorded
+    // mis-stamp, in which case the unit's own bytes (its brief, its later revision,
+    // its campaign cassette) name the honest request and the stamp is corrected â€”
+    // with the emitted kind kept, so the row reads as the failing request it is.
+    units.push(
+      hydrate({
+        source: "testruns",
+        unit: tree,
+        requestedKind: restamp ? restamp.requestedKind : (record?.kind ?? null),
+        emittedKind: emitted.kind,
+        emittedKindSource: emitted.source,
+        ...(restamp ? { restampedFrom: String(restamp.recordedKind ?? record?.kind ?? "") } : {}),
+        dir,
+      }),
+    );
   }
   const corpusKinds = {};
   if (existsSync(EVAL_CORPUS_DIR)) {
@@ -1056,11 +1178,35 @@ export function readKindFitUnits() {
       units.push({ source: "eval-out", unit: e.name, requestedKind: corpusKinds[base] ?? null, dir });
     }
   }
+  // W359 lane `kind-corpus`: the per-kind emitted units. Their requested kind comes
+  // from the corpus brief the fixture names, exactly as the eval-out units do, so a
+  // unit cannot be stamped by the file that adds it.
+  for (const entry of stamps.units) {
+    const rel = entry && typeof entry.dir === "string" ? entry.dir : "";
+    const unit = entry && typeof entry.unit === "string" ? entry.unit : rel;
+    const dir = join(REPO_ROOT, "testruns", rel.replace(/\//g, "\\"));
+    const shown = relative(REPO_ROOT, dir).replace(/\\/g, "/");
+    if (rel === "" || !existsSync(dir) || !existsSync(join(dir, ".rapidtool", "project.json"))) {
+      units.push({
+        source: "kind-corpus",
+        unit,
+        requestedKind: null,
+        dir,
+        skipReason: `the per-kind fixture corpus (testruns/kind-corpus/units.json) names this unit but no emitted tree with a .rapidtool/project.json record exists at ${shown} â€” a named corpus entry that is absent is recorded, never dropped in silence`,
+      });
+      continue;
+    }
+    const brief = entry && typeof entry.brief === "string" ? entry.brief : "";
+    units.push({ source: "kind-corpus", unit, requestedKind: corpusKinds[brief] ?? null, brief, keyed: entry?.keyed === true, dir });
+  }
   for (const u of units) {
     const all = walkFiles(u.dir).map((f) => ({ path: f.path, source: safeRead(f.absPath) }));
     u.files = all;
     u.pkg = readJsonFile(join(u.dir, "package.json")) ?? {};
     u.record = readJsonFile(join(u.dir, ".rapidtool", "project.json"));
+    const emitted = emittedKindOf(u.dir, u.record);
+    u.emittedKind = emitted.kind;
+    u.emittedKindSource = emitted.source;
   }
   return units;
 }
@@ -1074,7 +1220,7 @@ function safeRead(p) {
 }
 
 /**
- * The gate's own stage readings — either a gate verdict JSON or the gate temp dir.
+ * The gate's own stage readings â€” either a gate verdict JSON or the gate temp dir.
  * @param {string|null} path
  * @returns {any} a fixed-shape reading record; every field is null when unavailable
  */
@@ -1120,7 +1266,7 @@ export function readGate(path) {
   const s1 = safeRead(join(path, "testsScripts.log"));
   const l1 = safeRead(join(path, "testsLib.log"));
   const plog = safeRead(join(path, "prevention.log"));
-  // A green exit IS the measurement "0 errors / 0 problems" — never `null`.
+  // A green exit IS the measurement "0 errors / 0 problems" â€” never `null`.
   /** @type {any} */
   const typecheck = { exit: exitOf("typecheck"), errors: null };
   typecheck.errors = typecheck.exit === 0 ? 0 : (tlog.match(/error TS/g) ?? []).length;
@@ -1162,7 +1308,7 @@ function num(v) {
 }
 
 /**
- * The prevention harness — read from the gate's own log when supplied, else spawned.
+ * The prevention harness â€” read from the gate's own log when supplied, else spawned.
  * @param {boolean} spawn
  * @returns {any} a fixed-shape verdict; `count`/`countFloor` are null when unparseable
  */
@@ -1203,14 +1349,14 @@ export function readDocParity() {
     uniquePaths: num(j.uniquePaths),
     missingCount,
     emptyCount,
-    // Absent counts must NOT read as "0 mismatches" — unmeasurable, not clean.
+    // Absent counts must NOT read as "0 mismatches" â€” unmeasurable, not clean.
     mismatches: missingCount === null || emptyCount === null ? null : missingCount + emptyCount,
     advisory: true,
   };
 }
 
 /**
- * The acceptance record — run-eval's own results, with the stale flag SURFACED (W355 L4).
+ * The acceptance record â€” run-eval's own results, with the stale flag SURFACED (W355 L4).
  * @returns {any}
  */
 export function readAcceptance() {
@@ -1300,7 +1446,7 @@ export async function collectReadings(opts = {}) {
   readings["prevention.guards"] = Number.isFinite(prev.count) ? { value: prev.count } : unreadable(UNAVAILABLE_CODES.readerShapeInvalid, "the prevention verdict carried no numeric count");
   readings["prevention.countFloor"] = Number.isFinite(prev.countFloor) ? { value: prev.countFloor } : unreadable(UNAVAILABLE_CODES.readerShapeInvalid, "the prevention verdict carried no numeric countFloor");
 
-  // The census corpus (the pinned trees) — the substantive-tree reading.
+  // The census corpus (the pinned trees) â€” the substantive-tree reading.
   let census = opts.census ?? null;
   if (census === null && typeof readers.compile?.treeSubstanceOf === "function") {
     census = readCensus(readers);
@@ -1313,7 +1459,7 @@ export async function collectReadings(opts = {}) {
   if (shapeBad.length > 0) degraded.push(`census shape: ${shapeBad.map((r) => `${r.tree}: ${r.shapeError}`).join(" | ")}`);
   readings["tree.jobScopedRealTrees"] = censusRealTreesReading(census);
 
-  // R-5 · W357 — the SAME owner rule, over RapidTool's OWN tree.
+  // R-5 Â· W357 â€” the SAME owner rule, over RapidTool's OWN tree.
   const repoFiles = walkFiles(join(REPO_ROOT, "src"))
     .filter((f) => CODE_FILE_RE.test(f.path))
     .map((f) => ({ path: `src/${f.path}`, source: safeRead(f.absPath) }));
@@ -1356,9 +1502,9 @@ export async function collectReadings(opts = {}) {
   let kindFit = null;
   if (typeof readers.pq?.readProductQuality === "function") {
     const records = readQualityRecords();
-    // R-3 · W357: `qualityCount` is pinned at 0 (its structural minimum), so no
+    // R-3 Â· W357: `qualityCount` is pinned at 0 (its structural minimum), so no
     // regression can move it. The reader's OWN moving sub-legs are measured beside it
-    // and pinned where a drop is possible — the fix for "a floor that cannot fire".
+    // and pinned where a drop is possible â€” the fix for "a floor that cannot fire".
     let qualityTrue = 0;
     let treesPresent = 0;
     let realModulesPresent = 0;
@@ -1379,20 +1525,52 @@ export async function collectReadings(opts = {}) {
       readProductQuality: readers.pq.readProductQuality,
       fleetProductQualityFromProjects: readers.pq.fleetProductQualityFromProjects,
     });
+    // W359 lane `kind-corpus`: the corpus's own defects and its own coverage gaps,
+    // published as metrics of their own so neither can be averaged away by a
+    // per-kind rate. `misKindEmissions` is the owner's rule-2 defect counter (a
+    // corpus emission that is NOT the requested kind); `corpusUnitsMissing` is the
+    // fail-closed denominator guard for the per-kind fixture corpus.
+    readings["kindFit.misKindEmissions"] = { value: kindFit.misKindEmissions, evidence: { atoms: kindFit.misKindAtoms, units: kindFit.units } };
+    readings["kindFit.corpusUnitsMissing"] = { value: kindFit.corpusUnitsMissing, evidence: { units: kindFit.units, missing: kindFit.missingAtoms } };
+    // The owner's real-product rule over the per-kind corpus's OWN emitted bytes. These
+    // units are keyless deterministic-floor emissions, so the emitter's scaffolding
+    // leaves `TODO(E-15)` job/UI modules in them: counted, named, and published at the
+    // honest bar of 0 (`pending-first-green`) rather than left for a reader to mistake
+    // for a synthesized product. This is the corpus's own debt, distinct from
+    // `realProductOnly.stubProductionModules` (the 13 pinned census trees).
+    if (typeof readers.dod?.classifyModuleSource === "function") {
+      const perUnit = kindFitUnitsForStubScan(units).map((u) => {
+        const scan = scanRealProduct(u.files, readers.dod.classifyModuleSource);
+        return {
+          unit: u.unit,
+          codeModules: scan.codeModules,
+          real: scan.real,
+          stubs: scan.stubs,
+          stubsNamed: scan.violations.filter((v) => v.kind === "stub-module").map((v) => ({ path: v.path, marker: v.marker })),
+        };
+      });
+      readings["kindFit.corpusStubModules"] = {
+        value: perUnit.reduce((n, x) => n + x.stubs, 0),
+        evidence: { perUnit },
+      };
+    } else {
+      readings["kindFit.corpusStubModules"] = unreadable(UNAVAILABLE_CODES.readerShapeInvalid, "src/lib/dod.ts#classifyModuleSource is unavailable, so the per-kind corpus's stub debt cannot be measured");
+    }
     for (const k of RATCHET_KINDS) {
       const b = kindFit.byKind[k];
       const covered = b.units > 0;
-      // R-3: each leg of `fit` is published and pinned on its own where it can move
-      // (the `.fit` counts are 0 of 30/1/1 and so cannot regress at all).
+      // R-3: each leg of `fit` is published and pinned on its own, because the
+      // aggregate is the weakest of the four (W359 lane `kind-corpus`: every kind
+      // now has at least one emitted unit, so each leg is a real count).
       const legs = { entryOk: b.entryOk, scriptsOk: b.scriptsOk, surfaceOk: b.surfaceOk, demandedMatch: b.demandedMatch };
-      readings[`kindFit.${k}.units`] = covered ? { value: b.units } : unreadable(UNAVAILABLE_CODES.artifactAbsent, `no emitted artifact exists on disk for a ${k}-kind brief — UNCOVERED, never a pass`);
+      readings[`kindFit.${k}.units`] = covered ? { value: b.units } : unreadable(UNAVAILABLE_CODES.artifactAbsent, `no emitted artifact exists on disk for a ${k}-kind brief â€” UNCOVERED, never a pass`);
       readings[`kindFit.${k}.fit`] = covered
         ? { value: b.fit, evidence: { units: b.units, ...legs } }
-        : unreadable(UNAVAILABLE_CODES.artifactAbsent, `no emitted artifact exists on disk for a ${k}-kind brief — UNCOVERED, never a pass`);
+        : unreadable(UNAVAILABLE_CODES.artifactAbsent, `no emitted artifact exists on disk for a ${k}-kind brief â€” UNCOVERED, never a pass`);
       for (const [leg, value] of Object.entries(legs)) {
         readings[`kindFit.${k}.${leg}`] = covered
           ? { value, evidence: { units: b.units, fit: b.fit } }
-          : unreadable(UNAVAILABLE_CODES.artifactAbsent, `no emitted artifact exists on disk for a ${k}-kind brief — UNCOVERED, never a pass`);
+          : unreadable(UNAVAILABLE_CODES.artifactAbsent, `no emitted artifact exists on disk for a ${k}-kind brief â€” UNCOVERED, never a pass`);
       }
     }
   } else {
@@ -1401,6 +1579,9 @@ export async function collectReadings(opts = {}) {
       "productQuality.qualityCount",
       "productQuality.treesPresent",
       "productQuality.realModulesPresent",
+      "kindFit.misKindEmissions",
+      "kindFit.corpusUnitsMissing",
+      "kindFit.corpusStubModules",
       ...RATCHET_KINDS.flatMap((k) => [`kindFit.${k}.units`, `kindFit.${k}.fit`, `kindFit.${k}.entryOk`, `kindFit.${k}.scriptsOk`, `kindFit.${k}.surfaceOk`, `kindFit.${k}.demandedMatch`]),
     ]) {
       readings[id] = unreadable(UNAVAILABLE_CODES.readerShapeInvalid, "product-quality.ts does not export readProductQuality()");
@@ -1524,16 +1705,27 @@ export function runSelftest({ floors, floorsPath, readings, canaries, readers, f
     t("unavailable.pending-metric-does-not-fail", v.unavailableEnforced.every((x) => !x.startsWith(`${pendingId} `)), `${pendingId} -> unavailableEnforced=${JSON.stringify(v.unavailableEnforced)}`);
   }
 
-  // 4. An uncovered kind is `uncovered` — never a pass and never a failure.
+  // 4. An uncovered kind is `uncovered` â€” never a pass and never a failure.
+  //    W359 lane `kind-corpus`: this tooth plants its OWN uncovered pin as well as
+  //    reading the real set, because "no uncovered pin exists" must not be able to
+  //    turn this tooth vacuous once every kind has an honest case.
   const unc = Object.entries(floors.floors).filter(([, s]) => s.status === "uncovered").map(([id]) => id);
-  const uv = evaluate({ readings: {}, canaries: [], floors: { floors: Object.fromEntries(Object.entries(floors.floors).filter(([id]) => unc.includes(id))) } });
-  t("uncovered.never-passes", unc.length > 0 && uv.uncovered.length === unc.length && uv.metrics.every((m) => m.result === "uncovered"), `uncovered pins: ${unc.join(", ")}`);
+  const syntheticUncovered = { floors: { ...floors.floors, "planted.uncovered": { direction: "atLeast", floor: null, status: "uncovered", producer: "planted" } } };
+  const uv = evaluate({ readings: {}, canaries: [], floors: syntheticUncovered });
+  t(
+    "uncovered.never-passes",
+    uv.uncovered.includes("planted.uncovered") &&
+      uv.metrics.find((m) => m.id === "planted.uncovered")?.result === "uncovered" &&
+      !uv.metrics.some((m) => m.id === "planted.uncovered" && (m.result === "ok" || m.result === "regressed")) &&
+      unc.every((id) => uv.metrics.find((m) => m.id === id)?.result === "uncovered"),
+    `planted uncovered pin + the real uncovered set [${unc.join(", ")}] all read \`uncovered\``,
+  );
 
   // 5. The READER CANARY has teeth: a mutated reader must trip it (the C-06 mode).
   if (readers && typeof readers.compile?.treeSubstanceOf === "function") {
     // The A2-F3 aliasing, reproduced in memory: `jobScoped` re-pointed at the
     // whole-tree census. The scope canary must reject a row whose jobScoped file
-    // list is not the job dirs — proved with a synthetic row so the tooth does not
+    // list is not the job dirs â€” proved with a synthetic row so the tooth does not
     // depend on the reader's current (moving) state.
     const syntheticAliased = {
       readers,
@@ -1590,7 +1782,7 @@ export function runSelftest({ floors, floorsPath, readings, canaries, readers, f
     t("canary.classifier-discriminates-has-teeth", blindCanaries.some((c) => c.id === "canary.census.classifier-discriminates" && c.ok !== true), "a classifier that calls every module `real` must trip the canary");
   }
 
-  // 5b. R-4 / R-8 · W357: the census canaries must fire on ANY pinned tree (not just
+  // 5b. R-4 / R-8 Â· W357: the census canaries must fire on ANY pinned tree (not just
   //     the first) and on EITHER named scope, and a zero-tree corpus must be a
   //     failure rather than a vacuous pass. Planted rows, in memory.
   if (readers) {
@@ -1672,7 +1864,7 @@ export function runSelftest({ floors, floorsPath, readings, canaries, readers, f
     );
   }
 
-  // 5c. R-3 · W357: a floor no regression can move must be accounted for. Planted.
+  // 5c. R-3 Â· W357: a floor no regression can move must be accounted for. Planted.
   {
     const plantedZero = {
       ...floors,
@@ -1700,8 +1892,8 @@ export function runSelftest({ floors, floorsPath, readings, canaries, readers, f
     );
   }
 
-  // 5d. JOB 4 · W357/W358: the owed-code canary must be able to fail on BOTH declared
-  //     shapes — (a) a code still recorded as OWED, emitted before the register carries
+  // 5d. JOB 4 Â· W357/W358: the owed-code canary must be able to fail on BOTH declared
+  //     shapes â€” (a) a code still recorded as OWED, emitted before the register carries
   //     it, and (b) a code whose debt is recorded as PAID (`status:"registered"`) but
   //     which is NOT in ERROR_CODES. `floors.owedCodes` is overridden per plant so the
   //     real file's own entry is never edited to prove a tooth.
@@ -1734,7 +1926,7 @@ export function runSelftest({ floors, floorsPath, readings, canaries, readers, f
     t(
       "canary.errorCodes.registered-debt-is-verified",
       claimedPayment.some((c) => c.id === "canary.errorCodes.owed-code-not-emitted" && c.ok !== true),
-      "a debt recorded as PAID whose code is absent from ERROR_CODES must trip the canary — the payment is verified, not claimed (W358)",
+      "a debt recorded as PAID whose code is absent from ERROR_CODES must trip the canary â€” the payment is verified, not claimed (W358)",
     );
   }
   t("canary.registry.complete-has-teeth", true, "the registry-completeness canary is itself compared against the floors file in the real run");
@@ -1878,7 +2070,7 @@ async function main(argv) {
       },
       notes: [
         "estimatedCostUsd is null: no spend is fabricated.",
-        "Every reading is either measured or `unavailable` with a coded reason — never a silent pass.",
+        "Every reading is either measured or `unavailable` with a coded reason â€” never a silent pass.",
         ...collected.degraded.map((d) => `degraded: ${d}`),
       ],
     },

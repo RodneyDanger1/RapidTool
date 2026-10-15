@@ -1,9 +1,15 @@
 # NEXTSTEPS — RapidTool
 
+> ### ⏸ PAUSED 2026-10-15 — wave W359 was stopped mid-flight
+> All agents were halted at the owner's request and everything on disk was committed and pushed.
+> `npx tsc --noEmit` exits **0** at the pause, so the tree is syntactically sound. **Read §5b before
+> resuming** — it names what landed, what is half-done and what is left, per lane and per file, and the
+> per-file companion is **`wave_plans/W359/HANDOFF.md`**. The 19 files in flight each carry a one-line
+> `W359 PAUSED` marker comment.
+
 **Read this first.** It is the handoff: what RapidTool is, what changed recently, exactly how to run and
 verify it, what is still broken, and the remaining waves in order. Everything here was measured on
-2026-10-15 at HEAD `7c7f911` + the uncommitted closure work described below; where a claim came from a
-document rather than a command, it says so.
+2026-10-15; where a claim came from a document rather than a command, it says so.
 
 ---
 
@@ -140,6 +146,35 @@ kind-fidelity pin, which is intentional: see §6.
 
 ---
 
+## 5b. PAUSED — W359 mid-flight: what landed, what is half-done, what is left
+
+**Per-file companion: `wave_plans/W359/HANDOFF.md`.** Nothing below is a boundary-verified fact — no
+boundary ran after the pause, so a lane's own reported test numbers are **lane claims** until re-derived.
+
+| lane | state | files it touched | what is left to do |
+|---|---|---|---|
+| `kind-gate` | **LANDED — the wave's P0** | `src/lib/scaffold.ts`, `scaffold.test.ts` | Re-derive at a boundary. The lane reports the three previously-broken kinds (`game`, `tool`, `service`, `library`) going from **exit 2 with 167 errors → exit 0**, `scaffold.test.ts` **144/144** and `codegen.server.test.ts` **331/331**. If true, it clears the only failing test in the repo. |
+| `resolve-kind` | **LANDED + 6 disclosed residuals** | `src/lib/engine.ts`, `engine.test.ts`, `src/lib/types.ts`, `src/lib/dod.ts`, `dod.test.ts`, `scripts/run-eval.mjs`, `run-eval.test.mjs` | The residuals in `fixes/359_resolve_kind.md` §6: calibrate the keyword table from measurement (needs `kind-corpus`), a stale comment in `src/lib/sandbox.ts:509`, a "declared" vs "resolved" wording item at `scaffold.ts:8269`, and the `app` surface contract for briefs with no page noun. |
+| `inject-kind` | **LANDED + residuals** | `src/lib/codegen.server.ts`, `codegen.server.test.ts`, `src/lib/prompt-engine.ts`, `prompt-engine.test.ts` | Unmeasured by nature: the prompt change's effect needs a **keyed** run; the cache-hit gain is a placement argument; model obedience to the per-kind REQUIRED rows is run-side. It also repaired an encoding incident it caused (documented in its log) — the lesson is in the HANDOFF. |
+| `thread-kind` | **HALF-DONE, log still a skeleton** | `scripts/rapidtool-cli.mjs` (16:55), `src/lib/headless.ts` (16:59), `scripts/README-cli.md` (17:02) | **Four jobs, none documented:** (1) wire the inert CLI `--kind` on `create` (`rapidtool-cli.mjs:1632`); (2) `headless.ts:6602` must print the **resolved** kind; (3) `headless.ts:6427` must carry the kind into `promptExpand`; (4) **the dead gate seam** `headless.ts:5855 stampEmittedSurfaceForGate` — one hit repo-wide (its own definition), so the DoD gate reads the *synthesized* surface and can produce a **false refusal**. Highest-value item in the wave after the P0. **Diff the three files against `HEAD` first.** |
+| `kind-corpus` | **HALF-DONE, log still a skeleton** | `scripts/quality-ratchet.mjs` (17:17), `.test.mjs` (17:10), `.floors.json` (17:11), **created** `testruns/kind-corpus/units.json` + a real emitted `arcade-breakout` tree | All four jobs: the per-unit honest/mis-stamp verdict table; a per-kind coverage matrix so `kindFit.tool`/`service` stop being `uncovered`; each pin **able to fire** with a planted `floor − 1`; and `realProductOnly` re-verified over `src/**` (the no-mock rule) with the 3-module stub debt. **The reader, its test and the floors all moved without a log — diff all three against `HEAD` before trusting any reading.** |
+| `cartographer` | **NOT STARTED** | — | The whole lane: verify the five lanes adversarially, map the wave's regressions, and re-measure the **P6 wall** into a W360 lane plan. |
+
+### Resume order (also in the HANDOFF §3)
+
+1. `git diff HEAD` the six undocumented files (`scripts/rapidtool-cli.mjs`, `src/lib/headless.ts`,
+   `scripts/README-cli.md`, `scripts/quality-ratchet.mjs`, `quality-ratchet.test.mjs`,
+   `quality-ratchet.floors.json`) — the only way to learn what those two lanes actually did.
+2. `npx tsc --noEmit` → expect 0.
+3. `node --experimental-strip-types --test --test-reporter=tap src/lib/scaffold.test.ts src/lib/codegen.server.test.ts`
+   → expect green (that is the P0's proof).
+4. `node scripts/quality-ratchet.mjs --all` → expect `ok:true`, and note the `kindFit` readings.
+5. `& 'C:\Program Files\Git\bin\bash.exe' scripts/gate.sh` → **if `kind-gate` is right, this is the first
+   fully green boundary of the campaign.**
+6. Finish `thread-kind` (the dead seam first), then `kind-corpus`, then dispatch `cartographer`.
+
+---
+
 ## 6. What is still broken / not done (honest list)
 
 | # | item | where | why it matters |
@@ -162,7 +197,10 @@ kind-fidelity pin, which is intentional: see §6.
 
 ## 7. The remaining waves, in order
 
-**W359 — kind fidelity (planned and ready; `wave_plans/W359/README.md` + 6 lane notes).**
+**W359 — kind fidelity (DISPATCHED, then PAUSED mid-flight 2026-10-15 — see §5b and
+`wave_plans/W359/HANDOFF.md`; `wave_plans/W359/README.md` + 6 lane notes are the mandate).**
+Its P0 (`kind-gate`) reports landed; `thread-kind` and `kind-corpus` are half-done and undocumented;
+`cartographer` never started.
 1. `resolve-kind` — one truth: a scored, evidence-recording resolution (`kindResolution{kind,confidence,
    evidence}`), the three replicated resolvers deleted, the kind stamped on the **keyless** path.
 2. `kind-gate` — **the P0**: gate `briefedSiteFiles` on the kind and derive `jsx` from the emitted file set,

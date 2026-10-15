@@ -1,3 +1,4 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 export const PHASE_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 export type PhaseId = (typeof PHASE_IDS)[number];
 
@@ -12,7 +13,7 @@ export type ProjectStatus =
 
 /**
  * Which model backend actually produced this project's LLM content (E-14).
- * The live backend is DeepSeek (llm.ts / deepseek.server.ts) — the old
+ * The live backend is DeepSeek (llm.ts / deepseek.server.ts) â€” the old
  * "grok-4.5" | "local-edge" | "failover" labels described a target
  * architecture that was never implemented. Legacy persisted values hydrate
  * to "deterministic" (engine.ts hydrateProject) unless a logs entry shows a
@@ -24,12 +25,64 @@ export type ModelRoute = "deepseek-flash" | "deepseek-pro" | "deterministic" | "
  * The ONE stored delivery-kind taxonomy (342-4). engine.deliveryKindOf decides
  * it from the brief ONCE, withDeliveryKind stamps it at the keyed P6 seam, and
  * every resolver (engine.uiKindOf's 3-way P8 projection, scaffold.projectKindOf)
- * reads it back — never re-inferring from brief nouns. "app" = end-user web app,
+ * reads it back â€” never re-inferring from brief nouns. "app" = end-user web app,
  * "tool" = agent/CLI utility, "game" = playable game, "library" = importable
  * package, "service" = hosted API/worker.
  */
 export const DELIVERY_KINDS = ["app", "tool", "game", "library", "service"] as const;
 export type DeliveryKind = (typeof DELIVERY_KINDS)[number];
+
+/**
+ * W359 (resolve-kind): ONE matched signal behind a kind decision â€” the word, the
+ * weight the weighted table carries for it, where it was read, and whether it
+ * actually counted (`false` = a declared UI surface damped the library/tool rows).
+ * Exported so an audit can re-derive a decision from the record alone.
+ */
+export type KindEvidence = {
+  /** The kind this signal argues for. */
+  kind: DeliveryKind;
+  /** The matched table signal (already matched through the plural forms). */
+  signal: string;
+  /** The table weight; `null` for a `declared` row (an explicit kind is not a score). */
+  weight: number | null;
+  /** Where the signal was read. `"declared"` = the project's own stored kind. */
+  source: "declared" | "brief" | "domain" | "lattice";
+  /** False when the signal matched but was damped (never silently dropped). */
+  counted: boolean;
+};
+
+/**
+ * W359 (resolve-kind): the RECORDED delivery-kind decision â€” `kind` plus the
+ * evidence that produced it, so no consumer and no audit has to re-infer why.
+ *
+ * The resolution is pure, deterministic and MODEL-FREE (no keyed call), so this
+ * record is evidence, never a cache: `briefHash` is an FNV-1a of the exact
+ * decision input, and a record whose hash no longer matches the live input is
+ * STALE (readable as such) rather than a wrong answer. `kind` is never read back
+ * out of this record â€” the decision is re-derived from the brief on every call.
+ *
+ * `basis` describes the decision the record was WRITTEN from: `"declared"` when
+ * the project already carried a legal kind, `"scored"` when the weighted table
+ * decided it, `"default"` when nothing matched (â‡’ `app`).
+ */
+export type KindResolution = {
+  kind: DeliveryKind;
+  /** How the RECORDED decision was made: a stored kind, a scored win, or the default. */
+  basis: "declared" | "scored" | "default";
+  /** Winning total (sum of the counted weights); 0 for `declared`/`default`. */
+  score: number;
+  /** The best-scoring OTHER kind, or null when nothing else scored. */
+  runnerUp: { kind: DeliveryKind; score: number } | null;
+  /** Winner score Ã· (winner + runner-up) â€” a normalized MARGIN, never a probability.
+   *  1 = certain (a declared kind, or no competing kind scored); 0 = the bare default. */
+  confidence: number;
+  /** Every signal that matched, winner and losers alike, in the table's own order. */
+  evidence: KindEvidence[];
+  /** Rows damped by the declared-UI-surface rule (library/tool), when it applied. */
+  damped: DeliveryKind[];
+  /** FNV-1a over the exact decision input â€” the staleness key. */
+  briefHash: string;
+};
 
 export type ArtifactKind =
   | "scorecard"
@@ -88,14 +141,14 @@ export type Competitor = {
   source?: "illustrative" | "cited";
 };
 
-/** One real fetched finding (M-01/M-06) — the unit that may ground a claim. */
+/** One real fetched finding (M-01/M-06) â€” the unit that may ground a claim. */
 export type ResearchSource = {
   title: string;
   url: string;
   content: string;
 };
 
-/** One research phase's live corpus entry — persisted on Project (not artifact bodies)
+/** One research phase's live corpus entry â€” persisted on Project (not artifact bodies)
  *  so packet citations survive artifact trimming (M-06). */
 export type ResearchCorpusEntry = {
   /** The exact query that produced these items (engine researchQueryFor output). */
@@ -120,7 +173,7 @@ export type MemoryEntry = {
   /** E-18: free-form tags (vault memory notes, search facets). */
   tags?: string[];
   /** Learning-loop retirement (fixes/136 F5, A3-04): ids of older memory rows
-   *  this row supersedes — a supersede is an append, never a delete; the
+   *  this row supersedes â€” a supersede is an append, never a delete; the
    *  retireMemory() pass drops the declared-dead rows at the next merge.
    *  Mirrors KnowledgeEntry.supersedes. Absent on legacy rows (no-op). */
   supersedes?: string[];
@@ -128,10 +181,10 @@ export type MemoryEntry = {
    *  retireMemory() drops a row once it reaches LESSON_RETIRE_COUNTER (3).
    *  Absent/0/NaN read as 0. Absent on legacy rows (no-op). */
   counterEvidence?: number;
-  /** 216i (112 §3.1/§4.2 — T1): how many LATER recurrences independently
+  /** 216i (112 Â§3.1/Â§4.2 â€” T1): how many LATER recurrences independently
    *  reproduced this row's claim. TELEMETRY, like counterEvidence: mutated by
    *  the merge accrual (engine.accrueReproducedCounts) and never part of any
-   *  content fingerprint or id — lesson ids hash the failure signature
+   *  content fingerprint or id â€” lesson ids hash the failure signature
    *  (knowledge.lessonRow), so a repeated identical failure maps to the ONE
    *  existing row and only this counter moves. Absent/0/NaN read as 0.
    *  Absent on legacy rows (no-op). */
@@ -147,7 +200,7 @@ export type JsonLog = {
 };
 
 /**
- * 306 F5 (fixes/306_f5_pipeline.md) — coded unlock class for a parked wild run:
+ * 306 F5 (fixes/306_f5_pipeline.md) â€” coded unlock class for a parked wild run:
  * WHAT lets the run continue. Mapped to print-ready copy in engine.ts's
  * WILD_UNLOCK_TEXT (carried on every park as `unlockText`) so a UI/agent never
  * invents its own mapping:
@@ -155,9 +208,9 @@ export type JsonLog = {
  *  - "human-gate":    a human must approve/reject the open gate, then resume.
  *  - "human-retry":   a human decision is required (fix/regenerate/retry), then resume.
  *  - "resume":        plain resume retries the step (no repair named).
- *  - "operator":      the run state itself looks wrong — inspect, repair, resume.
+ *  - "operator":      the run state itself looks wrong â€” inspect, repair, resume.
  *  - "agent-seal":    resume the sealed run with a working keyed classifier
- *                     (313 D1) — the agent seal's Auto-Review classifier must
+ *                     (313 D1) â€” the agent seal's Auto-Review classifier must
  *                     consent before THIS gate can be approved unattended.
  */
 export type WildParkUnlock = "configure-key" | "human-gate" | "human-retry" | "resume" | "operator" | "agent-seal";
@@ -167,16 +220,16 @@ export type WildParkUnlock = "configure-key" | "human-gate" | "human-retry" | "r
 export type WildNextAction = "execute" | "gate" | "advance" | "finalize" | "park" | "none";
 
 /**
- * 306 F5 — the machine-readable PARK RECORD of a wild run, present on
+ * 306 F5 â€” the machine-readable PARK RECORD of a wild run, present on
  * `WildRunState.park` whenever `pause === true`. It answers the three
  * questions a driver, a UI and an agent all ask of a parked run without
  * reading prose:
- *   WHY                  — `code` (the `WildStepResult.code` RT_E_* class;
+ *   WHY                  â€” `code` (the `WildStepResult.code` RT_E_* class;
  *                          null for uncoded pauses: operator toggles and the
  *                          store's defensive step cap), plus `reason`.
- *   WHAT UNLOCKS         — `unlock` (coded class) + `unlockText` (same class,
+ *   WHAT UNLOCKS         â€” `unlock` (coded class) + `unlockText` (same class,
  *                          one ready-to-print sentence).
- *   WHERE resume re-enters — `resumePhase` + `resumeAction`: the edge the next
+ *   WHERE resume re-enters â€” `resumePhase` + `resumeAction`: the edge the next
  *                          wild step acts on after a resume. For checkpointed
  *                          runs this is the same edge the checkpoint records
  *                          as `run.phase` (headless.loadResumableCheckpoint).
@@ -187,7 +240,7 @@ export type WildParkInfo = {
   code: import("./errors.ts").ErrorCode | null;
   /** Ledger event that recorded the park; null for uncoded operator pauses. */
   event: string | null;
-  /** One-line reason — bounded copy of the park's own ledger detail. */
+  /** One-line reason â€” bounded copy of the park's own ledger detail. */
   reason: string;
   unlock: WildParkUnlock;
   /** Print-ready sentence for `unlock` (engine.ts WILD_UNLOCK_TEXT). */
@@ -200,7 +253,7 @@ export type WildParkInfo = {
 };
 
 /**
- * 306 F5 — the machine-readable summary of ONE executed wild step: what ran,
+ * 306 F5 â€” the machine-readable summary of ONE executed wild step: what ran,
  * what it produced, what's next. Stamped on `WildRunState.lastStep` by every
  * executed step so the console/CLI/agents read the SAME truth from the
  * persisted record; also carried on `WildStepResult.summary` and (flattened)
@@ -210,7 +263,7 @@ export type WildParkInfo = {
 export type WildStepSummary = {
   outcome: "advanced" | "completed" | "paused";
   /** What the call did: executed a phase, resolved an open gate, left a
-   *  complete phase, finalized P12 — or parked. */
+   *  complete phase, finalized P12 â€” or parked. */
   action: "execute" | "gate" | "advance" | "finalize" | "park";
   /** The edge the step acted on (the project's current phase at call time). */
   phase: number;
@@ -223,12 +276,12 @@ export type WildStepSummary = {
   /** What's next: the edge the next call acts on. */
   nextPhase: number;
   nextAction: WildNextAction;
-  /** Present iff `action === "park"` — the same object as `WildRunState.park`. */
+  /** Present iff `action === "park"` â€” the same object as `WildRunState.park`. */
   park?: WildParkInfo;
 };
 
 /**
- * Live Wild Mode autonomous-run surface (Pillar 13) — the exact field set the
+ * Live Wild Mode autonomous-run surface (Pillar 13) â€” the exact field set the
  * console (B7) streams: active/paused lifecycle, the frontier `phase`, and the
  * latest auto decision (`lastAutoLog`/`lastAutoAt`) so every step is observable
  * without paging the ledger. `stoppedAt` is set on natural completion (P12)
@@ -237,7 +290,7 @@ export type WildStepSummary = {
  *
  * 306 F5 additions (additive; absent on legacy payloads): `lastStep` carries
  * the last executed step's machine summary and `park` the coded why/unlock/
- * re-entry record of the current pause. Both are optional — hydrate keeps them
+ * re-entry record of the current pause. Both are optional â€” hydrate keeps them
  * only when shaped right (engine.hydrateWildRun).
  */
 export type WildRunState = {
@@ -250,12 +303,12 @@ export type WildRunState = {
   pause: boolean;
   /** 306 F5: the last executed step's machine-readable summary. */
   lastStep?: WildStepSummary | null;
-  /** 306 F5: why/unlock/re-entry of the current pause — present iff `pause`. */
+  /** 306 F5: why/unlock/re-entry of the current pause â€” present iff `pause`. */
   park?: WildParkInfo | null;
 };
 
 /**
- * R13-f02 (W30 lane S1 · fixes/272_s1_autonomy.md · spec §R13-f02) — the
+ * R13-f02 (W30 lane S1 Â· fixes/272_s1_autonomy.md Â· spec Â§R13-f02) â€” the
  * plan-before-execute SHELL. Mirrors `planning.ts`'s `Plan`/`PlanStep` shape
  * (the register's "wild.plan pre-execute from planning.ts's step shape") as an
  * inline type reference so this module never statically imports the
@@ -263,7 +316,7 @@ export type WildRunState = {
  *
  * Honesty semantics: the planner is NOT wired yet, so `engine.readWildPlan`
  * returns an EMPTY plan (`steps: []`, `source: "empty"`) with a note naming
- * the owning row — never fabricated steps. The full implementation fills
+ * the owning row â€” never fabricated steps. The full implementation fills
  * `steps` from a real planning pass, has the classifier review them, and
  * pauses before the first mutation unless `autoPlan`/policy approves (the
  * pin: a plan exists before phase 1 mutates).
@@ -273,13 +326,13 @@ export type WildPlanStep = import("./planning.ts").PlanStep;
 export type WildPlan = {
   /** The goal the plan executes against (the project brief in the empty shell). */
   goal: string;
-  /** Ordered steps — `[]` while the planner is unwired (never invented). */
+  /** Ordered steps â€” `[]` while the planner is unwired (never invented). */
   steps: WildPlanStep[];
   /** Provenance: "empty" = the shell's honest placeholder; "planner" = a real planning pass. */
   source: "empty" | "planner";
   /** Epoch ms of the planning pass; null while the shell holds no real plan. */
   plannedAt: number | null;
-  /** Human-readable gap note (names the TODO row) — never blank on `source:"empty"`. */
+  /** Human-readable gap note (names the TODO row) â€” never blank on `source:"empty"`. */
   note: string;
 };
 
@@ -308,22 +361,22 @@ export type HitlDecision = {
   requestedAt: number;
   decidedAt: number;
   /**
-   * 216o (T-107.3 · P0-02/P0-06 · W6-L2): WHERE this decision came from — the
+   * 216o (T-107.3 Â· P0-02/P0-06 Â· W6-L2): WHERE this decision came from â€” the
    * ONE policy seam's (`src/lib/policy.ts`) verdict that allowed it, recorded at
    * mint time by the headless approval path (`headless.ts` `approve`). ADDITIVE
    * and optional: rows minted before this field (engine autopilot steps, store
-   * approvals, fixtures, pre-216o payloads) parse and stay readable — `dod.ts`
-   * cross-checks the field against the row's own `[seat …]` tag when present and
+   * approvals, fixtures, pre-216o payloads) parse and stay readable â€” `dod.ts`
+   * cross-checks the field against the row's own `[seat â€¦]` tag when present and
    * fails closed on a contradiction, never inventing provenance for old rows.
    *
-   *   · `action`    — the registered policy action the verdict covered
+   *   Â· `action`    â€” the registered policy action the verdict covered
    *                   (`hitl.approve` or `hitl.force`).
-   *   · `resource`  — the resource it covered (`gate:P<phase>`).
-   *   · `reason`    — the verdict's reason (`"<kebab-id> — <clause>"`, per the
+   *   Â· `resource`  â€” the resource it covered (`gate:P<phase>`).
+   *   Â· `reason`    â€” the verdict's reason (`"<kebab-id> â€” <clause>"`, per the
    *                   policy.ts reason contract).
-   *   · `label`     — the seat label in `policy.seatLabel` vocabulary
-   *                   (`human/human-cli-i-am-human`, `autopilot/harness`, …).
-   *   · `tokenPath` — true iff the out-of-band `RT_HUMAN_SEAT_TOKEN` path
+   *   Â· `label`     â€” the seat label in `policy.seatLabel` vocabulary
+   *                   (`human/human-cli-i-am-human`, `autopilot/harness`, â€¦).
+   *   Â· `tokenPath` â€” true iff the out-of-band `RT_HUMAN_SEAT_TOKEN` path
    *                   verified the human seat (the seam only ever allows a
    *                   human-seat allow through that path).
    */
@@ -347,13 +400,13 @@ export type PhaseRecord = {
   /** Machine-checkable DoD gate verdict recorded at phase completion (T8). */
   gate?: { passed: boolean; unmet: string[]; evidenceHash: string; checkedAt: number } | null;
   /**
-   * 350 (F1): the keyed spend THIS phase MEASURED while it ran — the process
+   * 350 (F1): the keyed spend THIS phase MEASURED while it ran â€” the process
    * session-ledger delta across the phase's own run boundary, recorded verbatim
    * by the driver (`headless.recordPhaseSpend` at runReady / `engine.recordPhaseSpend`
    * at runPhaseAsync). ADDITIVE and optional: a phase that made no measured call
-   * carries no slice (absent ⇒ "not recorded per phase", never a fabricated 0),
+   * carries no slice (absent â‡’ "not recorded per phase", never a fabricated 0),
    * and legacy records without it parse and read exactly as before. Persisting
-   * spend NEVER feeds the cap — the cap stays the process ledger's business.
+   * spend NEVER feeds the cap â€” the cap stays the process ledger's business.
    */
   spend?: import("./token-ledger.ts").SpendSlice;
 };
@@ -371,16 +424,16 @@ export type IntentLattice = {
   constraints: string[];
   nodes: IntentNode[];
   complexity: number;
-  /** True when neither jobs nor entities came from brief vocabulary (both fallbacks fired) — lets the scorecard call reframe. */
+  /** True when neither jobs nor entities came from brief vocabulary (both fallbacks fired) â€” lets the scorecard call reframe. */
   vague?: boolean;
   /**
-   * The brief's own repeated content nouns (frequency ≥2, generic words
-   * removed), frequency-ranked — product vocabulary the LEX bank does not
+   * The brief's own repeated content nouns (frequency â‰¥2, generic words
+   * removed), frequency-ranked â€” product vocabulary the LEX bank does not
    * carry (a bakery's `donut`/`bread`/`menu`/`order`, a retailer's `cart`).
    * ADDITIVE: `entities`/`jobs`/`nodes`/`complexity`/`vague` stay the LEX-only
    * values, so no existing lattice consumer changes; product-facing artifact
    * builders merge this in (engine.productNouns). Absent for a vocabulary-free
-   * brief (no repeated content noun) → the deterministic fallback stands.
+   * brief (no repeated content noun) â†’ the deterministic fallback stands.
    */
   briefNouns?: string[];
 };
@@ -437,7 +490,7 @@ export type GeneratedTreeFile = {
   path: string;
   /** Full file source. */
   source: string;
-  /** Content-addressed hash (fnv1a of the source) — integrity, not crypto. */
+  /** Content-addressed hash (fnv1a of the source) â€” integrity, not crypto. */
   hash: string;
   /** Synthesis attempt that produced this file (0 = first pass; repairs bump). */
   attempt: number;
@@ -461,23 +514,34 @@ export type Project = {
   status: ProjectStatus;
   currentPhase: PhaseId;
   phases: PhaseRecord[];
-  /** Feasibility scorecard (P0 output) — null until Phase 0 runs. */
+  /** Feasibility scorecard (P0 output) â€” null until Phase 0 runs. */
   scorecard: FeasibilityScorecard | null;
   /**
    * Optional delivery-kind of the build (E-15 wave; WIDENED 342-4 to the
    * 5-way DeliveryKind so "library" is expressible instead of overloading
-   * kind-absence). Additive — absent on legacy/imported projects. The engine
-   * decides it once (engine.deliveryKindOf) and stamps it at the keyed P6
-   * seam (engine.withDeliveryKind); both resolvers then READ it — consumers
-   * needing the scaffold names map it (scaffold.projectKindOf).
+   * kind-absence). Additive â€” absent on legacy/imported projects. The engine
+   * decides it once (engine.deliveryKindOf, a deterministic keyless resolution)
+   * and stamps it with its evidence (engine.withDeliveryKind) on EVERY P6 path
+   * (W359: keyless and non-DeepSeek runs included, not just the keyed one); every
+   * resolver then READS it â€” consumers needing the scaffold names map it
+   * (scaffold.projectKindOf).
    */
   kind?: DeliveryKind;
+  /**
+   * W359 (resolve-kind): the recorded decision behind `kind` â€” `{kind, basis,
+   * score, runnerUp, confidence, evidence[], damped, briefHash}`. Written by
+   * `withDeliveryKind` at the same seam as the stamp it explains, and validated
+   * (never repaired) by `hydrateProject`. An absent record is honest for a
+   * legacy/imported project; a present one must name the kind the project
+   * carries or it is dropped.
+   */
+  kindResolution?: KindResolution;
   competitors: Competitor[];
   /**
    * Live-research corpus (M-01/M-06): real fetched findings per research phase,
    * kept OUTSIDE artifact bodies so packet citations survive artifact trimming.
    * Absent/empty on deterministic-only runs. Competitor template rows stay
-   * source:"illustrative" regardless — this field is their honest counterpart.
+   * source:"illustrative" regardless â€” this field is their honest counterpart.
    */
   research?: ResearchCorpusEntry[];
   artifacts: Artifact[];
@@ -505,13 +569,13 @@ export type Project = {
   crew: CrewSeat[];
   notes: string;
   generatedSource: string;
-  /** fixes/144 (M2): multi-file generation tree — additive; absent on legacy
+  /** fixes/144 (M2): multi-file generation tree â€” additive; absent on legacy
    * / deterministic payloads. Assembly + p6-arch probes consume this. */
   generatedTree?: GeneratedTreeFile[];
   /**
-   * fixes/353 — the emitter's OWN surface modules (pages, router, game shell,
+   * fixes/353 â€” the emitter's OWN surface modules (pages, router, game shell,
    * runnable entry), stamped by the driver immediately before the P6 gate is
-   * recorded. `dod`'s kind-aware criteria read `generatedTree ∪ emittedSurface`
+   * recorded. `dod`'s kind-aware criteria read `generatedTree âˆª emittedSurface`
    * because those files are written by `scaffold.ts`, never by synthesis; the
    * field is additive and absent on legacy records (byte-identical reading).
    */
@@ -528,34 +592,34 @@ export type Project = {
    * E-13: machine-explained engine state. `liveUnavailable` is set by
    * engine.liveLayer / deepenResearch when a research phase (0/7/11) ran but
    * live web research could not execute (backend not configured / call
-   * failed) — the DoD p7-research waiver key. Deterministic applyPhaseResult
+   * failed) â€” the DoD p7-research waiver key. Deterministic applyPhaseResult
    * runs leave it unset so a never-attempted live phase stays an honest
    * unmet gate.
    */
   meta?: { liveUnavailable?: boolean };
   /**
-   * P10: per-project Hard-DoD opt-in. Default OFF (absent/undefined) — gates
+   * P10: per-project Hard-DoD opt-in. Default OFF (absent/undefined) â€” gates
    * stay advisory exactly as before; when `true`, a machine advance may not
    * LEAVE phase N unless runGate(N) passes (store auto-advance guard +
    * engine wild-loop leave check). Blocked advances append a "Hard DoD block"
    * artifact + `dod.blocked` log and stop the run. Human HITL approval is
    * itself the completion act for gate phases (their DoD includes "HITL
-   * approved") — the recorded verdict surfaces that path in the ledger.
+   * approved") â€” the recorded verdict surfaces that path in the ledger.
    */
   enforceDod?: boolean;
   /**
    * P13: Wild Mode opt-in (autonomous loop). Default OFF. The engine loop
    * (`engine.wildStep`) executes the current legal phase, the Auto-Review
-   * classifier judges outputs, self-approves gates and loops P0→P12; all state
+   * classifier judges outputs, self-approves gates and loops P0â†’P12; all state
    * rides the `wildRun` surface below. Never inferred on legacy payloads.
    */
   wildMode?: boolean;
   /** P13: live Wild Mode run state (null until a run starts). */
   wildRun?: WildRunState | null;
   /**
-   * R13-f02 (W30 lane S1 · fixes/272_s1_autonomy.md): the plan the wild loop
+   * R13-f02 (W30 lane S1 Â· fixes/272_s1_autonomy.md): the plan the wild loop
    * must hold BEFORE it mutates phase 1 ("no execution without an approved
-   * plan or an explicit auto-plan policy"). Additive — absent on legacy
+   * plan or an explicit auto-plan policy"). Additive â€” absent on legacy
    * payloads; the engine read-point (`engine.readWildPlan`) then returns an
    * honest EMPTY plan and never fabricates steps. UI/packet surfacing is
    * TODO(R13-f02).
@@ -563,7 +627,7 @@ export type Project = {
   wildPlan?: WildPlan | null;
   /**
    * P0-2: persisted chat thread (console ChatPane). Absent on legacy/imported
-   * payloads; additive — never inferred. Rows mirror the console's ChatMsgView
+   * payloads; additive â€” never inferred. Rows mirror the console's ChatMsgView
    * minus the local id counter. `error` rows are display-only, never replayed
    * as model speech (chat.ts chatHistoryTurns filter is the replay law).
    */
@@ -572,7 +636,7 @@ export type Project = {
    * Brief-faithful implementation spec (prompt-engine expandBrief output,
    * E-30 / fixes/97 P0-01 Part B). `source` records who wrote it
    * ("prompt-verb" = the CLI prompt verb, "p6" = keyed P6 synthesis);
-   * `briefHash` (fnv1a of the brief) is the staleness guard — a spec whose
+   * `briefHash` (fnv1a of the brief) is the staleness guard â€” a spec whose
    * hash no longer matches the current brief is discarded and re-expanded.
    * Absent/null on keyless runs.
    */
@@ -589,41 +653,41 @@ export type Project = {
   } | null;
   /**
    * A1 (fixes/162): human-approved (or pending) brief-derived acceptance
-   * fixtures. Additive — ABSENCE on legacy/keyless payloads, never `[]`.
+   * fixtures. Additive â€” ABSENCE on legacy/keyless payloads, never `[]`.
    * Hydrate + io drop invalid rows; a briefHash mismatch pending-ifies
    * every approved row (never silently re-approves).
    */
   acceptanceFixtures?: import("./brief-fixtures.ts").BriefFixtureCase[];
   /** Epoch ms of the last human approve of the fixture set. Absent until approved. */
   acceptanceApprovedAt?: number;
-  /** C6: fnv1a(brief) the set was drafted against. Stale vs live brief → pending. */
+  /** C6: fnv1a(brief) the set was drafted against. Stale vs live brief â†’ pending. */
   acceptanceBriefHash?: string;
   /** B5: single-writer terminal run stamp (accepted|failed|aborted). Absence = no stamp. */
   acceptance?: "accepted" | "failed" | "aborted";
   /** B3: accumulated DeepSeek token usage for this run. Absence = unmetered. */
-  /** W46 · 332-2: the persisted run spend. `SpendSlice` (token-ledger.ts) is
-   *  the writer's own shape — widening it here stops the type under-describing
+  /** W46 Â· 332-2: the persisted run spend. `SpendSlice` (token-ledger.ts) is
+   *  the writer's own shape â€” widening it here stops the type under-describing
    *  what `accumulateSpend` actually stores (`calls` / cache keys). Optional
    *  keys stay optional: a legacy 2-key slice is a valid measured spend. */
   tokenUsage?: import("./token-ledger.ts").SpendSlice;
 
   /**
    * 348 (W2) persisted the P6 tree-run verdict here (`headless.withTreeRunVerdict`
-   * — `ok`/`verdict` mirror the TreeRunOutcome, `verdictHash` only when the run
+   * â€” `ok`/`verdict` mirror the TreeRunOutcome, `verdictHash` only when the run
    * minted one); 350 (F1) TYPES it so the run report + diagnosis can attribute
-   * the P6 verdict to phase 6. Absent on legacy/deterministic records ⇒ unknown.
+   * the P6 verdict to phase 6. Absent on legacy/deterministic records â‡’ unknown.
    */
   treeRun?: { ok: boolean; verdict: "pass" | "fail"; verdictHash?: string };
   /** 348 (W2): the P6 generated-tree substance census label (`"real"`/`"stub"`/
    *  `"empty"`/`"unknown"`), persisted only when the run produced a census. */
   substance?: { verdict: string };
 
-  /** W48 · 334-2: the last keyed-call outcome, persisted so a FRESH process can
+  /** W48 Â· 334-2: the last keyed-call outcome, persisted so a FRESH process can
    *  see that the previous run's key was refused. The tap is process-local, so
    *  without this a new `doctor` could only report `keyState: "unverified"`.
    *  Written by `headless.foldLastKeyedOutcome` (the only writer); read by
    *  `headless.resolveDoctorKeyState` and `doctor.readLastKeyedOutcome`.
-   *  `keySource` is tail-only (a path/scope plus the last 4 chars) — never a key.
+   *  `keySource` is tail-only (a path/scope plus the last 4 chars) â€” never a key.
    *  Absent on legacy records stays absent; a junk blob is dropped by readers. */
   lastKeyedOutcome?: { code: string; at: number; keySource?: string };
   /** Persisted-shape version marker (B-25/R9): 2 = post-repair shape. */
@@ -635,11 +699,11 @@ export type ChatLogRow = {
   role: "user" | "assistant";
   text: string;
   ts: number;
-  /** true ⇒ a failed-send display row, never replayed as model speech. */
+  /** true â‡’ a failed-send display row, never replayed as model speech. */
   error?: boolean;
   /** Normalized "RT_E_*" code when the turn failed. */
   code?: string;
-  /** Grounded stamp of an assistant row ("Grounded in build context v… …"). */
+  /** Grounded stamp of an assistant row ("Grounded in build context vâ€¦ â€¦"). */
   provenance?: string;
 };
 

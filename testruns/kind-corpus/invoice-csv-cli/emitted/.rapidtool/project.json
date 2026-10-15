@@ -1,0 +1,558 @@
+{
+  "id": "4dbb30be-da7b-47ae-8ae5-19aa54a69b46",
+  "name": "A Command-line Tool That",
+  "brief": "A command-line tool that reads a CSV invoice export and converts it to a JSON summary: --in and --out flags, per-vendor totals, monthly rollups, non-zero exit on malformed rows.",
+  "domain": "finance-ops",
+  "createdAt": 1792101445539,
+  "status": "intake",
+  "currentPhase": 0,
+  "phases": [
+    {
+      "id": 0,
+      "status": "ready",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 1,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 2,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 3,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 4,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 5,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 6,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 7,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 8,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 9,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 10,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 11,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 12,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    }
+  ],
+  "scorecard": null,
+  "competitors": [],
+  "artifacts": [],
+  "memory": [
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain finance-ops; jobs invoice, convert, export.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: none.",
+      "score": 0.7,
+      "source": "engine"
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1792101445540,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "finance-ops"
+    }
+  ],
+  "hitl": null,
+  "decisions": [],
+  "modelRoute": "deterministic",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": false
+  },
+  "openapi": "",
+  "adr": "",
+  "lattice": {
+    "domain": "finance-ops",
+    "jobs": [
+      "invoice",
+      "convert",
+      "export"
+    ],
+    "entities": [
+      "invoice",
+      "command",
+      "vendor",
+      "summary"
+    ],
+    "constraints": [],
+    "nodes": [
+      {
+        "kind": "job",
+        "label": "invoice",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "convert",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "export",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "invoice",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "command",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "vendor",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "summary",
+        "weight": 0.55
+      }
+    ],
+    "complexity": 6.15,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 2,
+    "apiDelta": 1,
+    "tightness": 9.5,
+    "extraHitl": [
+      6
+    ],
+    "notes": [
+      "Elevate isolate + OAuth review; treat data as sensitive.",
+      "Default API budget.",
+      "Extra HITL on P6."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1792101445548,
+      "summary": "7 nodes · complexity 6.2"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1792101445608,
+      "summary": "ranked 3 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1792101445548,
+      "summary": "tightness 9.5 · sec+2"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1792101445608,
+      "summary": "compiled P0 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1792101445548,
+      "summary": "8 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1792101445548,
+      "summary": "6 entities · 3 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1792101445548,
+      "summary": "4 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1792101445548,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — A Command-line Tool That\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-15T21:57:25.540Z\nproject_id: 4dbb30be-da7b-47ae-8ae5-19aa54a69b46\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P0 Deep Research & Feasibility) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-15T21:57:25.540Z\",\n  \"project_id\": \"4dbb30be-da7b-47ae-8ae5-19aa54a69b46\",\n  \"name\": \"A Command-line Tool That\",\n  \"project_status\": \"intake\",\n  \"current_phase\": {\n    \"id\": 0,\n    \"code\": \"P0\",\n    \"title\": \"Deep Research & Feasibility\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"input_hash\": \"3037120348\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": null,\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"ready\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 1,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 2,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 3,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 4,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 5,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 6,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 9,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 10,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 0,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 0,\n    \"empty_phases\": []\n  },\n  \"gate\": {\n    \"pass\": false,\n    \"unmet\": 2,\n    \"evidence_classes\": [\n      \"field-predicate\"\n    ],\n    \"product_build_verified\": false,\n    \"qualification\": {\n      \"weak\": true,\n      \"note\": \"this PASS rests on NON-EXECUTED evidence only (classes: field-predicate) — it verifies presence/structure/ledger, NOT that the emitted product runs or builds; a green seal here must not be read as \\\"the product builds\\\".\",\n      \"code\": \"RT_E_CLAIM_UNVERIFIED\"\n    }\n  },\n  \"tree_run\": null,\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 0,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\nA command-line tool that reads a CSV invoice export and converts it to a JSON summary: --in and --out flags, per-vendor totals, monthly rollups, non-zero exit on malformed rows.\n\n## Intent lattice (A1)\nDomain: finance-ops\nJobs: invoice, convert, export\nEntities: invoice, command, vendor, summary\nConstraints: none declared\nComplexity: 6.2 / 10\n\n## Scheduler (A3)\nTightness 9.5 · security Δ2 · api Δ1\n- Elevate isolate + OAuth review; treat data as sensitive.\n- Default API budget.\n- Extra HITL on P6.\nExtra HITL: P6\n\n## Crew (A8)\n- architect [ACTIVE] (1800 tok): Lock schema and routes for invoice, convert, export before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Deep Research & Feasibility. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/finance_ops.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/invoice.ts — Implement job “invoice” against the contract\n- [implementer] src/jobs/convert.ts — Implement job “convert” against the contract\n- [implementer] src/jobs/export.ts — Implement job “export” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Invoice: id:ulid, totalCents:int, approvedBy:ulid?\n- Command: id:ulid, status:enum, updatedAt:datetime\n- Vendor: id:ulid, status:enum, updatedAt:datetime\n- Summary: id:ulid, status:enum, updatedAt:datetime\n- Convert: id:ulid, status:enum, updatedAt:datetime\n- Export: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/invoice (invoice)\n- POST /v1/convert (convert)\n- POST /v1/export (export)\n\n## Oracle (A7)\n- job.invoice.happy: Authorized operator submits “invoice” with a valid invoice ⇒ 200 + persisted entity + checkpoint written\n- job.convert.happy: Authorized operator submits “convert” with a valid invoice ⇒ 200 + persisted entity + checkpoint written\n- job.export.happy: Authorized operator submits “export” with a valid invoice ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP0 — Deep Research & Feasibility\nDomain landscape, libraries, competing architectures, feasibility scorecard before any code.\nStatus: intake · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nGenerated artifact: none recorded (no project.generatedTree or project.generatedSource) — this edge has no generated bytes yet.\nPhase coverage: 0 of 13 phases executed / 0 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\n## Exit criteria (DoD)\nGate P0: FAIL (2 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [ ] Feasibility scorecard present with 5 axes\n- [ ] P0 verdict resolved to proceed (proceed | proceed-with-guards) — a reframe verdict is unmet\n- [x] Intent lattice primed with at least one job\n- [x] Non-empty brief produced job/entity vocabulary (lattice.vague must be false when the brief has ≥1 vocabulary-bearing token)\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.278] Domain finance-ops; jobs invoice, convert, export.\n2. [procedural 0.275] Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.\n3. [episodic 0.230] Constraints declared: none.\n\n## Scorecard\nNot written — the scorecard is a Phase 0 output.\n\n## Artifacts (trimmed)\n(none yet)\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge — only P1 if this phase completes\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/finance_ops.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/invoice.ts",
+        "purpose": "Implement job “invoice” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/convert.ts",
+        "purpose": "Implement job “convert” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/export.ts",
+        "purpose": "Implement job “export” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Invoice",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "totalCents",
+            "type": "int"
+          },
+          {
+            "name": "approvedBy",
+            "type": "ulid?"
+          }
+        ]
+      },
+      {
+        "name": "Command",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Vendor",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Summary",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Convert",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Export",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/invoice",
+        "job": "invoice"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/convert",
+        "job": "convert"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/export",
+        "job": "export"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.invoice.happy",
+      "given": "Authorized operator submits “invoice” with a valid invoice",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "invoice"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.convert.happy",
+      "given": "Authorized operator submits “convert” with a valid invoice",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "convert"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.export.happy",
+      "given": "Authorized operator submits “export” with a valid invoice",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "export"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for invoice, convert, export before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": true
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Deep Research & Feasibility.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": false
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": false
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: none.",
+      "active": false
+    }
+  ],
+  "notes": "",
+  "generatedSource": "",
+  "lastTest": null,
+  "enforceDod": true,
+  "wildMode": false,
+  "wildRun": null,
+  "chatLog": [],
+  "research": [],
+  "implementationSpec": null,
+  "_v": 2
+}

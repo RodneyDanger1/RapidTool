@@ -1,0 +1,70 @@
+{
+  "schema": "rapidtool-kindfit-corpus/1",
+  "lane": "W359 kind-corpus",
+  "why": [
+    "The kindFit reader measures the EMITTED artifact against the REQUESTED kind. Two of its three",
+    "sources already carry an independent request: the eval-out units take their kind from the corpus",
+    "brief's own `kind:` front-matter. The testruns trees did not - their requestedKind came from the",
+    "emitted record's own `kind`, which makes the reading self-confirming (a mis-stamp compares a tree",
+    "against its own stamp). This file is the fixture-side stamping data that fixes that, and it is the",
+    "only place the lane writes a kind by hand: every OTHER requestedKind in the corpus is read from a",
+    "declaration the fixture itself carries."
+  ],
+  "units": [
+    {
+      "unit": "kind-corpus/arcade-breakout/emitted",
+      "dir": "kind-corpus/arcade-breakout/emitted",
+      "brief": "arcade-breakout",
+      "keyed": false,
+      "producedBy": "node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief research/eval-corpus/arcade-breakout.md --out <tmp>/arcade-breakout.json ; node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project <tmp>/arcade-breakout.json --out testruns/kind-corpus/arcade-breakout/emitted --red-tree banner",
+      "note": "The game brief had NO emitted artifact on disk (its only `game` unit was a mis-stamped bakery website). This tree is the factory's own keyless deterministic-floor emission of the corpus brief: real emitter bytes, `record.tokenUsage` null (no keyed call), kind resolved by the emitter itself (emitted README: `**Kind:** game`). Its `fit` therefore measures the SCAFFOLD's kind fidelity - entry shape + declared scripts + the kind's demanded surface - not a synthesized product."
+    },
+    {
+      "unit": "kind-corpus/invoice-csv-cli/emitted",
+      "dir": "kind-corpus/invoice-csv-cli/emitted",
+      "brief": "invoice-csv-cli",
+      "keyed": false,
+      "producedBy": "node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief research/eval-corpus/invoice-csv-cli.md --out <tmp>/invoice-csv-cli.json ; node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project <tmp>/invoice-csv-cli.json --out testruns/kind-corpus/invoice-csv-cli/emitted --red-tree banner",
+      "note": "`tool` had 0 units - `kindFit.tool.*` read `uncovered`, never a pass. Same keyless deterministic-floor provenance; emitted README: `**Kind:** cli-tool` (normalized to `tool` by normalizeRequestedKind)."
+    },
+    {
+      "unit": "kind-corpus/order-webhook-service/emitted",
+      "dir": "kind-corpus/order-webhook-service/emitted",
+      "brief": "order-webhook-service",
+      "keyed": false,
+      "producedBy": "node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief research/eval-corpus/order-webhook-service.md --out <tmp>/order-webhook-service.json ; node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project <tmp>/order-webhook-service.json --out testruns/kind-corpus/order-webhook-service/emitted --red-tree banner",
+      "note": "`service` had 0 units - `kindFit.service.*` read `uncovered`, never a pass. Same provenance; emitted README: `**Kind:** service`."
+    },
+    {
+      "unit": "kind-corpus/date-rrule-library/emitted",
+      "dir": "kind-corpus/date-rrule-library/emitted",
+      "brief": "date-rrule-library",
+      "keyed": false,
+      "producedBy": "node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief research/eval-corpus/date-rrule-library.md --out <tmp>/date-rrule-library.json ; node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project <tmp>/date-rrule-library.json --out testruns/kind-corpus/date-rrule-library/emitted --red-tree banner",
+      "note": "`library`'s only unit was a mis-stamped mobile app. Same provenance; emitted README: `**Kind:** library`."
+    }
+  ],
+  "restampedTrees": [
+    {
+      "tree": "bakery-website/emitted",
+      "recordedKind": "game",
+      "requestedKind": "app",
+      "evidence": [
+        "The unit's OWN bytes are a web-app request: testruns/bakery-website/brief.md is `# Golden Crust Bakery - Marketing Website` (a public, read-mostly marketing site with pages, a hero, an opening-hours badge, phone-first) and the emitted tree carries the web entry shape (index.html + vite.config.ts + src/main.ts).",
+        "The SAME brief was emitted as `app` by the later revision of the same slug: testruns/bakery-website/emitted.v2/.rapidtool/project.json `kind` = app, and testruns/campaign2/bakery-website/build.json `kind` = app.",
+        "The campaign-1 emit cassette for the same slug records the emit's own summary as `kind webapp` (scripts/prevention/cassettes/campaign1/bakery-website/emit-banner.json).",
+        "So `game` is the mis-stamp (the old bare-noun `level` resolver), not the request. The tree's own RECORD still says `game` and is NOT edited: the row keeps `emittedKind: \"game\"` and is counted as a mis-kind emission, so the unit now reads as a FAILING app request - it cannot satisfy the app contract."
+      ]
+    },
+    {
+      "tree": "mobile-companion/emitted",
+      "recordedKind": "library",
+      "requestedKind": "app",
+      "evidence": [
+        "The unit's OWN bytes are an app request: testruns/mobile-companion/brief.md is `# Crumb & Bloom Companion - Mobile App` - `Form factor: designed for a 360-430px portrait viewport; works one-handed; bottom tab bar navigation with four tabs; large tap targets` - i.e. a phone-first application, not a library.",
+        "The SAME brief was emitted as `app` by the later revision of the same slug: testruns/mobile-companion/emitted.v2/.rapidtool/project.json `kind` = app, whose tree carries index.html + vite.config.ts + src/main.tsx.",
+        "So `library` is the mis-stamp, not the request. The record is NOT edited: the row keeps `emittedKind: \"library\"` and is counted as a mis-kind emission, so the unit reads as a FAILING app request (no index.html, no `build` script)."
+      ]
+    }
+  ]
+}

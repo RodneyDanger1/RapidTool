@@ -1,39 +1,40 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// engine.test.ts — 325 A1/A1b pins: a persisted SEALED park must survive
+// engine.test.ts â€” 325 A1/A1b pins: a persisted SEALED park must survive
 // hydrate on the CLI load path (`preserveWildRun: true`).
 //
 // Run: node --experimental-strip-types --test src/lib/engine.test.ts
 //
-// Context (fixes/325_a1_hunt.md · A1-1, HIGH · data-integrity): hydrateWildRun
+// Context (fixes/325_a1_hunt.md Â· A1-1, HIGH Â· data-integrity): hydrateWildRun
 // rebuilds `wildRun` and carries `park`/`lastStep` only through structural
 // guards. The park guard's accept-list used to be a hand-maintained mirror
-// array that 313 D1's `agent-seal` union growth (types.ts:152) never reached —
+// array that 313 D1's `agent-seal` union growth (types.ts:152) never reached â€”
 // so `usableWildPark` returned null for every SEALED park: hydrate kept
 // `pause:true`, dropped `park`, and (via the summary guard) the whole
 // `lastStep` carrying it. The landed fix derives the accept-set from
-// `WILD_UNLOCK_TEXT` — the compile-time-exhaustive `Record<WildParkUnlock,
-// string>` — so the next union growth fails typecheck instead of silently
+// `WILD_UNLOCK_TEXT` â€” the compile-time-exhaustive `Record<WildParkUnlock,
+// string>` â€” so the next union growth fails typecheck instead of silently
 // dropping records (engine.ts: `acceptedParkUnlock`).
 //
 // Keyless + fully injected reviewer: no DEEPSEEK_API_KEY, no network, no TTY.
 // Pins:
-//   §A1-1a  a persisted sealed park (unlock "agent-seal", pause:true) hydrates
-//           VERBATIM through the CLI path — park + lastStep byte-identical
+//   Â§A1-1a  a persisted sealed park (unlock "agent-seal", pause:true) hydrates
+//           VERBATIM through the CLI path â€” park + lastStep byte-identical
 //           (pre-fix: park undefined, lastStep undefined); a non-sealed park
 //           keeps surviving too.
-//   §A1-1b  the guard is derived, not blunted: every WildParkUnlock member is
-//           accepted; garbage/near-miss unlock values are still rejected — at
+//   Â§A1-1b  the guard is derived, not blunted: every WildParkUnlock member is
+//           accepted; garbage/near-miss unlock values are still rejected â€” at
 //           run.park AND lastStep.park level.
-//   §A1-1c  "park present iff pause" holds across the family: preserve-hydrate
+//   Â§A1-1c  "park present iff pause" holds across the family: preserve-hydrate
 //           (park kept), browser force-stop (cleared), stale-park drop, and
 //           the CLI resume (wildResumeRun clears; re-hydrate stays clean).
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSchemaSql, declaresUiSurface, deliveryKindOf, DOMAIN_TERMS, filterOffIntentResearch, filterRelevantResearch, hydrateProject, inferDomain, inferName, isOffIntentResearch, liveLayer, phaseGroundedArtifact, priorArtifactContext, recordPhaseSpend, rejectHitl, repairPhases, researchQueryFor, researchQueryText, stageWiringLogRows, stripOutOfScope, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSchemaSql, declaresUiSurface, deliveryKindOf, DOMAIN_TERMS, filterOffIntentResearch, filterRelevantResearch, hydrateProject, inferDomain, inferName, isOffIntentResearch, kindResolutionOf, liveLayer, phaseGroundedArtifact, priorArtifactContext, recordPhaseSpend, rejectHitl, repairPhases, researchQueryFor, researchQueryText, stageWiringLogRows, stripOutOfScope, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
 import { BRIEF_CORE_REGISTER } from "./sandbox.ts";
 import { runGate } from "./dod.ts";
 import { exportProjectJson, importProject } from "./io.ts";
@@ -89,7 +90,7 @@ function taintedPark(p: Project, unlock: string): Project {
   };
 }
 
-describe("§A1-1a sealed-park hydrate round-trip (325 A1, HIGH)", () => {
+describe("Â§A1-1a sealed-park hydrate round-trip (325 A1, HIGH)", () => {
   it("a persisted agent-seal park + its lastStep hydrate VERBATIM (CLI preset path)", async () => {
     const parked = await sealedParkedProject();
     const parkBefore = parked.wildRun?.park;
@@ -123,8 +124,8 @@ describe("§A1-1a sealed-park hydrate round-trip (325 A1, HIGH)", () => {
   });
 });
 
-describe("§A1-1b the accept-guard stays honest (derived, not blunted)", () => {
-  /** Every member of the WildParkUnlock union (types.ts:152) — all must ride. */
+describe("Â§A1-1b the accept-guard stays honest (derived, not blunted)", () => {
+  /** Every member of the WildParkUnlock union (types.ts:152) â€” all must ride. */
   const ACCEPTED = ["configure-key", "human-gate", "human-retry", "resume", "operator", "agent-seal"] as const;
   /** Near-misses a weakened guard would swallow. */
   const REJECTED = ["agent-seal ", " Agent-Seal", "agent-seal\n", "agent_seal", "seal", "garbage", ""];
@@ -166,18 +167,18 @@ describe("§A1-1b the accept-guard stays honest (derived, not blunted)", () => {
   });
 });
 
-describe("§A1-1c park present iff pause — the invariant across the family", () => {
+describe("Â§A1-1c park present iff pause â€” the invariant across the family", () => {
   it("preserve-hydrate keeps pause:true WITH the park (CLI load path)", async () => {
     const parked = await sealedParkedProject();
     const re = hydrateProject(parked, { preserveWildRun: true });
     assert.equal(re.wildRun?.pause, true);
-    assert.ok(re.wildRun?.park, "pause ⇒ park is present");
+    assert.ok(re.wildRun?.park, "pause â‡’ park is present");
   });
 
   it("default hydrate force-stops the session: pause:false, park cleared, history kept", async () => {
     const parked = await sealedParkedProject();
     const re = hydrateProject(parked);
-    assert.equal(re.wildRun?.active, false, "the driver died with the session — active cannot survive");
+    assert.equal(re.wildRun?.active, false, "the driver died with the session â€” active cannot survive");
     assert.equal(re.wildRun?.pause, false);
     assert.equal(re.wildRun?.park ?? null, null, "no park may ride the forced stop");
     assert.ok(re.wildRun?.lastStep, "the step history itself survives the stop");
@@ -210,7 +211,7 @@ describe("§A1-1c park present iff pause — the invariant across the family", (
   });
 });
 
-describe("§A1-2 a minted park's event names its OWN recording row (325 A1b)", () => {
+describe("Â§A1-2 a minted park's event names its OWN recording row (325 A1b)", () => {
   /** Park one arm's run + return the park and the project's wild.* ledger rows. */
   async function pauseArm(p: Project): Promise<{ park: WildParkInfo; rows: string[] }> {
     const res = await wildStep(p, { reviewer: notConfigured });
@@ -257,14 +258,14 @@ describe("§A1-2 a minted park's event names its OWN recording row (325 A1b)", (
   });
 });
 
-describe("T4 · 112 §4.4 — deps.proven is additive on the engine's keyless P6 floor (330 · Composer)", () => {
+describe("T4 Â· 112 Â§4.4 â€” deps.proven is additive on the engine's keyless P6 floor (330 Â· Composer)", () => {
   /** One resolved cross-project row (provenToLessonRow shape). */
   const PROVEN: readonly RankableLessonRow[] = [
     {
       id: "proven-K1deadbeef",
       kind: "semantic",
       phase: 0,
-      text: "MARKER_PROVEN: a prior accepted run dropped the empty-column rejection guard — keep it.",
+      text: "MARKER_PROVEN: a prior accepted run dropped the empty-column rejection guard â€” keep it.",
       score: 0.95,
       source: "research",
       tags: ["lesson"],
@@ -273,8 +274,8 @@ describe("T4 · 112 §4.4 — deps.proven is additive on the engine's keyless P6
 
   it("liveLayer(p, 6, { proven }) returns the byte-identical keyless floor as liveLayer(p, 6)", async () => {
     // The engine forwards deps verbatim to codegen ONLY on the keyed path; this
-    // pins that adding proven changes nothing when keyless (no key ⇒ the
-    // deterministic floor both times — the additive-field byte-identity law).
+    // pins that adding proven changes nothing when keyless (no key â‡’ the
+    // deterministic floor both times â€” the additive-field byte-identity law).
     const saved = process.env.DEEPSEEK_API_KEY;
     delete process.env.DEEPSEEK_API_KEY;
     try {
@@ -298,7 +299,7 @@ describe("T4 · 112 §4.4 — deps.proven is additive on the engine's keyless P6
     }
   });
 
-  it("liveLayer(p, 2) keyless is the deterministic floor — the grounded-artifact seam never fabricates", async () => {
+  it("liveLayer(p, 2) keyless is the deterministic floor â€” the grounded-artifact seam never fabricates", async () => {
     const saved = process.env.DEEPSEEK_API_KEY;
     delete process.env.DEEPSEEK_API_KEY;
     try {
@@ -326,12 +327,12 @@ describe("T4 · 112 §4.4 — deps.proven is additive on the engine's keyless P6
 });
 
 // ---------------------------------------------------------------------------
-// 331 V3 (telemetry invariant) — wildLog is a ledger writer: it must never
-// throw into the run it observes. Pre-fix `[...p.logs, …]` raised
+// 331 V3 (telemetry invariant) â€” wildLog is a ledger writer: it must never
+// throw into the run it observes. Pre-fix `[...p.logs, â€¦]` raised
 // "p.logs is not iterable" on a hand-built / foreign project with no `logs`
 // array (the same class the 330 wave fixed in knowledge.ts lessonLog).
 // ---------------------------------------------------------------------------
-describe("331 V3 — wildLog never throws into the run it observes", () => {
+describe("331 V3 â€” wildLog never throws into the run it observes", () => {
   const base = () => emptyProject({ name: "Wild", brief: "A brief long enough to seal the lattice gate." });
 
   it("control: appends one ledger row on a normal project", () => {
@@ -350,7 +351,7 @@ describe("331 V3 — wildLog never throws into the run it observes", () => {
     assert.equal(q.logs[0]!.level, "warn");
   });
 
-  it("the ≤200-row window is preserved", () => {
+  it("the â‰¤200-row window is preserved", () => {
     let p = base();
     for (let i = 0; i < 205; i++) p = wildLog(p, 0, "info", "wild.tick", `t${i}`);
     assert.equal(p.logs.length, 200, "capped at 200 like every log writer");
@@ -359,11 +360,11 @@ describe("331 V3 — wildLog never throws into the run it observes", () => {
 });
 
 // ---------------------------------------------------------------------------
-// W50/336-1 — the P12 database-schema producer (the 335-1 STOP item). The A6
+// W50/336-1 â€” the P12 database-schema producer (the 335-1 STOP item). The A6
 // contract carries the schema input (entity names + typed fields), so the DDL
 // is DERIVED; nothing is invented and an empty contract produces no schema.
 // ---------------------------------------------------------------------------
-describe("W50/336-1 — the P12 database-schema producer (derived, never invented)", () => {
+describe("W50/336-1 â€” the P12 database-schema producer (derived, never invented)", () => {
   it("derives one CREATE TABLE per contract entity with the contract's own columns", () => {
     const sql = databaseSchemaSql({
       entities: [
@@ -405,12 +406,12 @@ describe("W50/336-1 — the P12 database-schema producer (derived, never invente
 });
 
 // ---------------------------------------------------------------------------
-// 342-4 — kind resolution single source of truth. The engine's brief
+// 342-4 â€” kind resolution single source of truth. The engine's brief
 // classifier decides a library brief, but Project.kind could not EXPRESS
-// "library", so the decision was never stored — the tree trigger read the
+// "library", so the decision was never stored â€” the tree trigger read the
 // absence signal instead. RED before the widening: hydration drops the value.
 // ---------------------------------------------------------------------------
-describe("342-4 — the stored delivery kind is the single source of truth", () => {
+describe("342-4 â€” the stored delivery kind is the single source of truth", () => {
   const LIB_BRIEF = "A kanban board library exposing a typed board client";
 
   it("hydrateProject preserves a stored library kind (it must be expressible)", () => {
@@ -419,12 +420,12 @@ describe("342-4 — the stored delivery kind is the single source of truth", () 
     assert.equal(h.kind, "library", "a declared library kind survives hydration, not dropped as junk");
   });
 
-  it("deliveryKindOf is the ONE decision — library-first, and a stored kind always wins", () => {
+  it("deliveryKindOf is the ONE decision â€” library-first, and a stored kind always wins", () => {
     assert.equal(deliveryKindOf(emptyProject({ name: "KanbanLib", brief: LIB_BRIEF })), "library");
     assert.equal(deliveryKindOf(emptyProject({ name: "Dispatch", brief: "A kanban board for dispatch teams" })), "app");
     assert.equal(deliveryKindOf(emptyProject({ name: "Arcade", brief: "Retro arcade game with levels" })), "game");
     assert.equal(deliveryKindOf(emptyProject({ name: "Billing", brief: "Webhook worker API for billing" })), "service");
-    // A stored value is read back verbatim — the brief is never re-inferred over it.
+    // A stored value is read back verbatim â€” the brief is never re-inferred over it.
     assert.equal(deliveryKindOf(emptyProject({ name: "KanbanLib", brief: LIB_BRIEF, kind: "game" })), "game");
   });
 
@@ -438,19 +439,19 @@ describe("342-4 — the stored delivery kind is the single source of truth", () 
 });
 
 // ---------------------------------------------------------------------------
-// 346 T1 — classification matches the words a brief WROTE, never stem
+// 346 T1 â€” classification matches the words a brief WROTE, never stem
 // collisions. Pre-fix, tokenizeWords canonicalized every brief word and the
 // registers were compared stem-to-stem, so ordinary English hijacked a domain/
-// kind: a bakery site's "Home" page ⇒ real-estate, "shows"⇒showing,
-// "list"⇒listing, "multi-tenant"⇒real-estate, "packaging"⇒package(library),
-// "field-level"⇒level(game). Each assertion below failed on the pre-fix code.
+// kind: a bakery site's "Home" page â‡’ real-estate, "shows"â‡’showing,
+// "list"â‡’listing, "multi-tenant"â‡’real-estate, "packaging"â‡’package(library),
+// "field-level"â‡’level(game). Each assertion below failed on the pre-fix code.
 // ---------------------------------------------------------------------------
-describe("346 T1 — surface-word classification (no stem collisions)", () => {
+describe("346 T1 â€” surface-word classification (no stem collisions)", () => {
   it("a marketing-site brief is not typed real-estate by its Home page", () => {
     const brief =
       "A marketing website for a neighbourhood bakery. Home page, a menu with allergen tags, an opening-hours badge, and an order form with field-level validation.";
     // W61 C2: the new `web-marketing` register names this correctly (it was
-    // `custom-software` before the register existed); the 346 point stands — it
+    // `custom-software` before the register existed); the 346 point stands â€” it
     // is NOT real-estate.
     assert.equal(inferDomain(brief), "web-marketing");
     assert.notEqual(inferDomain(brief), "real-estate");
@@ -497,7 +498,7 @@ describe("346 T1 — surface-word classification (no stem collisions)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// W62 · C1-07 (R-08) — the held-out brief must classify as a UI product, not a
+// W62 Â· C1-07 (R-08) â€” the held-out brief must classify as a UI product, not a
 // lending library. The proof is the REAL brief texts: the held-out community
 // tool-library brief resolves {custom-software, app} while the seven campaign /
 // historical briefs (byte-identical) keep their corrected labels. The rule is
@@ -505,7 +506,7 @@ describe("346 T1 — surface-word classification (no stem collisions)", () => {
 // resolves `library`, and the SAME library noun with a declared UI surface
 // resolves `app`.
 // ---------------------------------------------------------------------------
-describe("W62 C1-07 — the held-out tool-library brief is a UI app, not a lending library", () => {
+describe("W62 C1-07 â€” the held-out tool-library brief is a UI app, not a lending library", () => {
   const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
   const TESTRUNS = join(REPO_ROOT, "..", "testruns");
   const CAMPAIGN = join(TESTRUNS, "campaign1");
@@ -565,11 +566,11 @@ describe("W62 C1-07 — the held-out tool-library brief is a UI app, not a lendi
 });
 
 // ---------------------------------------------------------------------------
-// 345 F2 · A1-05 — the mutation-invisible engine guards, pinned.
+// 345 F2 Â· A1-05 â€” the mutation-invisible engine guards, pinned.
 // Each test below fails if its guard is made inert (the V1 mutation probe found
 // no suite failed on removal). They pin HEAD behavior; the source is unchanged.
 // ---------------------------------------------------------------------------
-describe("345 F2 (A1-05) — wildStep/approveHitl guards are fail-able", () => {
+describe("345 F2 (A1-05) â€” wildStep/approveHitl guards are fail-able", () => {
   /** An active, unpaused wild run whose cursor sits on `phase`. */
   function activeWildAt(phase: number, recordStatus: "ready" | "running"): Project {
     const p = emptyProject({ name: "Guarded", brief: "A governed field-service dispatch brief with enough vocabulary." });
@@ -621,14 +622,14 @@ describe("345 F2 (A1-05) — wildStep/approveHitl guards are fail-able", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 346 P2-6 — `boundedStepWatch`'s production consumer. Before this wiring the
+// 346 P2-6 â€” `boundedStepWatch`'s production consumer. Before this wiring the
 // export had zero non-test callers (fixes/344 A3-05); now `wildStep` wraps its
 // phase-execution await in it, so store `startWildRun` and the headless wild
 // loops watch every executed step. The pins below fail without that call site:
-// a real overrun must surface a coded row AND park the run (§5.2 tier 2), while
+// a real overrun must surface a coded row AND park the run (Â§5.2 tier 2), while
 // a step inside budget must emit nothing new and keep its bytes.
 // ---------------------------------------------------------------------------
-describe("346 P2-6 — the wild step is watched by boundedStepWatch", () => {
+describe("346 P2-6 â€” the wild step is watched by boundedStepWatch", () => {
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
   /** A P6-ready wild fixture: priors 0-5 sealed, cursor on a ready phase 6. */
@@ -657,7 +658,7 @@ describe("346 P2-6 — the wild step is watched by boundedStepWatch", () => {
     return { rows, onEvent: (seed) => rows.push(seed) };
   }
 
-  /** Wall-clock masks only — the same volatile set the wild-step parity pin uses. */
+  /** Wall-clock masks only â€” the same volatile set the wild-step parity pin uses. */
   function normalize(p: Project): unknown {
     const strip = (s: string) =>
       s
@@ -699,11 +700,11 @@ describe("346 P2-6 — the wild step is watched by boundedStepWatch", () => {
     };
   }
 
-  it("overrun: a step resolving at ≥ 2× budget fires the tier rows AND parks coded", async () => {
+  it("overrun: a step resolving at â‰¥ 2Ã— budget fires the tier rows AND parks coded", async () => {
     const r = recorder();
     const res = await wildStep(p6ReadyFixture(), {
       reviewer: notConfigured,
-      // Slow injected edge (any key state): resolves well past the 2× tier.
+      // Slow injected edge (any key state): resolves well past the 2Ã— tier.
       p6Edge: async (q) => {
         await sleep(80);
         return { ...q, lastTest: { ok: true, detail: "slow edge" } };
@@ -744,7 +745,7 @@ describe("346 P2-6 — the wild step is watched by boundedStepWatch", () => {
     assert.ok(!names.includes("wild.step_timeout"), `no timeout row on a fast step (got: ${names.join(", ")})`);
     assert.notEqual(within.code, "RT_E_LLM_TIMEOUT", "a fast step is never paused by the watchdog");
 
-    // Control: the wrap is inert on the fast path — a different budget cannot
+    // Control: the wrap is inert on the fast path â€” a different budget cannot
     // change the produced bytes (only wall-clock fields differ; masked).
     const large = await wildStep(p6ReadyFixture(), {
       reviewer: notConfigured,
@@ -758,7 +759,7 @@ describe("346 P2-6 — the wild step is watched by boundedStepWatch", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 346 K3 — console PHASE-run spend. The engine meters every model call it makes
+// 346 K3 â€” console PHASE-run spend. The engine meters every model call it makes
 // during a step into the PROCESS session ledger; the exported `wildStep`
 // wrapper surfaces the step's measured DELTA to `opts.onUsage`, so a driver
 // (store.startWildRun) can fold it into `Project.tokenUsage`. The sink is pure
@@ -825,7 +826,7 @@ describe("346 K3 - wildStep surfaces the step measured session-ledger usage to o
 });
 
 // ---------------------------------------------------------------------------
-// 350 (F1) — the console phase-run twin: runPhaseAsync folds the phase's
+// 350 (F1) â€” the console phase-run twin: runPhaseAsync folds the phase's
 // MEASURED session-ledger delta onto its PhaseRecord.spend (the engine helper
 // is the same arithmetic as headless.recordPhaseSpend, pinned directly here).
 // ---------------------------------------------------------------------------
@@ -843,9 +844,9 @@ describe("350 F1 - engine.recordPhaseSpend writes only a measured delta", () => 
 });
 
 // ---------------------------------------------------------------------------
-// M7-01 (fixes/310) — a phase record that repairPhases has to INSERT must carry
+// M7-01 (fixes/310) â€” a phase record that repairPhases has to INSERT must carry
 // the same hydrate birth-stamps (rejectionHistory/gate) a KEPT record gets.
-// Without them the repaired payload's first export→import→export hop silently
+// Without them the repaired payload's first exportâ†’importâ†’export hop silently
 // ADDED both keys (the exact drift M7-01 exists to kill).
 // ---------------------------------------------------------------------------
 describe("M7-01 - a repaired phase INSERT is already normalized (no first-hop key drift)", () => {
@@ -862,7 +863,7 @@ describe("M7-01 - a repaired phase INSERT is already normalized (no first-hop ke
     });
   });
 
-  it("a missing-phase payload export→import→export is byte-stable on the FIRST hop", () => {
+  it("a missing-phase payload exportâ†’importâ†’export is byte-stable on the FIRST hop", () => {
     const base = emptyProject({ name: "Repair", brief: "a repaired brief with vocabulary", enforceDod: false });
     const raw = JSON.parse(exportProjectJson(base)) as { phases: unknown[] };
     raw.phases.splice(5, 1);
@@ -881,7 +882,7 @@ describe("M7-01 - a repaired phase INSERT is already normalized (no first-hop ke
 // ---------------------------------------------------------------------------
 // H-03 / B-25 - repairs are LOUD, never silent. The research normalizer dropped
 // entry-level junk (a null/non-object entry, or `items` that is not an array)
-// without setting researchRepaired → the entry vanished from the corpus with no
+// without setting researchRepaired â†’ the entry vanished from the corpus with no
 // hydrate.repaired row. The flag now names every entry-level drop.
 // ---------------------------------------------------------------------------
 describe("H-03 - entry-level research drops are recorded in hydrate.repaired", () => {
@@ -1065,7 +1066,7 @@ describe("W61 C6 - deepenResearch empty-corpus guard", () => {
 // ---------------------------------------------------------------------------
 // W61 lane C - C9 (PR-17): intent-first research query + deterministic
 // off-intent filter. RED before the change: the domain noun bag LED the query,
-// so a bakery/flower P0 pass researched "property rental tenant lease …
+// so a bakery/flower P0 pass researched "property rental tenant lease â€¦
 // architecture feasibility" and grounded itself in rental/lease category pages
 // (BL-001 recurrence); nothing dropped an off-intent category page from an
 // engineering-phase corpus.
@@ -1073,7 +1074,7 @@ describe("W61 C6 - deepenResearch empty-corpus guard", () => {
 describe("W61 C9 - intent-first research query + off-intent filter", () => {
   const p0Intent = "architecture feasibility 2026";
 
-  it("the phase intent leads; the business name is present; ≤3 ADDED qualifiers follow", () => {
+  it("the phase intent leads; the business name is present; â‰¤3 ADDED qualifiers follow", () => {
     const p = emptyProject({
       name: "Golden Crust Bakery",
       brief:
@@ -1184,7 +1185,7 @@ describe("W61 C9 - intent-first research query + off-intent filter", () => {
     });
     p.domain = "web-marketing";
     const onIntent = {
-      title: "Bloedow Bakery — donuts, breads and cakes",
+      title: "Bloedow Bakery â€” donuts, breads and cakes",
       url: "https://example.com/bloedow",
       content: "Order pickup and local delivery.",
     };
@@ -1217,11 +1218,11 @@ describe("W61 C9 - intent-first research query + off-intent filter", () => {
 });
 
 // ---------------------------------------------------------------------------
-// W62 C9(b) — the product phases name the brief's OWN nouns (lattice.briefNouns
+// W62 C9(b) â€” the product phases name the brief's OWN nouns (lattice.briefNouns
 // folded by A1 and merged into productNouns). Before: P4 printed the LEX bank's
 // generic nouns for every brief.
 // ---------------------------------------------------------------------------
-describe("W62 C9(b) — P2/P4 name the brief's own nouns", () => {
+describe("W62 C9(b) â€” P2/P4 name the brief's own nouns", () => {
   const brief =
     "# Bloedow Bakery\n\nA bakery website. The menu lists donut, bread and cake. Order a donut or a cake. Pickup or delivery: order a donut, cake and bread.";
 
@@ -1239,14 +1240,14 @@ describe("W62 C9(b) — P2/P4 name the brief's own nouns", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 349 L3 — every pipeline stage produces a real, visible artifact. The
+// 349 L3 â€” every pipeline stage produces a real, visible artifact. The
 // per-phase Artifact rows are the run's "real output", so a full keyless run
-// must leave ≥1 artifact with a NON-EMPTY body on every phase 0..12 (a phase
+// must leave â‰¥1 artifact with a NON-EMPTY body on every phase 0..12 (a phase
 // whose body were empty would render as a blank deliverable). Drives the same
-// real engine via the shared fixtures (runHeadless → applyPhaseResult, the
-// deterministic keyless floor) — no mocks, no key, no network.
+// real engine via the shared fixtures (runHeadless â†’ applyPhaseResult, the
+// deterministic keyless floor) â€” no mocks, no key, no network.
 // ---------------------------------------------------------------------------
-describe("349 L3 — every phase 0..12 records ≥1 artifact with a non-empty body after a full run", () => {
+describe("349 L3 â€” every phase 0..12 records â‰¥1 artifact with a non-empty body after a full run", () => {
   const done = runHeadless(seedProject(), ALL_PHASES);
 
   it("the run is a real, complete keyless pipeline (P12 sealed)", () => {
@@ -1268,11 +1269,11 @@ describe("349 L3 — every phase 0..12 records ≥1 artifact with a non-empty bo
 });
 
 // ---------------------------------------------------------------------------
-// W62 · C1-07 remediation — a lone DECISIVE register hit survives the
+// W62 Â· C1-07 remediation â€” a lone DECISIVE register hit survives the
 // UI-surface demotion (a bakery website is web-marketing), while a lone
 // INCIDENTAL hit (the held-out tool library's "catalogue") still demotes.
 // ---------------------------------------------------------------------------
-describe("W62 C1-07 — inferDomain trusts a DECISIVE lone hit, not an incidental one", () => {
+describe("W62 C1-07 â€” inferDomain trusts a DECISIVE lone hit, not an incidental one", () => {
   const SHORT = "A bakery website with a donut menu, order pickup and local delivery.";
   const LONG =
     "# Bloedow Bakery\n\nA bakery website. The menu lists donut, bread and cake. Order a donut or a cake. Pickup or delivery: order a donut, cake and bread.";
@@ -1286,9 +1287,9 @@ describe("W62 C1-07 — inferDomain trusts a DECISIVE lone hit, not an incidenta
   });
 
   it("a lone incidental register hit on a UI brief still demotes to custom-software", () => {
-    // "catalogue" is a web-marketing term but NOT decisive — the held-out
+    // "catalogue" is a web-marketing term but NOT decisive â€” the held-out
     // tool-library brief carries it (and a dashboard) and must stay
-    // custom-software. This is the exact class the C1-07 ≥2 rule protects.
+    // custom-software. This is the exact class the C1-07 â‰¥2 rule protects.
     const heldOutShape =
       "A community tool library lets members borrow shared tools. Browse the catalogue and reserve a tool; " +
       "manage the catalogue and overdue loans. A dashboard lists overdue loans.";
@@ -1297,11 +1298,11 @@ describe("W62 C1-07 — inferDomain trusts a DECISIVE lone hit, not an incidenta
 });
 
 // ---------------------------------------------------------------------------
-// W62 · C1-07 remediation — a valid brief that names product objects but hits
+// W62 Â· C1-07 remediation â€” a valid brief that names product objects but hits
 // no LEX job/entity must NOT seal `vague` (which failed p0-verdict +
 // p0-brief-grounded and hard-blocked a keyed enforceDod run at P0).
 // ---------------------------------------------------------------------------
-describe("W62 C1-07 — a vocabulary-bearing brief with no LEX hit still passes P0", () => {
+describe("W62 C1-07 â€” a vocabulary-bearing brief with no LEX hit still passes P0", () => {
   const SHORT = "A bakery website with a donut menu, order pickup and local delivery.";
 
   it("the short bakery brief is not vague and its P0 gate passes", () => {
@@ -1322,11 +1323,11 @@ describe("W62 C1-07 — a vocabulary-bearing brief with no LEX hit still passes 
 });
 
 // ---------------------------------------------------------------------------
-// W62 · C1-07 remediation — the DOMAIN_TERMS register cannot silently drift
+// W62 Â· C1-07 remediation â€” the DOMAIN_TERMS register cannot silently drift
 // from sandbox.ts's BRIEF_CORE_REGISTER (the comment there claimed a pin that
 // did not exist; the register was missing every web/retail/mobile term).
 // ---------------------------------------------------------------------------
-describe("W62 C1-07 — DOMAIN_TERMS cannot silently drift from BRIEF_CORE_REGISTER", () => {
+describe("W62 C1-07 â€” DOMAIN_TERMS cannot silently drift from BRIEF_CORE_REGISTER", () => {
   it("every live DOMAIN_TERMS value is present in BRIEF_CORE_REGISTER", () => {
     const live = [...new Set(Object.values(DOMAIN_TERMS).flat())];
     const missing = live.filter((t) => !BRIEF_CORE_REGISTER.has(t));
@@ -1339,12 +1340,12 @@ describe("W62 C1-07 — DOMAIN_TERMS cannot silently drift from BRIEF_CORE_REGIS
 });
 
 // ---------------------------------------------------------------------------
-// W62 · C1-07 remediation — the P1-P5 templates must not claim evidence they
+// W62 Â· C1-07 remediation â€” the P1-P5 templates must not claim evidence they
 // do not have: P2 asserts declared contracts (never observed reads/writes),
 // P3 never emits a placeholder that claims the brief named services, P5 states
 // the learning loop's real state instead of a constant "no loop behind it".
 // ---------------------------------------------------------------------------
-describe("W62 C1-07 — P1-P5 artifacts declare, never fabricate", () => {
+describe("W62 C1-07 â€” P1-P5 artifacts declare, never fabricate", () => {
   const bodyOf = (proj: Project, phase: PhaseId): string =>
     (proj.artifacts ?? [])
       .filter((a) => a.phase === phase)
@@ -1383,11 +1384,11 @@ describe("W62 C1-07 — P1-P5 artifacts declare, never fabricate", () => {
 });
 
 // ---------------------------------------------------------------------------
-// W62 · C1-07 remediation — the learning loop is no longer write-only for
+// W62 Â· C1-07 remediation â€” the learning loop is no longer write-only for
 // P1-P5: a human reject mints an L5 correction lesson (its first production
 // caller) that the next regeneration reads back into the artifact.
 // ---------------------------------------------------------------------------
-describe("W62 C1-07 — a human reject's lesson reaches the next regeneration", () => {
+describe("W62 C1-07 â€” a human reject's lesson reaches the next regeneration", () => {
   it("mints an L5 correction lesson and reads it back into the regenerated P4 artifact", async () => {
     await import("./knowledge.ts"); // resolve the lazy lesson seam (H2 pattern)
     const p = emptyProject({
@@ -1417,13 +1418,13 @@ function bodyOf(proj: Project, phase: PhaseId): string {
 }
 
 // ---------------------------------------------------------------------------
-// 2026-10-06 — pipeline fixes (items 1/2/3). Context flow, coded empty stages,
+// 2026-10-06 â€” pipeline fixes (items 1/2/3). Context flow, coded empty stages,
 // and a relevance filter that no longer keeps a body-only generic-term hit.
 // ---------------------------------------------------------------------------
-describe("2026-10-06 — pipeline flow, coded empty stages and the research floor", () => {
+describe("2026-10-06 â€” pipeline flow, coded empty stages and the research floor", () => {
   it("filterRelevantResearch drops a body-only generic-term hit below the floor", () => {
     // The measured defect: a Wikipedia "Pixar" page matched the generic term
-    // `software` in its BODY only and scored 0.042 — it must not earn the corpus.
+    // `software` in its BODY only and scored 0.042 â€” it must not earn the corpus.
     const p = emptyProject({
       name: "Sky Hopper",
       brief: "A 2D browser arcade game: jumping, platforms, coins and a high score.",
@@ -1458,7 +1459,7 @@ describe("2026-10-06 — pipeline flow, coded empty stages and the research floo
     const rows = stageWiringLogRows(stripped as unknown as Project, 1);
     assert.equal(rows.length, 2, "no deliverable + no graph kind are both coded");
     assert.ok(rows.every((r) => r.event === "p1.stage.unwired" && r.level === "warn"));
-    assert.match(rows[0].detail, /RT_E_PLAN_UNDERPRODUCED · P1 completed with NO deliverable/);
+    assert.match(rows[0].detail, /RT_E_PLAN_UNDERPRODUCED Â· P1 completed with NO deliverable/);
     assert.ok(rows.some((r) => /produced no graph artifact/.test(r.detail)));
     // Idempotent: the same record yields no duplicate row.
     const once = { ...stripped, logs: rows };
@@ -1493,7 +1494,7 @@ describe("2026-10-06 — pipeline flow, coded empty stages and the research floo
     assert.equal(
       seen[0].opts.thinking,
       false,
-      "measured live: thinking ON + a bounded window returned reasoning only (empty content) — E1",
+      "measured live: thinking ON + a bounded window returned reasoning only (empty content) â€” E1",
     );
     assert.ok((seen[0].opts.maxTokens ?? 0) >= 2000, "the artifact window has headroom for a heading + body");
     assert.match(seen[0].prompt, /Produce the REAL deliverable for phase P2/);
@@ -1519,5 +1520,234 @@ describe("2026-10-06 — pipeline flow, coded empty stages and the research floo
     assert.equal(ctx.some((c) => c.phase >= 3), false, "the current phase never rides its own context");
     assert.equal(ctx.some((c) => c.title === "Agent packet (A4)"), false, "the packet row is bookkeeping");
     assert.equal(ctx.some((c) => c.title.startsWith("DoD gate")), false, "gate rows are bookkeeping");
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// W359 (resolve-kind) â€” the SCORED decision, its record, and the corpus proof.
+//
+// Measured at the W359 pin: the pre-W359 ORDERED FIRST-HIT table mis-resolved 3
+// of the 11 corpus briefs â€” arcade-breakout -> app (via the noun "screen"),
+// coffeehouse2home-property-ledger -> service, showing-booking -> tool (via the
+// noun "agent", a real-estate agent). Every corpus assertion below resolves from
+// the brief ALONE ({brief, domain:"", lattice:null}) â€” the form that drives the
+// real CLI path, which forwards no kind â€” so this suite cannot pass by reading a
+// record the eval driver stamped.
+// ---------------------------------------------------------------------------
+describe("W359 (resolve-kind) â€” the scored decision", () => {
+  const REPO = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const CORPUS = join(REPO, "research", "eval-corpus");
+
+  /** The corpus contract: 3 MUST FLIP, 8 MUST NOT MOVE (the declared kind is the
+   *  gate's own expectedKind for every one of these fixtures). */
+  const CORPUS_KIND: Record<string, "app" | "tool" | "game" | "library" | "service"> = {
+    // must flip (pre-W359 resolved app / service / tool respectively)
+    "arcade-breakout": "game",
+    "coffeehouse2home-property-ledger": "app",
+    "showing-booking": "app",
+    // must not change
+    "invoice-csv-cli": "tool",
+    "order-webhook-service": "service",
+    "date-rrule-library": "library",
+    "field-ops-suite": "app",
+    "house-flip-manager": "app",
+    "permit-inspection-tracker": "app",
+    "real-estate-crm": "app",
+    "rental-portfolio": "app",
+  };
+
+  function frontmatter(text: string): Record<string, string> {
+    const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    const out: Record<string, string> = {};
+    if (!m) return out;
+    for (const line of m[1].split(/\r?\n/)) {
+      const kv = line.match(/^([a-z]+):\s*(.*)$/i);
+      if (!kv) continue;
+      const v = kv[2].trim();
+      out[kv[1]] = v.startsWith('"') && v.endsWith('"') ? v.slice(1, -1) : v;
+    }
+    return out;
+  }
+
+  const corpusBrief = (slug: string): string =>
+    frontmatter(readFileSync(join(CORPUS, `${slug}.md`), "utf8")).brief ?? "";
+
+  it("resolves all 11 corpus briefs from the brief ALONE (3 flipped, 8 held)", () => {
+    for (const [slug, expected] of Object.entries(CORPUS_KIND)) {
+      const brief = corpusBrief(slug);
+      assert.ok(brief.length > 0, `${slug}: the corpus brief was read (not an empty fallback)`);
+      assert.equal(
+        deliveryKindOf({ brief, domain: "", lattice: null }),
+        expected,
+        `${slug} resolves ${expected} from its own brief`,
+      );
+    }
+  });
+
+  it("the table covers every corpus brief on disk (a new fixture cannot slip past the pin)", () => {
+    const onDisk = readdirSync(CORPUS)
+      .filter((f) => f.endsWith(".md") && f !== "README.md")
+      .map((f) => f.replace(/\.md$/, ""));
+    assert.deepEqual(
+      [...onDisk].sort(),
+      [...Object.keys(CORPUS_KIND)].sort(),
+      "every brief in research/eval-corpus carries a pinned kind",
+    );
+  });
+
+  it("the three measured mis-resolutions are dead â€” the old deciding token no longer decides", () => {
+    // arcade-breakout: "â€¦win or lose screens â€” canvas only." resolved `app` because
+    // the app row preceded the game row. It still MATCHES app:screen@3 â€” and loses.
+    const arcade = corpusBrief("arcade-breakout");
+    assert.match(arcade, /screens/);
+    assert.equal(deliveryKindOf({ brief: arcade, domain: "", lattice: null }), "game");
+    // showing-booking: "agents publish open-houseâ€¦" (a real-estate agent) resolved `tool`.
+    const booking = corpusBrief("showing-booking");
+    assert.match(booking, /agents/);
+    assert.equal(deliveryKindOf({ brief: booking, domain: "", lattice: null }), "app");
+    // coffeehouse2home: "property-services company â€¦ field services" resolved `service`.
+    const c2h = corpusBrief("coffeehouse2home-property-ledger");
+    assert.match(c2h, /services/);
+    assert.equal(deliveryKindOf({ brief: c2h, domain: "", lattice: null }), "app");
+  });
+
+  it("records score, runner-up, confidence and every matched signal â€” the model's own invariants", () => {
+    const r = kindResolutionOf({ brief: corpusBrief("arcade-breakout"), domain: "", lattice: null });
+    assert.equal(r.kind, "game");
+    assert.equal(r.basis, "scored");
+    const counted = r.evidence.filter((e) => e.counted && e.kind === r.kind);
+    assert.equal(
+      r.score,
+      counted.reduce((sum, e) => sum + (e.weight ?? 0), 0),
+      "the score IS the sum of the winner's counted weights (no hidden term)",
+    );
+    assert.ok(r.runnerUp !== null && r.runnerUp.score < r.score, "a runner-up is recorded when one scored");
+    assert.equal(
+      r.confidence,
+      Number((r.score / (r.score + r.runnerUp.score)).toFixed(3)),
+      "confidence is the stated margin, not a fabricated probability",
+    );
+    assert.ok(
+      r.evidence.some((e) => e.signal === "arcade" && e.weight === 4 && e.counted),
+      "the deciding signal is named, with its weight",
+    );
+    assert.ok(
+      r.evidence.some((e) => e.kind === "app" && e.signal === "screen" && e.counted),
+      "the LOSING signal is recorded too â€” the record explains the race, not just the win",
+    );
+    assert.ok(r.briefHash.length > 0, "the record carries the staleness key");
+    // Determinism: the same input resolves to deep-equal evidence, every time.
+    assert.deepEqual(kindResolutionOf({ brief: corpusBrief("arcade-breakout"), domain: "", lattice: null }), r);
+  });
+
+  it("the tie policy is documented and deterministic: total, then specificity, then the fixed order", () => {
+    // Equal totals (5 v 5), unequal specificity: the 5-weight CLI noun wins over
+    // mobile(3)+app(2) â€” the more specific row. (A brief that DECLARES a UI
+    // surface would instead damp the tool row entirely; that rule is pinned below.)
+    const specific = kindResolutionOf({ brief: "A cli utility for a mobile app", domain: "", lattice: null });
+    assert.equal(specific.kind, "tool");
+    assert.equal(specific.score, 5);
+    assert.equal(specific.runnerUp?.kind, "app");
+    assert.equal(specific.runnerUp?.score, 5, "the totals really do tie â€” specificity decided it");
+    // An exact tie between two NON-app kinds keeps the earlier member of the fixed
+    // order (library precedes tool); `app` leads it, so a tie INVOLVING app is app.
+    assert.equal(deliveryKindOf({ brief: "A cli and a library for teams", domain: "", lattice: null }), "library");
+    // Nothing scored at all â‡’ app, and the record says so (never a silent default).
+    const bare = kindResolutionOf({ brief: "Build something for the team", domain: "", lattice: null });
+    assert.equal(bare.kind, "app");
+    assert.equal(bare.basis, "default");
+    assert.equal(bare.confidence, 0);
+    assert.deepEqual(bare.evidence, []);
+  });
+
+  it("one ambiguous noun cannot out-score a specific one (and the damp rule survives)", () => {
+    // "agent"/"tool"/"service" are wide English words: they may support, never decide.
+    assert.equal(deliveryKindOf({ brief: "A dispatch board with agents", domain: "", lattice: null }), "app");
+    // C1-07 kept: a declared UI surface damps library/tool â€” and the damped
+    // matches stay in the record as `counted:false`, never silently dropped.
+    const uiLib = kindResolutionOf({ brief: "A tool library with a catalogue and a dashboard", domain: "", lattice: null });
+    assert.equal(uiLib.kind, "app");
+    assert.deepEqual(uiLib.damped, ["library", "tool"]);
+    assert.ok(
+      uiLib.evidence.some((e) => e.kind === "library" && e.counted === false),
+      "the damped library noun is recorded as matched-but-not-counted",
+    );
+    assert.equal(kindResolutionOf({ brief: "A kanban board library exposing a typed board client", domain: "", lattice: null }).kind, "library");
+  });
+
+  it("a stored kind wins verbatim and is recorded as `declared` (never re-inferred)", () => {
+    const r = kindResolutionOf({ brief: "A cli tool", kind: "game", domain: "", lattice: null });
+    assert.equal(r.kind, "game");
+    assert.equal(r.basis, "declared");
+    assert.equal(r.confidence, 1);
+    assert.deepEqual(r.evidence, [{ kind: "game", signal: "stored kind", weight: null, source: "declared", counted: true }]);
+  });
+});
+
+describe("W359 (resolve-kind) â€” the stamp, its invalidation rule and hydration", () => {
+  const LIB = "A kanban board library exposing a typed board client";
+
+  it("withDeliveryKind stamps the kind AND the record, and is idempotent", () => {
+    const p = emptyProject({ name: "Stamped", brief: LIB });
+    assert.equal(p.kind, undefined, "create leaves the kind absent");
+    assert.equal(p.kindResolution, undefined, "and no record before the stamp");
+    const stamped = withDeliveryKind(p);
+    assert.equal(stamped.kind, "library");
+    assert.equal(stamped.kindResolution?.kind, "library");
+    assert.equal(stamped.kindResolution?.basis, "scored");
+    assert.equal(withDeliveryKind(stamped), stamped, "same kind + current record â‡’ the same reference");
+  });
+
+  it("the record is invalidated by a changed brief; the stored KIND is authoritative by design", () => {
+    // Invalidation rule: `briefHash` is the key. A record is never a cache â€” the
+    // decision is re-derived on every call â€” but a record whose hash no longer
+    // matches the live text is re-stamped, so a stale "why" can never be read.
+    const p = emptyProject({ name: "Ref", brief: "A bakery website with a menu." });
+    const stamped = withDeliveryKind(p);
+    assert.equal(stamped.kind, "app");
+    const edited = { ...stamped, brief: "A cli tool that converts invoices." };
+    const restamped = withDeliveryKind(edited);
+    assert.notEqual(restamped.kindResolution!.briefHash, stamped.kindResolution!.briefHash);
+    // The kind is NOT re-decided over a stored one (a declared --kind, a corpus
+    // declaration or an earlier stamp is not silently overwritten).
+    assert.equal(restamped.kind, "app");
+    assert.equal(restamped.kindResolution!.basis, "declared");
+    // With the kind absent, the same edit DOES move the resolved kind.
+    const fresh = withDeliveryKind(emptyProject({ name: "Fresh", brief: "A cli tool that converts invoices." }));
+    assert.equal(fresh.kind, "tool");
+  });
+
+  it("hydrateProject carries the record, and drops a corrupt or contradictory one", () => {
+    const stamped = withDeliveryKind(emptyProject({ name: "Hyd", brief: LIB }));
+    const back = hydrateProject({ ...stamped } as never);
+    assert.deepEqual(back.kindResolution, stamped.kindResolution, "a well-formed record survives the round trip");
+    assert.equal(back.kind, "library");
+
+    const contradictory = hydrateProject({
+      ...stamped,
+      kindResolution: { ...stamped.kindResolution!, kind: "game" },
+    } as never);
+    assert.equal(contradictory.kindResolution, undefined, "a record naming a kind the project does not carry is dropped");
+    assert.equal(contradictory.kind, "library", "the kind itself is untouched");
+
+    const malformed = hydrateProject({ ...stamped, kindResolution: { kind: "library" } } as never);
+    assert.equal(malformed.kindResolution, undefined, "a malformed record is dropped, never repaired into a claim");
+
+    const legacy = hydrateProject({ ...emptyProject({ name: "Legacy", brief: LIB }) } as never);
+    assert.equal("kindResolution" in legacy, false, "an absent record stays absent (legacy bytes untouched)");
+  });
+
+  it("the keyless P6 path carries the decided kind (the stamp no longer sits behind the key)", async () => {
+    const saved = process.env.DEEPSEEK_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY; // the keyless path, measured
+    try {
+      const p = emptyProject({ name: "Keyless", brief: LIB });
+      const done = await liveLayer(p, 6);
+      assert.equal(done.kind, "library", "a keyless P6 result carries the resolved kind");
+      assert.equal(done.kindResolution?.briefHash.length! > 0, true, "and the record that explains it");
+    } finally {
+      if (saved !== undefined) process.env.DEEPSEEK_API_KEY = saved;
+    }
   });
 });

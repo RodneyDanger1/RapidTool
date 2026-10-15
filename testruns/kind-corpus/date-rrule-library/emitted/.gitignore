@@ -1,0 +1,14 @@
+# RapidTool scaffold .gitignore — keeps this emitted tree a reviewable unit.
+# Ignore only what a real install/build/verify run leaves behind (T4.1/T4.2);
+# the generated source, .rapidtool/project.json and the notes stay tracked.
+# Secrets never enter the tree: .env stays local, only .env.example ships.
+node_modules/
+dist/
+.rapidtool/logs/
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+.vite/
+.DS_Store

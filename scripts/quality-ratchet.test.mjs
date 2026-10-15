@@ -1,10 +1,11 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// scripts/quality-ratchet.test.mjs — the ratchet's own test suite.
+// scripts/quality-ratchet.test.mjs â€” the ratchet's own test suite.
 //
 // Two layers, deliberately separated:
-//   · PURE layer — the evaluator, the two owner-rule readers, the producer-output
+//   Â· PURE layer â€” the evaluator, the two owner-rule readers, the producer-output
 //     parser, and the floors-file contract. Fast, no IO beyond reading two files.
-//   · TEETH layer — the planted-regression proofs (a beaten floor MUST fail, a
+//   Â· TEETH layer â€” the planted-regression proofs (a beaten floor MUST fail, a
 //     mutated reader MUST trip its canary) and one CLI-contract run.
 // The assertions that would depend on the rest of the tree being green (a floor
 // breached on the real bytes) live in the ratchet's `--selftest` and in the
@@ -38,6 +39,8 @@ import {
   isTestSeamPath,
   normalizeRequestedKind,
   kindFitOf,
+  readKindCorpusStamps,
+  readKindFitUnits,
   parseProducerJson,
   readJsonFile,
   loadFloors,
@@ -51,7 +54,7 @@ const FLOORS = { ...FLOORS_RAW, _canaries: FLOORS_RAW.canaries ?? {} };
 
 test("floors file: schema, per-metric contract, and the no-fabrication rule", () => {
   assert.equal(FLOORS_RAW.schema, "rapidtool-quality-ratchet-floors/1");
-  assert.equal(FLOORS_RAW.estimatedCostUsd, null, "estimatedCostUsd must stay null — no spend is fabricated");
+  assert.equal(FLOORS_RAW.estimatedCostUsd, null, "estimatedCostUsd must stay null â€” no spend is fabricated");
   const ids = Object.keys(FLOORS_RAW.floors);
   assert.ok(ids.length >= 20, `expected a substantial metric set, found ${ids.length}`);
   for (const [id, spec] of Object.entries(FLOORS_RAW.floors)) {
@@ -118,7 +121,7 @@ test("evaluate: A PLANTED REGRESSION ON EVERY ENFORCED FLOOR IS A NAMED HARD FAI
 
 test("evaluate: an enforced metric that cannot be produced fails closed; a pending one does not", () => {
   const floors = { floors: { e: { direction: "atLeast", floor: 1, status: "enforced", producer: "p" }, p: { direction: "atLeast", floor: 1, status: "pending-first-green", producer: "p" } } };
-  // A BROKEN/ABSENT producer on an enforced pin is a hard failure — never a silent pass.
+  // A BROKEN/ABSENT producer on an enforced pin is a hard failure â€” never a silent pass.
   const broken = evaluate({ readings: { e: { value: null, code: UNAVAILABLE_CODES.artifactAbsent, reason: "artifact absent" }, p: { value: null, code: UNAVAILABLE_CODES.artifactAbsent, reason: "artifact absent" } }, canaries: [], floors });
   assert.equal(broken.ok, false);
   assert.equal(broken.unavailableEnforced.length, 1);
@@ -130,7 +133,7 @@ test("evaluate: an enforced metric that cannot be produced fails closed; a pendi
   assert.ok(!unsupplied.unavailableEnforced.some((x) => x.startsWith("p ")), "a pending-first-green metric must never hard-fail");
 });
 
-test("evaluate: an uncovered pin is `uncovered` — never a pass, never a regression", () => {
+test("evaluate: an uncovered pin is `uncovered` â€” never a pass, never a regression", () => {
   const floors = { floors: { k: { direction: "atLeast", floor: null, status: "uncovered", producer: "p" } } };
   const v = evaluate({ readings: {}, canaries: [], floors });
   assert.equal(v.ok, true);
@@ -339,14 +342,14 @@ test("censusRealTreesReading: a shape-invalid row or an empty corpus fails CLOSE
 
 test("floors file: every `atLeast: 0` pin declares a MOVING sub-leg floor or a non-regressible reason", () => {
   const zeroPins = Object.entries(FLOORS_RAW.floors).filter(([, s]) => s.direction === "atLeast" && s.floor === 0 && s.status !== "uncovered");
-  assert.ok(zeroPins.length > 0, "the accounting would be vacuous with no atLeast-0 pin — this test is the canary's twin");
+  assert.ok(zeroPins.length > 0, "the accounting would be vacuous with no atLeast-0 pin â€” this test is the canary's twin");
   for (const [id, spec] of zeroPins) {
     const legs = Array.isArray(spec.subLegs) ? spec.subLegs : [];
     if (legs.length > 0) {
       for (const leg of legs) {
         const target = FLOORS_RAW.floors[leg];
         assert.ok(target, `${id}: subLeg ${leg} names no floor`);
-        assert.ok(typeof target.floor === "number" && target.floor > 0, `${id}: subLeg ${leg} is itself pinned at ${target.floor} — a regression cannot move it either`);
+        assert.ok(typeof target.floor === "number" && target.floor > 0, `${id}: subLeg ${leg} is itself pinned at ${target.floor} â€” a regression cannot move it either`);
       }
       continue;
     }
@@ -360,28 +363,71 @@ test("floors file: every `atLeast: 0` pin declares a MOVING sub-leg floor or a n
   assert.equal(FLOORS_RAW.floors["tree.tscPassSample"].floor, 1);
 });
 
-// --- W358 · R-11 + the re-pinned lint reading --------------------------------
+// --- W358 Â· R-11 + the re-pinned lint reading ---------------------------------
+// --- W359 Â· lane `kind-corpus`: the kind pins are covered, honest, and CAN FIRE --
 
-test("floors file: R-11 — the two kind-surface legs are pinned, and each fails when planted at floor−1", () => {
-  for (const id of ["kindFit.game.surfaceOk", "kindFit.library.surfaceOk"]) {
+const KIND_SURFACE_LEGS = ["kindFit.game.surfaceOk", "kindFit.library.surfaceOk", "kindFit.tool.surfaceOk", "kindFit.service.surfaceOk"];
+/** units + the four legs the `app` kind uses â€” every kind must be covered on all five. */
+const KIND_COVERAGE_IDS = RATCHET_KINDS.flatMap((k) =>
+  ["units", "entryOk", "scriptsOk", "surfaceOk", "demandedMatch"].map((leg) => `kindFit.${k}.${leg}`),
+);
+
+test("floors file: every kind's units + four legs are pinned at >= 1, and EVERY pin fails at floorâˆ’1 when planted", () => {
+  for (const id of KIND_COVERAGE_IDS) {
     const spec = FLOORS_RAW.floors[id];
-    assert.ok(spec, `${id}: the leg the ratchet can already measure (0 of 1) had NO pin — W357 R-11`);
+    assert.ok(spec, `${id}: no pin â€” a kind's coverage or a leg of its contract is unmeasured`);
+    assert.notEqual(spec.status, "uncovered", `${id}: an uncovered kind is a measurement gap, never a pass`);
+    assert.equal(spec.status, "enforced", `${id}: a coverage pin must be enforced, not prose`);
+    assert.equal(spec.direction, "atLeast", `${id}: a count of kind-conforming units is a floor`);
+    assert.ok(spec.floor >= 1, `${id}: floor ${spec.floor} cannot fire â€” a count at 0 has no producible floorâˆ’1`);
+    // Planted at floorâˆ’1: a named hard failure, against the REAL floors file.
+    const beaten = spec.floor - 1;
+    const v = evaluate({ readings: { [id]: { value: beaten } }, canaries: [], floors: FLOORS });
+    assert.equal(v.ok, false, `${id}: beating the floor to ${beaten} must fail`);
+    assert.ok(v.regressions.some((r) => r.startsWith(`${id} (`)), `${id}: the failure must be NAMED (got ${JSON.stringify(v.regressions)})`);
+  }
+  // The five `fit` aggregates: the app kind is honestly 0 of 32 (its four moving legs
+  // are pinned instead), every non-app kind now satisfies the whole contract.
+  for (const k of RATCHET_KINDS) {
+    const fit = FLOORS_RAW.floors[`kindFit.${k}.fit`];
+    assert.ok(fit, `kindFit.${k}.fit: no pin`);
+    assert.equal(fit.direction, "atLeast");
+    assert.equal(fit.subLegs?.length, 4, `kindFit.${k}.fit: the aggregate must name all four moving legs`);
+    if (k === "app") {
+      assert.equal(fit.floor, 0, "the app aggregate is honestly 0 of 32 â€” a floor may only rise");
+      assert.ok(typeof fit.nonRegressible === "string" || fit.subLegs.length > 0, "an atLeast-0 aggregate must account for itself");
+      continue;
+    }
+    assert.equal(fit.floor, 1, `kindFit.${k}.fit: the honest bar is 1`);
+    assert.equal(fit.reading, 1, `kindFit.${k}.fit: the reading is the measured 1`);
+    const beaten = evaluate({ readings: { [`kindFit.${k}.fit`]: { value: 0 } }, canaries: [], floors: FLOORS });
+    assert.equal(beaten.ok, false, `kindFit.${k}.fit: 0 of 1 must fail`);
+    assert.ok(beaten.regressions.some((r) => r.startsWith(`kindFit.${k}.fit (`)));
+  }
+});
+
+test("floors file: the kind-surface legs are pinned at the honest bar of 1, and each fails when planted at floorâˆ’1", () => {
+  // W358 pinned these two legs at the measured 0 and disclosed, honestly, that an
+  // `atLeast: 0` bar cannot fail by number (a count's structural minimum is 0, so the
+  // plan's literal `floor âˆ’ 1 = âˆ’1` plant only proved the evaluator's arithmetic). W359
+  // lane `kind-corpus` replaced the mis-stamped unit each pin covered with an honest one,
+  // so the reading is 1, the floor ROSE to the honest bar, and the plant now runs for real.
+  for (const id of KIND_SURFACE_LEGS) {
+    const spec = FLOORS_RAW.floors[id];
+    assert.ok(spec, `${id}: the leg the ratchet can already measure had NO pin â€” W357 R-11`);
     assert.equal(spec.status, "enforced", `${id}: the pin must be enforced, not prose`);
-    assert.equal(spec.floor, 0, `${id}: pinned at the measured 0 of 1 — a floor may only rise`);
-    assert.equal(spec.reading, 0, `${id}: the reading is the measured 0`);
-    assert.ok(
-      typeof spec.nonRegressible === "string" && spec.nonRegressible.length > 20,
-      `${id}: an atLeast-0 pin must account for itself (subLegs or a non-regressible reason)`,
-    );
-    // Planted at floor−1: a NAMED hard failure — the same plant the selftest runs over
-    // every enforced numeric floor, quoted here for these two pins by name.
+    assert.equal(spec.floor, 1, `${id}: the honest bar is 1 â€” every unit of the kind carries the demanded surface`);
+    assert.equal(spec.reading, 1, `${id}: the reading is the measured 1 of 1`);
+    assert.ok(spec.nonRegressible === undefined, `${id}: the nonRegressible accounting was the honest record of a count that could not move â€” it must be gone once the count moves`);
+    // Planted at floorâˆ’1 = 0, which IS a producible count for this metric (it is what a
+    // kind with no honest unit reads): a NAMED hard failure.
     const v = evaluate({ readings: { [id]: { value: spec.floor - 1 } }, canaries: [], floors: FLOORS });
     assert.equal(v.ok, false, `${id}: beating the floor to ${spec.floor - 1} must fail`);
     assert.ok(v.regressions.some((r) => r.startsWith(`${id} (`)), `${id}: the failure must be NAMED (got ${JSON.stringify(v.regressions)})`);
   }
   // And the leg is not silent when the reading disappears: an unproducible reading on an
   // ENFORCED pin is a hard failure (so removing the game/library surface reading entirely
-  // can no longer slip through the two `entryOk`/`units` floors that never measured it).
+  // cannot slip through the `units` floor).
   const gone = evaluate({
     readings: { "kindFit.game.surfaceOk": { value: null, code: UNAVAILABLE_CODES.artifactAbsent, reason: "no emitted artifact for a game-kind brief" } },
     canaries: [],
@@ -394,13 +440,48 @@ test("floors file: R-11 — the two kind-surface legs are pinned, and each fails
   );
 });
 
+test("floors file: the corpus's own defects and its own coverage gaps are pinned and disclosed", () => {
+  // The owner's rule-2 defect, counted rather than averaged away: a corpus emission whose
+  // tree records a DIFFERENT kind from the one requested. The honest bar is 0 and the
+  // reading is 3, so the pin is REPORTED â€” the boundary owner's call, on a keyed re-emit.
+  const mis = FLOORS_RAW.floors["kindFit.misKindEmissions"];
+  assert.ok(mis, "the mis-kind emissions were a named defect with no pin");
+  assert.equal(mis.direction, "atMost");
+  assert.equal(mis.floor, 0, "the honest bar is 0");
+  assert.equal(mis.status, "pending-first-green", "3 > 0 can never read as a pass, and enforcing it would just make a red tree redder");
+  assert.equal(mis.reading, 3);
+  assert.match(String(mis.reason), /bar is 0/i);
+  const asPinned = evaluate({ readings: { "kindFit.misKindEmissions": { value: 3 } }, canaries: [], floors: FLOORS });
+  assert.ok(asPinned.pendingFirstGreen.some((x) => x.startsWith("kindFit.misKindEmissions (BELOW THE HONEST BAR today)")), "the below-the-bar marker must be carried");
+  assert.ok(!asPinned.regressions.some((r) => r.startsWith("kindFit.misKindEmissions ")), "a pending-first-green pin is reported, not enforced");
+  // The bar is reachable, not decorative: flipped to `enforced` (the owner's call) it is a
+  // NAMED hard failure at 3 and at 1, and green at 0.
+  const enforced = { floors: { ...FLOORS_RAW.floors, "kindFit.misKindEmissions": { ...mis, status: "enforced" } } };
+  for (const reading of [1, 3]) {
+    const e = evaluate({ readings: { "kindFit.misKindEmissions": { value: reading } }, canaries: [], floors: enforced });
+    assert.equal(e.ok, false, `a mis-kind emission at ${reading} must fail once the owner enforces the bar`);
+    assert.ok(e.regressions.some((r) => r.startsWith("kindFit.misKindEmissions (")));
+  }
+  assert.equal(evaluate({ readings: { "kindFit.misKindEmissions": { value: 0 } }, canaries: [], floors: enforced }).ok, true, "0 mis-kind emissions MEETS the bar");
+  // The fail-closed denominator guard for the corpus itself.
+  const missing = FLOORS_RAW.floors["kindFit.corpusUnitsMissing"];
+  assert.ok(missing, "a named corpus entry that disappears must be a metric, not a silent shrink");
+  assert.equal(missing.direction, "atMost");
+  assert.equal(missing.floor, 0);
+  assert.equal(missing.status, "enforced");
+  assert.equal(missing.reading, 0);
+  const planted = evaluate({ readings: { "kindFit.corpusUnitsMissing": { value: 1 } }, canaries: [], floors: FLOORS });
+  assert.equal(planted.ok, false, "a corpus entry that disappears must turn the ratchet red");
+  assert.ok(planted.regressions.some((r) => r.startsWith("kindFit.corpusUnitsMissing (")), "and by name");
+});
+
 test("floors file: `lint.problems` is re-pinned to the measured 5 with the honest bar still 0", () => {
   const spec = FLOORS_RAW.floors["lint.problems"];
   assert.equal(spec.direction, "atMost");
-  assert.equal(spec.floor, 0, "the honest bar stays 0 — the re-pin moves the READING, never the bar");
+  assert.equal(spec.floor, 0, "the honest bar stays 0 â€” the re-pin moves the READING, never the bar");
   assert.equal(spec.status, "pending-first-green", "a tree carrying 5 problems is not lint-clean, so the pin stays pending (reported), never enforced-as-met");
-  assert.equal(spec.reading, 5, "the reading is the boundary's own measured value (fix-lint): 947 → 5");
-  assert.match(String(spec.reason), /947 → 5/);
+  assert.equal(spec.reading, 5, "the reading is the boundary's own measured value (fix-lint): 947 â†’ 5");
+  assert.match(String(spec.reason), /947 â†’ 5/);
   // A reading above the bar can never read as a pass...
   const v = evaluate({ readings: { "lint.problems": { value: 5 } }, canaries: [], floors: FLOORS });
   assert.deepEqual(
@@ -412,26 +493,26 @@ test("floors file: `lint.problems` is re-pinned to the measured 5 with the hones
     v.pendingFirstGreen.some((x) => x.startsWith("lint.problems (BELOW THE HONEST BAR today)")),
     "the below-the-bar marker must be carried",
   );
-  assert.ok(!v.regressions.some((r) => r.startsWith("lint.problems ")), "a pending-first-green pin is reported, not enforced — the boundary owner flips it once the source tree is warning-free");
+  assert.ok(!v.regressions.some((r) => r.startsWith("lint.problems ")), "a pending-first-green pin is reported, not enforced â€” the boundary owner flips it once the source tree is warning-free");
   // ...and the bar is reachable, not decorative: at 0 the comparison is `ok` (the pin still
-  // reports `pending` because its status is pending-first-green — only the owner enforces it).
+  // reports `pending` because its status is pending-first-green â€” only the owner enforces it).
   const clean = evaluate({ readings: { "lint.problems": { value: 0 } }, canaries: [], floors: FLOORS });
   const cleanMetric = clean.metrics.find((m) => m.id === "lint.problems");
-  assert.equal(cleanMetric.comparison, "ok", "0 problems MEETS the floor of 0 — the bar is reachable");
+  assert.equal(cleanMetric.comparison, "ok", "0 problems MEETS the floor of 0 â€” the bar is reachable");
   assert.ok(!clean.pendingFirstGreen.some((x) => x.startsWith("lint.problems (BELOW")), "a met bar carries no below-the-bar marker");
 });
 
-test("floors file: the owed code is DECLARED, registered, and not emitted by this ratchet — the debt is PAID and verified", () => {
+test("floors file: the owed code is DECLARED, registered, and not emitted by this ratchet â€” the debt is PAID and verified", () => {
   const owed = Object.keys(FLOORS_RAW.owedCodes ?? {});
   assert.deepEqual(owed, ["RT_E_RATCHET_METRIC_UNAVAILABLE"]);
   const entry = FLOORS_RAW.owedCodes[owed[0]];
-  // W358: the owed edit landed (ERROR_CODES + ERROR_CODE_DOC), so the record says so —
+  // W358: the owed edit landed (ERROR_CODES + ERROR_CODE_DOC), so the record says so â€”
   // and the canary verifies the recorded payment against the register (never claims it).
-  assert.equal(entry.status, "registered", "the owed edit has landed — record it as `registered`, do not leave a stale 'unowned this wave' debt");
+  assert.equal(entry.status, "registered", "the owed edit has landed â€” record it as `registered`, do not leave a stale 'unowned this wave' debt");
   assert.match(String(entry.owedEdit), /src\/lib\/errors\.ts/);
   assert.match(String(entry.owedEdit), /APPLIED/, "a paid debt must say the edit was applied, and when");
   const emitted = Object.values(UNAVAILABLE_CODES);
-  assert.ok(!emitted.includes("RT_E_RATCHET_METRIC_UNAVAILABLE"), "the ratchet does not emit this code yet — it classifies by cause through the three long-standing codes (recorded in the entry's `why`)");
+  assert.ok(!emitted.includes("RT_E_RATCHET_METRIC_UNAVAILABLE"), "the ratchet does not emit this code yet â€” it classifies by cause through the three long-standing codes (recorded in the entry's `why`)");
   const registry = readRegisteredCodes();
   assert.equal(registry.ok, true, registry.reason);
   const registered = new Set(/** @type {string[]} */ (registry.evidence?.registered ?? []));
@@ -456,12 +537,12 @@ const stubReaders = {
   fleetProductQualityFromProjects: (rows) => ({ readings: rows.map((r) => ({ surfaceOk: r.__surfaceOk === true })) }),
 };
 
-test("kindFit: a kind with no emitted case is `uncovered` — never a pass", () => {
+test("kindFit: a kind with no emitted case is `uncovered` â€” never a pass", () => {
   const units = [{ source: "s", unit: "u", requestedKind: "game", files: [], pkg: {}, record: {} }];
   const fit = kindFitOf(units, stubReaders);
   assert.equal(fit.byKind.tool.units, 0);
   assert.equal(fit.byKind.tool.uncovered, true);
-  assert.equal(fit.byKind.tool.fit, 0, "an uncovered kind contributes no fit — it is not a pass");
+  assert.equal(fit.byKind.tool.fit, 0, "an uncovered kind contributes no fit â€” it is not a pass");
   assert.equal(fit.byKind.game.units, 1);
 });
 
@@ -498,6 +579,100 @@ test("kindFit: an unknown requested kind is not silently treated as a pass", () 
   assert.equal(fit.rows[0].fit, false);
   assert.equal(fit.rows[0].uncovered, true);
   assert.equal(fit.byKind.app.units, 0);
+});
+
+// --- W359 lane `kind-corpus`: the per-kind corpus and the two honest re-stamps ---
+
+test("kind-corpus: the fixture file cannot invent the kind its own units are measured against", () => {
+  const stamps = readKindCorpusStamps();
+  assert.equal(stamps.error, null, String(stamps.error));
+  assert.ok(stamps.units.length >= 4, `the per-kind corpus must name a unit for every kind that had none (found ${stamps.units.length})`);
+  for (const u of stamps.units) {
+    assert.ok(!Object.prototype.hasOwnProperty.call(u, "requestedKind"), `${u.unit}: a corpus unit must NOT carry its own requestedKind â€” the request is read from the corpus brief's front-matter`);
+    assert.ok(typeof u.brief === "string" && u.brief !== "", `${u.unit}: a corpus unit must name the corpus brief it was emitted from`);
+    assert.equal(u.keyed, false, `${u.unit}: a keyless deterministic-floor emission must say so â€” a keyed claim would need the spend trail`);
+  }
+  for (const r of stamps.restamped) {
+    assert.ok(r.tree && r.requestedKind && r.recordedKind, `${r.tree}: a re-stamp must record BOTH the honest request and the stamp it corrects`);
+    assert.notEqual(r.requestedKind, r.recordedKind, `${r.tree}: a re-stamp that changes nothing is not a re-stamp`);
+    assert.ok(Array.isArray(r.evidence) && r.evidence.length > 0, `${r.tree}: a corrected stamp must carry its evidence`);
+  }
+  // The units the reader actually builds: every kind in the ratchet's vocabulary has at
+  // least one unit whose requested kind comes from an independent declaration.
+  const counted = {};
+  for (const u of readKindFitUnits()) {
+    const k = normalizeRequestedKind(u.requestedKind);
+    if (k !== null) counted[k] = (counted[k] ?? 0) + 1;
+  }
+  for (const k of RATCHET_KINDS) assert.ok((counted[k] ?? 0) >= 1, `kind ${k}: no emitted unit carries an independently declared request kind`);
+});
+
+test("kind-corpus: the two mis-stamped trees are re-measured as the app requests they are â€” and their own bytes are NOT edited", () => {
+  const units = readKindFitUnits();
+  for (const [unit, recorded] of [["bakery-website/emitted", "game"], ["mobile-companion/emitted", "library"]]) {
+    const u = units.find((x) => x.unit === unit);
+    assert.ok(u, `${unit}: the tree must stay in the corpus â€” dropping it would only move the defect out of sight`);
+    assert.equal(u.requestedKind, "app", `${unit}: the unit's own bytes (its brief) request an app`);
+    assert.equal(u.record.kind, recorded, `${unit}: the persisted record must NOT be edited to look honest â€” it still says ${recorded}`);
+    assert.equal(u.emittedKind, recorded, `${unit}: the emitted-kind witness is the record's own kind`);
+    assert.equal(u.restampedFrom, recorded, `${unit}: the corrected stamp records what it corrected`);
+    const fit = kindFitOf([u], stubReaders);
+    assert.equal(fit.rows[0].misKind, true, `${unit}: a kind-mismatched emission must be flagged, not averaged away`);
+    assert.ok(fit.rows[0].unmet.some((x) => x.includes("mis-kind emission")), `${unit}: the row must NAME the mis-kind emission`);
+    assert.equal(fit.misKindEmissions, 1);
+  }
+});
+
+test("kind-corpus: a named corpus unit that is absent from disk is RECORDED, never silently dropped", () => {
+  const tmp = join(process.env.TEMP ?? "/tmp", `rt-kind-corpus-planted-${process.pid}.json`);
+  writeFileSync(
+    tmp,
+    JSON.stringify({
+      schema: "rapidtool-kindfit-corpus/1",
+      units: [{ unit: "kind-corpus/planted/emitted", dir: "kind-corpus/does-not-exist/emitted", brief: "arcade-breakout", keyed: false }],
+      restampedTrees: [],
+    }),
+    "utf8",
+  );
+  try {
+    const planted = readKindFitUnits({ stampsPath: tmp }).find((u) => u.unit === "kind-corpus/planted/emitted");
+    assert.ok(planted, "the absent entry must still be reported as a unit row");
+    assert.equal(planted.requestedKind, null, "an absent tree has no measurable request kind");
+    assert.match(String(planted.skipReason), /no emitted tree with a \.rapidtool\/project\.json record exists/);
+    const fit = kindFitOf([planted], stubReaders);
+    assert.equal(fit.corpusUnitsMissing, 1, "an absent corpus entry must be COUNTED â€” a missing artifact is never a smaller denominator read as clean");
+    assert.equal(fit.byKind.game.units, 0, "an absent entry must not be counted as coverage for its kind");
+    assert.match(String(fit.rows[0].unmet[0]), /exists at/);
+    assert.equal(fit.rows[0].uncovered, true);
+  } finally {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* best effort */
+    }
+  }
+});
+
+test("kindFit: a mis-kind emission with all four legs satisfied still FAILS â€” and an agreeing emission does not", () => {
+  const base = {
+    source: "s",
+    unit: "u",
+    requestedKind: "app",
+    files: [{ path: "index.html", source: "<html></html>" }, { path: "src/main.tsx", source: "export {}" }],
+    pkg: { scripts: { typecheck: "tsc", test: "node --test", build: "vite build" } },
+    record: { surface: "web", __surfaceOk: true },
+  };
+  const agreeing = kindFitOf([{ ...base, emittedKind: "app" }], stubReaders);
+  assert.equal(agreeing.rows[0].fit, true, "an emission whose own kind agrees with the request fits");
+  assert.equal(agreeing.misKindEmissions, 0);
+  const mismatched = kindFitOf([{ ...base, emittedKind: "game" }], stubReaders);
+  assert.equal(mismatched.rows[0].fit, false, "a tree that records a different kind from the one requested is NOT a fit, however green its legs look");
+  assert.equal(mismatched.misKindEmissions, 1);
+  assert.deepEqual(mismatched.misKindAtoms, [{ source: "s", unit: "u", requestedKind: "app", emittedKind: "game" }]);
+  // "unknown" is not a claim in either direction.
+  const unknown = kindFitOf([{ ...base, emittedKind: null }], stubReaders);
+  assert.equal(unknown.rows[0].misKind, false);
+  assert.equal(unknown.misKindEmissions, 0);
 });
 
 test("normalizeRequestedKind maps the corpus vocabulary and rejects the unknown", () => {
@@ -570,7 +745,7 @@ test("CLI: `--all` prints ONE parseable JSON verdict, names every floor, and fab
   assert.equal(verdict.tool, "quality-ratchet");
   assert.equal(verdict.schema, SCHEMA);
   assert.equal(verdict.mode, "all");
-  assert.equal(verdict.estimatedCostUsd, null, "estimatedCostUsd must be null — no spend is fabricated");
+  assert.equal(verdict.estimatedCostUsd, null, "estimatedCostUsd must be null â€” no spend is fabricated");
   assert.ok(Array.isArray(verdict.metrics) && Array.isArray(verdict.canaries));
   const ids = new Set(verdict.metrics.map((m) => m.id));
   for (const id of Object.keys(FLOORS_RAW.floors)) assert.ok(ids.has(id), `floor ${id} is missing from the verdict`);

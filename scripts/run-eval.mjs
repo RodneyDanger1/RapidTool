@@ -1,13 +1,14 @@
 #!/usr/bin/env node
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 /**
- * fixes/144 (M6, lane D4) + fixes/147 (Wave E, lane E3) — run-eval.mjs: the
+ * fixes/144 (M6, lane D4) + fixes/147 (Wave E, lane E3) â€” run-eval.mjs: the
  * maker-loop eval driver.
  *
  * For every corpus fixture present under research/eval-corpus/<slug>.md:
- *   create → drive the FULL pipeline (keyless deterministic floor by default;
+ *   create â†’ drive the FULL pipeline (keyless deterministic floor by default;
  *   `--keyed` + DEEPSEEK_API_KEY = one bounded live entry) with stock-HITL
- *   approvals via the driver → emit to research/eval-out/<slug>/ → tree-run →
- *   score with the pure maker rubric (src/lib/maker-score.ts) → print a table
+ *   approvals via the driver â†’ emit to research/eval-out/<slug>/ â†’ tree-run â†’
+ *   score with the pure maker rubric (src/lib/maker-score.ts) â†’ print a table
  *   and persist research/eval-out/results.json (+ history.json for M7 priors).
  *
  * SINGLE-SYNTHESIS KEYED FLOW (fixes/147 E3, divergence #4 closure): a keyed
@@ -19,23 +20,23 @@
  * happen ONCE at the end. Keyless mode is unchanged (the floor regression).
  *
  * M1 CAPABILITY-COVERAGE REPORT (fixes/147 E3, divergence #1 signal): every
- * entry persists its coverage map ({capability → tree file paths} + missing),
+ * entry persists its coverage map ({capability â†’ tree file paths} + missing),
  * computed here from corpus expectedCapabilities + the final project tree via
- * maker-score's pure probes. When a KEYED journey CONVERGED but M1=0 — a
- * converged run that shipped no identifier for a demanded capability — the
+ * maker-score's pure probes. When a KEYED journey CONVERGED but M1=0 â€” a
+ * converged run that shipped no identifier for a demanded capability â€” the
  * missing list is printed LOUDLY. maker-score stays pure: it only exposes the
  * probes; the driver owns the report.
  *
- * W16-L1 (fixes/244) — OV-35 Step-0 preflight, three additive pieces:
- *   (a) OV-27 reachability probe (`probeP6Reachability`) — proves the CLI keyed
+ * W16-L1 (fixes/244) â€” OV-35 Step-0 preflight, three additive pieces:
+ *   (a) OV-27 reachability probe (`probeP6Reachability`) â€” proves the CLI keyed
  *       path can reach a model through the P6 SEPARATE-SPECIFIER imports
  *       (engine.ts:2851-2885), keyless with a dummy key: reports `configured`
  *       + wire-reach honestly and states what only a real key can prove;
- *   (b) failure-class triage (`classifyRunOutcome`/`classifyDrainEnding`) — a
+ *   (b) failure-class triage (`classifyRunOutcome`/`classifyDrainEnding`) â€” a
  *       coded class for EVERY RunOutcome value and drain ending; no ending may
  *       surface as a silent `stalled`;
  *   (c) kill-safety run marker (`writeRunStartMarker`/`finishRunMarker`/
- *       `runWithMarker`) — WRITTEN BEFORE the first corpus entry of a keyed
+ *       `runWithMarker`) â€” WRITTEN BEFORE the first corpus entry of a keyed
  *       run and finalized only after results.json AND history.json are written
  *       (WB-6), so a killed run leaves `finishedAt:null` and cannot be mistaken
  *       for a completed one. Keyless legs write nothing new (byte-identical).
@@ -45,39 +46,39 @@
  * taken from the agent-writable corpus fixture anymore: it lives in a run-side grader file
  * `research/eval-corpus/graders/<slug>.grader.json`, read ONLY by this driver. Graders are
  * never handed to createProject/emitProject and never copied into the emit dir, so the
- * emitted tree can neither read nor game them — and every emitted tree is scanned for grader
+ * emitted tree can neither read nor game them â€” and every emitted tree is scanned for grader
  * leaks at emit time (`graderLeakScan`, pinned by scripts/run-eval.test.mjs). Each case is
  * run `--trials=N` times (default 1 = the legacy single-run contract) in a FRESH project per
  * trial; the honest metrics per case are pass@k / pass^k / flakiness (a case that flips
  * between trials is FLAKY, never averaged into a fabricated pass). A case with no valid
- * run-side grader is SKIPPED with a reason — never graded against an undeclared bar.
+ * run-side grader is SKIPPED with a reason â€” never graded against an undeclared bar.
  *
- * W19-L4 (fixes/252) — OV-7 corpus expansion + grader-FREEZE audit, additive:
- *   (a) corpus spread — `permit-inspection-tracker` joins `field-ops-suite` as a
- *       second `construction` fixture, so ≥2 domains each carry ≥2 fixtures and
+ * W19-L4 (fixes/252) â€” OV-7 corpus expansion + grader-FREEZE audit, additive:
+ *   (a) corpus spread â€” `permit-inspection-tracker` joins `field-ops-suite` as a
+ *       second `construction` fixture, so â‰¥2 domains each carry â‰¥2 fixtures and
  *       the M7/learning prior is citable inside each (`corpusDomainIndex`; the
  *       pin lives in scripts/run-eval.test.mjs). Prior reads stay BY SLUG
- *       (`priorFor`): a slug's first run has no prior — honest, stated, never
+ *       (`priorFor`): a slug's first run has no prior â€” honest, stated, never
  *       faked. `priorFor` takes an injectable history path for the test pin.
- *   (b) grader freeze — every grader file is fingerprint-raw-bytes at plan time
+ *   (b) grader freeze â€” every grader file is fingerprint-raw-bytes at plan time
  *       (`graderFreezeFingerprint`) and re-verified before persist
  *       (`verifyGraderFreeze`); a grader that moved mid-run stamps
  *       `results.json.graderFreeze.ok=false` + a loud print, because a bar that
  *       changed while the run was in flight cannot grade that run. The driver
  *       still LOADS each grader exactly once (plan time) and every trial scores
  *       against that in-memory object.
- *   (c) brief leak scan — `briefLeakScan` closes the OTHER leak direction the
- *       playbook names (230 §OV-7: the emitted-tree scan misses grader text
+ *   (c) brief leak scan â€” `briefLeakScan` closes the OTHER leak direction the
+ *       playbook names (230 Â§OV-7: the emitted-tree scan misses grader text
  *       baked into the *brief*): the agent-facing surface (brief + name) is
  *       scanned for the grader's bar/file name and recorded per row.
  *
  * Results are DATA, not failures: the script exits 0 always (missing corpus
- * dir, unparseable entries, red scores — all printed and recorded, never
+ * dir, unparseable entries, red scores â€” all printed and recorded, never
  * thrown as process failures). Keyless = the honest regression leg.
  *
  * Run: npm run eval -- --out <dir>   (REQUIRED unless EVAL_OUT_DIR is set: the
  *                                    bare default would rewrite the tracked
- *                                    research/eval-out/** — see evalOutRefusal)
+ *                                    research/eval-out/** â€” see evalOutRefusal)
  *      npm run eval -- --out <dir> --keyed       (one bounded keyed entry when the key is set)
  *      npm run eval -- --out <dir> --trials=3 [--all|--limit=N]   (trials + pass@k)
  *      npm run eval -- --out research/eval-out   (explicitly regenerate the tracked scorecard)
@@ -104,16 +105,20 @@ import {
   FIRST_RUN_UNSCOREABLE_CRITERIA,
 } from "../src/lib/maker-score.ts";
 import { fnv1a } from "../src/lib/algorithms.ts";
+// W359 (resolve-kind): ONE TRUTH. The driver no longer carries its own
+// corpus-kind resolver â€” it bridges the declared corpus vocabulary and lets the
+// engine's single decision resolve (and record) the kind.
+import { deliveryKindOf } from "../src/lib/engine.ts";
 // W23-L1 (fixes/262): the trial rows' usage/cost evidence consumes the
-// T-107.6 ledger helpers directly — consume, never recompute. F1 (314) adds
+// T-107.6 ledger helpers directly â€” consume, never recompute. F1 (314) adds
 // the session-budget READ (isBudgetExhausted) the iterate decision consults.
 import { emptyLedger, recordSpend, totalTokens, estimateCostUsd, sessionTokenBudget, isBudgetExhausted } from "../src/lib/token-ledger.ts";
-// F1 (314) — the iterate driver's config gate + PURE decision (src/lib/iterate.ts).
+// F1 (314) â€” the iterate driver's config gate + PURE decision (src/lib/iterate.ts).
 // The eval side RECORDS the per-trial decision (additive `iterate` row block);
 // the live keyed firing is owner-gated and never engages in this leg.
 import { readIterateConfig, decideIterate, ITERATE_THRESHOLD_ENV } from "../src/lib/iterate.ts";
-// W43 · H5 (fixes/316_h5_oracle.md · T6.3): the behavioral oracle is ONE shared
-// module now — `src/lib/entry-oracle.ts` (moved VERBATIM out of this driver).
+// W43 Â· H5 (fixes/316_h5_oracle.md Â· T6.3): the behavioral oracle is ONE shared
+// module now â€” `src/lib/entry-oracle.ts` (moved VERBATIM out of this driver).
 // The product path (compile-check.server.ts `treeRun`) evaluates a tree's OWN
 // declared contract (`entry-runs` rows in `.rapidtool/project.json`) with the
 // same primitive; this driver delegates its eval-side evaluation to it, so
@@ -127,22 +132,22 @@ import {
   runEntryOracle,
   validateExpectedBehavior,
 } from "../src/lib/entry-oracle.ts";
-// W43 · H5 (fixes/316_h5_oracle.md · T5.4): run-level eval telemetry — the
+// W43 Â· H5 (fixes/316_h5_oracle.md Â· T5.4): run-level eval telemetry â€” the
 // driver stamps its OWN bounded rows (host "cli", scope "eval-run") so
 // `diagnose` can audit an eval run; the rt-events catalogue owns the legal
 // event names (guardrail checked at emit time).
 import { isKnownRtEvent } from "../src/lib/rt-events.ts";
 import { appendRtLine, makeCliRow, resolveLogDir } from "../src/lib/runtime-log.server.ts";
-// W45·331-1 (Keywright): the provider key resolver the driver declares the
+// W45Â·331-1 (Keywright): the provider key resolver the driver declares the
 // checkout's `.env` to, and the provider's own one-shot transport. The probes
-// below must record HTTP status over `oneShotFetch` — not undici's global
-// `fetch` — because the driver ends in an in-tick `process.exit()`, which races
+// below must record HTTP status over `oneShotFetch` â€” not undici's global
+// `fetch` â€” because the driver ends in an in-tick `process.exit()`, which races
 // an undici TLS teardown handle into a libuv abort on Node 24/Windows.
 import { resolveProcessKey } from "../src/lib/llm/providers/key-source.server.ts";
 import { oneShotFetch } from "../src/lib/llm/providers/one-shot-fetch.server.ts";
 
-// W44 · A1 + parent completion (fixes/318_a1_oracle.md · T5.4): THE bounded
-// run-level emitter — run start + run end + the top-catch crash row, ≤3 rows
+// W44 Â· A1 + parent completion (fixes/318_a1_oracle.md Â· T5.4): THE bounded
+// run-level emitter â€” run start + run end + the top-catch crash row, â‰¤3 rows
 // per run. The rt-events catalogue is the guardrail (an unknown name is
 // refused, never invented); telemetry must NEVER alter the run or its scores:
 // any failure here is swallowed.
@@ -160,11 +165,11 @@ export function emitEvalRunRow(seed) {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 /** Corpus dir honors EVAL_CORPUS_DIR (isolated scratch runs for lane proof /
- *  future keyed experiments) — default is D3's research/eval-corpus. */
+ *  future keyed experiments) â€” default is D3's research/eval-corpus. */
 const CORPUS_DIR = process.env.EVAL_CORPUS_DIR ? resolve(process.env.EVAL_CORPUS_DIR) : join(ROOT, "research", "eval-corpus");
 /** Eval output honors `--out <dir>` and EVAL_OUT_DIR (both keep scratch runs
  *  out of the real results/history used for M7 priors); `--out` wins over the
- *  env. The bare default is the TRACKED `research/eval-out/**` — see
+ *  env. The bare default is the TRACKED `research/eval-out/**` â€” see
  *  `evalOutRefusal` for why an un-chosen default write into the repo is refused. */
 const OUT_ARG = (() => {
   const eq = process.argv.find((a) => a.startsWith("--out="));
@@ -180,15 +185,15 @@ const RESULTS_PATH = join(OUT_DIR, "results.json");
 const HISTORY_PATH = join(OUT_DIR, "history.json");
 
 /**
- * W50 · 336-4 (Switchboard) — the eval OUT_DIR guard, pure so the pin can call
+ * W50 Â· 336-4 (Switchboard) â€” the eval OUT_DIR guard, pure so the pin can call
  * it directly (scripts/run-eval.test.mjs). The driver used to default OUT_DIR to
  * the repo's TRACKED `research/eval-out/**` and rewrite it in place (results.json,
- * history.json, every <slug>/ trial tree) — which is why no wave dared run
+ * history.json, every <slug>/ trial tree) â€” which is why no wave dared run
  * `npm run eval`: the tree went dirty. A write into the working tree is allowed
  * only when the caller CHOSE it (`--out <dir>` / `EVAL_OUT_DIR`); the bare default
  * is refused so a scorecard can be produced in scratch without dirtying the tree.
  * An explicit `--out research/eval-out` still regenerates the tracked scorecard on
- * purpose — the guard refuses surprise, not intent.
+ * purpose â€” the guard refuses surprise, not intent.
  * @returns {{ code: string, message: string } | null}
  */
 export function evalOutRefusal(outDir, { explicit = false, repoRoot = ROOT } = {}) {
@@ -197,7 +202,7 @@ export function evalOutRefusal(outDir, { explicit = false, repoRoot = ROOT } = {
   const insideRepo = rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
   if (!insideRepo) return null;
   return {
-    // RT_E_VALIDATION is the registered usage/config class (errors.ts) — no new
+    // RT_E_VALIDATION is the registered usage/config class (errors.ts) â€” no new
     // registry row is invented here.
     code: "RT_E_VALIDATION",
     message:
@@ -208,7 +213,7 @@ export function evalOutRefusal(outDir, { explicit = false, repoRoot = ROOT } = {
   };
 }
 /** RUN-SIDE GRADER DIR (W5-L5 / T-107.5). Per-case acceptance bars live in
- *  `<corpus>/graders/<slug>.grader.json` — run-side files read ONLY by this
+ *  `<corpus>/graders/<slug>.grader.json` â€” run-side files read ONLY by this
  *  driver (EVAL_GRADER_DIR overrides for scratch/test corpora). They are never
  *  passed to createProject/emitProject and never written under OUT_DIR, so the
  *  emitted tree cannot read them; every emitted tree is additionally scanned
@@ -218,8 +223,8 @@ const GRADER_DIR = process.env.EVAL_GRADER_DIR ? resolve(process.env.EVAL_GRADER
 const JOURNEY_BUDGET = 3;
 const KEYED = process.argv.includes("--keyed");
 /** Whether a USABLE key resolves. Recomputed at the top of main() AFTER the
- *  checkout's `.env` is declared to the provider's key resolver (W45·331-1):
- *  a workspace whose only key lives in `.env` must run keyed — the raw process
+ *  checkout's `.env` is declared to the provider's key resolver (W45Â·331-1):
+ *  a workspace whose only key lives in `.env` must run keyed â€” the raw process
  *  read alone missed it and every keyed call 401'd on a stale ambient value.
  *  The module-level initial value keeps the crash tombstone honest if main()
  *  never reached that point. */
@@ -227,7 +232,7 @@ let keyedOk = KEYED && Boolean(process.env.DEEPSEEK_API_KEY);
 const EVAL_ALL = process.argv.includes("--all");
 const LIMIT_ARG = process.argv.find((a) => a.startsWith("--limit="));
 const EVAL_LIMIT = LIMIT_ARG ? Number(LIMIT_ARG.slice("--limit=".length)) : NaN;
-/** W5-L5 T-107.5 — trials per corpus case. Default 1 keeps the legacy
+/** W5-L5 T-107.5 â€” trials per corpus case. Default 1 keeps the legacy
  *  single-run contract byte-identical (pass@1 == the one observed trial);
  *  `--trials=N` (2..MAX_TRIALS) enables pass@k + flakiness accounting. An
  *  invalid value falls back to 1 with an honest note below, never a throw. */
@@ -240,7 +245,7 @@ const TRIALS =
     : 1;
 /** Which k the reported pass@k uses (additive `--k=N`; default 1 = the
  *  standard single-trial success probability). pass@k with k = n is trivially
- *  1 whenever any trial passed — the honest small-k / pass^n pair is what
+ *  1 whenever any trial passed â€” the honest small-k / pass^n pair is what
  *  separates "solved it once" from "solves it reliably". */
 const K_ARG = process.argv.find((a) => a.startsWith("--k="));
 const K_REQUESTED = K_ARG ? Number(K_ARG.slice("--k=".length)) : 1;
@@ -263,7 +268,7 @@ function unquote(s) {
 
 /** Split a bracket-list body on commas that are NOT inside a double-quoted
  *  string. Corpus fixtures write `expectedCapabilities: ["A, with commas",
- *  "B"]` — a naive split(",") fragments quoted capability text (7 real
+ *  "B"]` â€” a naive split(",") fragments quoted capability text (7 real
  *  capabilities became 32 pseudo-caps in M1/coverage evidence). YAML block
  *  lists (`- item` lines) never pass through here; only inline `[...]`. */
 function splitListRespectingQuotes(s) {
@@ -362,14 +367,14 @@ function loadCorpusEntry(file) {
     expectedNouns: strList(fm.expectedNouns),
     expectedCapabilities: strList(fm.expectedCapabilities),
     acceptance: strList(fm.acceptance),
-    baseline: fm.baseline !== undefined && fm.baseline !== null ? String(fm.baseline) : "—",
+    baseline: fm.baseline !== undefined && fm.baseline !== null ? String(fm.baseline) : "â€”",
     raw: fm,
   };
 }
 
-/** OV-7 corpus spread: domain → slugs for the parsed entries. Pure. The
+/** OV-7 corpus spread: domain â†’ slugs for the parsed entries. Pure. The
  *  test pin reads the REAL corpus through this (`listCorpusEntries` is the
- *  same loader the driver uses — no second parser to drift). */
+ *  same loader the driver uses â€” no second parser to drift). */
 export function corpusDomainIndex(entries) {
   const byDomain = {};
   for (const e of entries) {
@@ -389,12 +394,12 @@ export function listCorpusEntries() {
     .filter((f) => f.endsWith(".md"))
     .sort()
     .map((f) => {
-      // Only frontmatter-carrying files are fixtures — corpus documentation
+      // Only frontmatter-carrying files are fixtures â€” corpus documentation
       // (e.g. D3's README.md) is not an entry to evaluate.
       try {
         const text = readFileSync(join(CORPUS_DIR, f), "utf8");
         if (!text.startsWith("---")) {
-          return { entry: null, error: `${f}: not a corpus fixture (no YAML frontmatter fence) — skipped as documentation` };
+          return { entry: null, error: `${f}: not a corpus fixture (no YAML frontmatter fence) â€” skipped as documentation` };
         }
         return { entry: loadCorpusEntry(f), error: null };
       } catch (e) {
@@ -410,7 +415,7 @@ export function listCorpusEntries() {
 // A grader file (`<GRADER_DIR>/<slug>.grader.json`) is the grading source of
 // truth for its case: acceptance bar text, required identifiers, required
 // capabilities, run-side file/content assertions (SWE-agent-style
-// expectedFiles / expectedContent, 107 §8) and the pass threshold. The corpus
+// expectedFiles / expectedContent, 107 Â§8) and the pass threshold. The corpus
 // frontmatter keeps its copies as the documented D3 schema; this driver no
 // longer grades from them (`scoringCorpusFor` pins that in the tests).
 // ---------------------------------------------------------------------------
@@ -423,7 +428,7 @@ export function graderFileFor(slug, graderDir = GRADER_DIR) {
 /** One run-side grader document. @typedef {{slug: string, graderVersion: number, caseName: string, authority: string, movedFrom: string, acceptanceBar: string, requiredIdentifiers: string[], requiredCapabilities: string[], expectedFiles: string[], expectedContent: Array<{file: string, contains: string}>, expectedKind: string | null, expectedBehavior: object[], passWhen: {meanAtLeast: number, firstRun: {meanAtLeast: number, excludeCriteria: import("../src/lib/maker-score.ts").MakerCriterionId[]} | null, requireExpectedFiles: boolean, requireExpectedContent: boolean, requireExpectedBehavior: boolean, requireExpectedKind: boolean}}} Grader */
 
 /** Parse + validate one grader document text. Returns `{ ok: true, grader }`
- *  or `{ ok: false, error }` — a grader that cannot be trusted never grades.
+ *  or `{ ok: false, error }` â€” a grader that cannot be trusted never grades.
  *  @returns {{ok: true, grader: Grader} | {ok: false, error: string}} */
 export function parseGrader(raw, slug) {
   let doc;
@@ -447,7 +452,7 @@ export function parseGrader(raw, slug) {
   // first run cannot score M7 (no prior same-slug run, maker-score m7Learning),
   // so the grader may declare a first-run threshold taken over the card's
   // criteria MINUS `excludeCriteria`. Read it here, validated: a malformed
-  // block is a coded refusal, never silently dropped — dropping it would judge
+  // block is a coded refusal, never silently dropped â€” dropping it would judge
   // first runs at the warm bar and cap them at 8/9 by arithmetic.
   //
   // 342-2b (verifier B): the exclusion list is maker-score's ONE list
@@ -495,8 +500,8 @@ export function parseGrader(raw, slug) {
         .filter((c) => c && typeof c.file === "string" && typeof c.contains === "string")
         .map((c) => ({ file: c.file, contains: c.contains }))
     : [];
-  // W40·N4 (§R7-f04): the DECLARED delivery kind this grader demands of the
-  // emitted tree — asserted against the emitted README's "**Kind:** <kind>"
+  // W40Â·N4 (Â§R7-f04): the DECLARED delivery kind this grader demands of the
+  // emitted tree â€” asserted against the emitted README's "**Kind:** <kind>"
   // line by checkExpectedKind, so a keyword-table edit (or a dropped declared
   // kind) can never silently mis-kind a fixture. Absent = a v1 grader (no
   // kind assertion; v1 back-compat). Values = the scaffold taxonomy
@@ -512,22 +517,22 @@ export function parseGrader(raw, slug) {
     }
     expectedKind = doc.expectedKind.trim();
   }
-  // A3-f05/R11-f12 (W36 · N5 — landing the structure W30 §Graders spec'd;
-  // fixes/299 U1 completes it; W44·A1: the row-shape validation DELEGATES to
-  // the shared oracle's `validateExpectedBehavior` — no local copy): optional
+  // A3-f05/R11-f12 (W36 Â· N5 â€” landing the structure W30 Â§Graders spec'd;
+  // fixes/299 U1 completes it; W44Â·A1: the row-shape validation DELEGATES to
+  // the shared oracle's `validateExpectedBehavior` â€” no local copy): optional
   // per-kind expectedBehavior rows over the EMITTED TREE (not text presence).
   // A grader that cannot be trusted never grades (the refusal strings are the
-  // grader-loading contract — byte-for-byte what the shared validator emits);
+  // grader-loading contract â€” byte-for-byte what the shared validator emits);
   // the rows are evaluated later by checkExpectedBehavior. Checks:
-  //   file-exists           — `path` must exist in the emitted tree manifest
-  //   package-target-exists — the emitted package.json's `bin`|`main`|`exports`
+  //   file-exists           â€” `path` must exist in the emitted tree manifest
+  //   package-target-exists â€” the emitted package.json's `bin`|`main`|`exports`
   //                           target(s) must resolve to emitted files
-  //   entry-runs            — RUNTIME row, evaluated by a bounded, env-minimal
+  //   entry-runs            â€” RUNTIME row, evaluated by a bounded, env-minimal
   //                           spawn of the emitted `entry` (fixes/299 U1):
   //                           pass = the declared exit/output pins hold within
   //                           budget; fail = timeout / exit mismatch / missing
   //                           pin text / missing entry. A UI kind declares
-  //                           `uiShell: true` instead of an entry — that is a
+  //                           `uiShell: true` instead of an entry â€” that is a
   //                           structural skip (verified against the tree's
   //                           index.html, mirroring treeRun's resolveEntry),
   //                           never a silent pass. Rows that name neither an
@@ -554,24 +559,24 @@ export function parseGrader(raw, slug) {
       requiredCapabilities: capabilities,
       expectedFiles,
       expectedContent,
-      // W40·N4 (§R7-f04): the declared delivery kind the emitted tree must
-      // land (null = v1 grader — no assertion).
+      // W40Â·N4 (Â§R7-f04): the declared delivery kind the emitted tree must
+      // land (null = v1 grader â€” no assertion).
       expectedKind,
-      // W36 · N5: the checked expectedBehavior rows ([] = legacy grader — the
+      // W36 Â· N5: the checked expectedBehavior rows ([] = legacy grader â€” the
       // verification label then reads "files+content only", exactly the
       // pre-expectedBehavior contract).
       expectedBehavior,
       passWhen: {
         meanAtLeast,
         // 342-2 (W56): the declared first-run bar (null = keep the warm bar
-        // for first runs too — v1 back-compat).
+        // for first runs too â€” v1 back-compat).
         firstRun,
         requireExpectedFiles: pw.requireExpectedFiles !== false,
         requireExpectedContent: pw.requireExpectedContent !== false,
-        // A declared bar is mandatory by default — same doctrine as files/content;
+        // A declared bar is mandatory by default â€” same doctrine as files/content;
         // `false` is the explicit leniency opt-out (a declared row that FAILED
         // is never a pass unless the grader says so; a `pending` runtime row
-        // never fails a tree — it is visible in the verification label).
+        // never fails a tree â€” it is visible in the verification label).
         requireExpectedBehavior: pw.requireExpectedBehavior !== false,
         // Same doctrine for the declared kind; a no-op when expectedKind is absent.
         requireExpectedKind: pw.requireExpectedKind !== false,
@@ -589,10 +594,10 @@ export function loadGrader(slug, graderDir = GRADER_DIR) {
   try {
     raw = readFileSync(path, "utf8");
   } catch {
-    return { ok: false, path, error: `no run-side grader at ${path} — case SKIPPED (never graded against an undeclared bar)` };
+    return { ok: false, path, error: `no run-side grader at ${path} â€” case SKIPPED (never graded against an undeclared bar)` };
   }
   const parsed = parseGrader(raw, slug);
-  if (!parsed.ok) return { ok: false, path, error: `run-side grader ${path} rejected: ${parsed.error} — case SKIPPED` };
+  if (!parsed.ok) return { ok: false, path, error: `run-side grader ${path} rejected: ${parsed.error} â€” case SKIPPED` };
   return { ok: true, path, grader: parsed.grader };
 }
 
@@ -631,12 +636,12 @@ function readJson(path, fallback) {
   try {
     if (existsSync(path)) return JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    /* corrupt/missing history is not a failure — start fresh */
+    /* corrupt/missing history is not a failure â€” start fresh */
   }
   return fallback;
 }
 
-/** M7 prior evidence for one slug — the LAST recorded history row for that
+/** M7 prior evidence for one slug â€” the LAST recorded history row for that
  *  slug, or null when this is the slug's first run (a new domain therefore
  *  starts with no prior: honest, and stated in the corpus README). `historyPath`
  *  is injectable so the M7-resolution pin can drive a temp history file; the
@@ -651,17 +656,17 @@ export function priorFor(slug, historyPath = HISTORY_PATH) {
 
 function domainMatch(entry, project) {
   const d = entry.domain;
-  if (!d) return null; // no domain declared — nothing to match
+  if (!d) return null; // no domain declared â€” nothing to match
   const hay = `${project.brief ?? ""} ${project.domain ?? ""}`.toLowerCase();
   const tokens = d.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 1);
   if (tokens.length === 0) return null;
   return tokens.every((t) => hay.includes(t)) ? 1 : 0;
 }
 
-/** F4 (fixes/314_f4_outshine · MA §5 move 3 — the hashed verdict): lift the
+/** F4 (fixes/314_f4_outshine Â· MA Â§5 move 3 â€” the hashed verdict): lift the
  *  tree-run verdict into the driver's M2 evidence. `verdictHash` (compile-
  *  check's FNV-1a `treeVerdictHash`, set on every runnable verdict) is carried
- *  through so the persisted scorecard can cite it; absent ⇒ omitted, never
+ *  through so the persisted scorecard can cite it; absent â‡’ omitted, never
  *  invented. Exported for the test suite (the driver self-executes only as the
  *  CLI entry).
  *  @returns {{ok: boolean, dir: string, compileOk: boolean, testsPass: number, testsFail: number, verdictHash?: string, detail?: string, minted?: boolean} | null} */
@@ -691,9 +696,9 @@ export function treeRunToEvidence(outcome) {
     compileOk: outcome.compile ? outcome.compile.ok === true : outcome.ok === true,
     testsPass: specPass,
     testsFail: specFail,
-    // F4 (fixes/314_f4_outshine · MA §5 move 3): the verdict's own hash, when
+    // F4 (fixes/314_f4_outshine Â· MA Â§5 move 3): the verdict's own hash, when
     // the outcome carries one (compile-check sets it on every runnable
-    // verdict); absent ⇒ omitted, never invented.
+    // verdict); absent â‡’ omitted, never invented.
     verdictHash:
       typeof outcome.verdictHash === "string" && outcome.verdictHash.length > 0 ? outcome.verdictHash : undefined,
     detail,
@@ -704,14 +709,14 @@ export function treeRunToEvidence(outcome) {
 // Trials, pass@k / pass^k / flakiness + the grader leak scan (W5-L5 T-107.5).
 // `checkAcceptance` reads files; since fixes/299 (U1) its `entry-runs` rows
 // also run the declared emitted entry through the shared bounded, env-minimal
-// oracle (`src/lib/entry-oracle.ts` — the spawn lives there, one truth with
-// the product path's treeRun) — nothing here writes into an emitted tree.
+// oracle (`src/lib/entry-oracle.ts` â€” the spawn lives there, one truth with
+// the product path's treeRun) â€” nothing here writes into an emitted tree.
 // ---------------------------------------------------------------------------
 
 const round4 = (x) => Math.round(x * 10_000) / 10_000;
 
 /** Binomial coefficient C(n, k); 0 when out of range. Exact for the small n
- *  this driver sees (trials ≤ 9) because the float product is rounded back. */
+ *  this driver sees (trials â‰¤ 9) because the float product is rounded back. */
 export function choose(n, k) {
   if (!Number.isInteger(n) || !Number.isInteger(k) || n < 0 || k < 0 || k > n) return 0;
   let r = 1;
@@ -719,7 +724,7 @@ export function choose(n, k) {
   return Math.round(r);
 }
 
-/** pass@k (OpenAI human-eval reading, 107 §5): P(at least 1 of k trials passes),
+/** pass@k (OpenAI human-eval reading, 107 Â§5): P(at least 1 of k trials passes),
  *  estimated from the observed n trials with c passes as 1 - C(n-c,k)/C(n,k).
  *  `null` when the inputs are not a real trial record (never a fabricated 0). */
 export function passAtK(n, c, k = n) {
@@ -731,7 +736,7 @@ export function passAtK(n, c, k = n) {
   return round4(1 - choose(n - c, kk) / denom);
 }
 
-/** pass^k: P(all k of the k trials pass), estimated as C(c,k)/C(n,k) — the
+/** pass^k: P(all k of the k trials pass), estimated as C(c,k)/C(n,k) â€” the
  *  reliability bar ("solves it reliably", not "solved it once"). */
 export function passCaretK(n, c, k = n) {
   if (!Number.isInteger(n) || n < 1) return null;
@@ -744,13 +749,13 @@ export function passCaretK(n, c, k = n) {
 
 /** Honest trials accounting for one case: a case that flips between trials is
  *  FLAKY (never averaged into a pass). With 1 trial flakiness is not measurably
- *  zero — it is UNMEASURABLE, and the block says so. */
+ *  zero â€” it is UNMEASURABLE, and the block says so. */
 export function trialsSummary(outcomes, opts = {}) {
   const list = Array.isArray(outcomes) ? outcomes.map((o) => o === true) : [];
   const n = list.length;
   const c = list.filter(Boolean).length;
   // Default k = 1 (single-trial success probability). k is clamped to the
-  // observed trial count and BOTH are reported — never a silent substitution.
+  // observed trial count and BOTH are reported â€” never a silent substitution.
   const kRequested = Number.isFinite(opts.k) && opts.k >= 1 ? Math.floor(opts.k) : 1;
   if (n === 0) {
     return {
@@ -781,27 +786,27 @@ export function trialsSummary(outcomes, opts = {}) {
     observedPassRate: round4(c / n),
     flaky: n >= 2 ? c > 0 && c < n : false,
     flakinessMeasurable: n >= 2,
-    note: n >= 2 ? null : "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)",
+    note: n >= 2 ? null : "1 trial â€” flakiness unmeasurable (pass@1 only; use --trials=N â‰¥ 2)",
   };
 }
 
-// (316 I1: the local normalizeEmittedFiles was MOVED to src/lib/entry-oracle.ts —
+// (316 I1: the local normalizeEmittedFiles was MOVED to src/lib/entry-oracle.ts â€”
 // imported at the top; the leftover declaration here was the duplicate-symbol
 // SyntaxError that aborted this driver's leg.)
 
 // ---------------------------------------------------------------------------
-// fixes/299 (U1 — closes the A3-f05 TODO; Q4 item a): `entry-runs` is a REAL,
+// fixes/299 (U1 â€” closes the A3-f05 TODO; Q4 item a): `entry-runs` is a REAL,
 // bounded, honest runtime evaluation. Before this lane the row pushed
-// `pending` and never failed — the acceptance gate's one never-failing clause.
-// W44·A1 (fixes/318): the machinery (budget clamp, stream tail, env allowlist,
+// `pending` and never failed â€” the acceptance gate's one never-failing clause.
+// W44Â·A1 (fixes/318): the machinery (budget clamp, stream tail, env allowlist,
 // the bounded spawn itself) MOVED VERBATIM to the shared oracle
-// `src/lib/entry-oracle.ts` — one truth with the product path's treeRun. The
+// `src/lib/entry-oracle.ts` â€” one truth with the product path's treeRun. The
 // driver keeps this single-row seam as a thin delegate so the eval side and
 // the tree side can never drift.
 // ---------------------------------------------------------------------------
 
-/** fixes/299 (U1): one `entry-runs` row, evaluated for real — delegated to the
- *  shared oracle (`runEntryOracle`): status ∈ { "pass", "fail", "ui-shell" } +
+/** fixes/299 (U1): one `entry-runs` row, evaluated for real â€” delegated to the
+ *  shared oracle (`runEntryOracle`): status âˆˆ { "pass", "fail", "ui-shell" } +
  *  a human detail; bounded spawn over the emitted dir, env-minimal, row budget
  *  clamped (entry-oracle.ts owns the contract). Reads + spawns only; never
  *  writes. */
@@ -809,14 +814,14 @@ export function evaluateEntryRunsRow(row, emittedDir, has) {
   return runEntryOracle(row, emittedDir, has);
 }
 
-/** W40·N4 (§R7-f03/f04) + fixes/299 (U1) + W44·A1 (fixes/318): evaluate the
+/** W40Â·N4 (Â§R7-f03/f04) + fixes/299 (U1) + W44Â·A1 (fixes/318): evaluate the
  *  grader's declared `expectedBehavior` rows against the EMITTED TREE (the
- *  manifest + package.json) — never against text presence in the brief. The
+ *  manifest + package.json) â€” never against text presence in the brief. The
  *  row loop and the record are DELEGATED to the shared oracle
- *  (`checkEntryContract` over `manifestHas`/`manifestFind`) — the module's
+ *  (`checkEntryContract` over `manifestHas`/`manifestFind`) â€” the module's
  *  record shape is byte-identical to what this function has always produced
  *  (key order included; entry-oracle.ts EntryContractRecord). Row statuses:
- *  file-exists / package-target-exists / entry-runs — the RUNTIME row is a
+ *  file-exists / package-target-exists / entry-runs â€” the RUNTIME row is a
  *  REAL bounded, env-minimal spawn (`runEntryOracle`): a broken artifact
  *  FAILS the row, never a silent pass; a ui-shell row reads the verified
  *  structural skip. `ok` = no row FAILED (a ui-shell skip does not fail a
@@ -829,9 +834,9 @@ export function checkExpectedBehavior(grader, emittedDir, emittedFiles) {
   return checkEntryContract(declaredRows, emittedDir, manifestHas(files), manifestFind(files));
 }
 
-/** W40·N4 (§R7-f04): assert the emitted README's Kind line against the
+/** W40Â·N4 (Â§R7-f04): assert the emitted README's Kind line against the
  *  grader's declared `expectedKind`. Returns null when the grader declares no
- *  kind (a v1 grader — nothing to assert). Fail-closed: a tree without a
+ *  kind (a v1 grader â€” nothing to assert). Fail-closed: a tree without a
  *  readable README Kind line FAILS the assertion rather than skipping it. */
 export function checkExpectedKind(grader, emittedDir, emittedFiles) {
   const expected = typeof grader.expectedKind === "string" && grader.expectedKind.trim() ? grader.expectedKind.trim() : null;
@@ -851,7 +856,7 @@ export function checkExpectedKind(grader, emittedDir, emittedFiles) {
       expected,
       actual: null,
       ok: false,
-      reason: "README.md absent/unreadable in the emitted tree — the Kind line cannot be verified",
+      reason: "README.md absent/unreadable in the emitted tree â€” the Kind line cannot be verified",
     };
   }
   const m = text.match(/\*\*Kind:\*\*\s*([a-z-]+)/);
@@ -861,7 +866,7 @@ export function checkExpectedKind(grader, emittedDir, emittedFiles) {
       expected,
       actual,
       ok: false,
-      reason: 'README.md carries no "**Kind:** <kind>" line — the emitted kind cannot be verified',
+      reason: 'README.md carries no "**Kind:** <kind>" line â€” the emitted kind cannot be verified',
     };
   }
   return actual === expected
@@ -870,15 +875,15 @@ export function checkExpectedKind(grader, emittedDir, emittedFiles) {
         expected,
         actual,
         ok: false,
-        reason: `emitted kind "${actual}" ≠ expectedKind "${expected}" — the fixture was mis-kinded (keyword table / declared-kind drop)`,
+        reason: `emitted kind "${actual}" â‰  expectedKind "${expected}" â€” the fixture was mis-kinded (keyword table / declared-kind drop)`,
       };
 }
 
-/** W40·N4: the honest one-line verification label the acceptance record and
+/** W40Â·N4: the honest one-line verification label the acceptance record and
  *  the CLI carry: what was actually verified for this trial. Legacy graders
  *  read "files+content only"; a declared behavior block names its row math.
  *  fixes/299 (U1): a ui-shell structural skip is named (it is neither a pass
- *  nor a failure — the reader must be able to see it). */
+ *  nor a failure â€” the reader must be able to see it). */
 function verificationLabel(behavior) {
   if (!behavior || behavior.declared === 0) return "files+content only";
   const bits = [`${behavior.passed}/${behavior.declared} rows pass`];
@@ -888,9 +893,9 @@ function verificationLabel(behavior) {
   return `files+content+behavior (${bits.join(", ")})`;
 }
 
-/** Run-side acceptance assertions (107 §8 steal): the grader's declared
+/** Run-side acceptance assertions (107 Â§8 steal): the grader's declared
  *  expectedFiles / expectedContent checked against the EMITTED tree by the
- *  driver — declared before the run, applied from outside the tree. W40·N4:
+ *  driver â€” declared before the run, applied from outside the tree. W40Â·N4:
  *  the same record also carries the evaluated `expectedBehavior` rows, the
  *  declared-kind assertion and the honest `verification` label. */
 export function checkAcceptance(grader, emittedDir, emittedFiles) {
@@ -920,7 +925,7 @@ export function checkAcceptance(grader, emittedDir, emittedFiles) {
       if (!text.includes(want.contains)) failedContent.push(`${want.file}: missing ${JSON.stringify(want.contains)}`);
     }
   }
-  // W40·N4: the behavioral + kind halves ride the same acceptance record (all
+  // W40Â·N4: the behavioral + kind halves ride the same acceptance record (all
   // read from OUTSIDE the tree). `behaviorOk` follows checkExpectedBehavior's
   // no-FAILED-row rule; `kindOk` is null when the grader declares no kind.
   const behavior = checkExpectedBehavior(grader, emittedDir, files);
@@ -948,37 +953,37 @@ export function trialEmitDir(outDir, slug, trial, trials) {
 }
 
 // ---------------------------------------------------------------------------
-// W23-L1 (fixes/262) — per-trial MODEL EVIDENCE: the provider call tap +
+// W23-L1 (fixes/262) â€” per-trial MODEL EVIDENCE: the provider call tap +
 // served-id/usage/cost folding + the clean emit target.
 //
 // Run #3's results.json recorded NO model ids and NO usage anywhere: a
 // flash-only run was not verifiable from the row and the spend was invisible
 // (context for this lane). The driver now installs the provider's opt-in call
-// tap (`src/lib/llm/providers/deepseek.ts` `setLlmCallTap` — the one funnel
+// tap (`src/lib/llm/providers/deepseek.ts` `setLlmCallTap` â€” the one funnel
 // every keyed call passes through) once per keyed run, resets it per trial,
 // and folds the trial's records into the row:
-//   servedModels     — every id the provider READ BACK (never the requested
+//   servedModels     â€” every id the provider READ BACK (never the requested
 //                      constant; a refused call served nothing, so it adds none);
-//   usage            — measured {promptTokens, completionTokens, totalTokens}
+//   usage            â€” measured {promptTokens, completionTokens, totalTokens}
 //                      (+ `cachedPromptTokens` when the window reported the
-//                      vendor cache-read split — absent otherwise, never a
+//                      vendor cache-read split â€” absent otherwise, never a
 //                      fabricated 0), folded via the T-107.6 ledger helpers
-//                      (`recordSpend` / `totalTokens` — consume, never
+//                      (`recordSpend` / `totalTokens` â€” consume, never
 //                      recompute);
-//   estimatedCostUsd — an ESTIMATE from caller-supplied per-1M prices
+//   estimatedCostUsd â€” an ESTIMATE from caller-supplied per-1M prices
 //                      (`RAPIDTOOL_PRICE_INPUT_PER_M` / `RAPIDTOOL_PRICE_OUTPUT_PER_M`
 //                      env wins; else the repo's documented list-price row,
-//                      OFF-PEAK cache-miss rates — see the table below),
+//                      OFF-PEAK cache-miss rates â€” see the table below),
 //                      labelled by `costBasis`. An unknown model NEVER gets a
-//                      guessed price (null + reason — 101 §4.5).
+//                      guessed price (null + reason â€” 101 Â§4.5).
 // Nothing is invented when nothing was measured: keyless trials (and a keyed
 // run whose tap could not install) record `usage: null` / `estimatedCostUsd:
-// null` — never fabricated zeros.
+// null` â€” never fabricated zeros.
 // ---------------------------------------------------------------------------
 
 /** Documented DeepSeek list prices (USD per 1M tokens) for the cost ESTIMATE,
  *  from the repo's own research table (`research/multiagent/90_LEAPFROG.md`
- *  §12.3.1 pricing row, [H2]-sourced): OFF-PEAK, cache-MISS input + output.
+ *  Â§12.3.1 pricing row, [H2]-sourced): OFF-PEAK, cache-MISS input + output.
  *  The usage record carries no cache-hit and no peak/off-peak data, so the
  *  estimate is a labelled off-peak/cache-miss figure, not a bill. Both the
  *  request aliases and the vendor-SERVED ids are keyed (the vendor serves
@@ -991,12 +996,12 @@ export const DEEPSEEK_PRICE_TABLE_USD_PER_M = Object.freeze({
 });
 
 const PRICE_BASIS_TABLE =
-  "DeepSeek off-peak cache-miss list rates, USD per 1M tokens (research/multiagent/90_LEAPFROG.md §12.3.1 [H2]) — an estimate, not a bill: peak windows (01:00–04:00 & 06:00–10:00 UTC Mon–Fri) bill 2x and cache-hit reads are cheaper";
+  "DeepSeek off-peak cache-miss list rates, USD per 1M tokens (research/multiagent/90_LEAPFROG.md Â§12.3.1 [H2]) â€” an estimate, not a bill: peak windows (01:00â€“04:00 & 06:00â€“10:00 UTC Monâ€“Fri) bill 2x and cache-hit reads are cheaper";
 
 /** Resolve per-1M prices for a trial's served models: operator env first
  *  (`RAPIDTOOL_PRICE_INPUT_PER_M` / `RAPIDTOOL_PRICE_OUTPUT_PER_M`, the
- *  101 §4.5 `RAPIDTOOL_PRICE_<PREFIX>` idiom), else the documented table.
- *  Returns `{ prices: null, basis }` when no honest price exists — the caller
+ *  101 Â§4.5 `RAPIDTOOL_PRICE_<PREFIX>` idiom), else the documented table.
+ *  Returns `{ prices: null, basis }` when no honest price exists â€” the caller
  *  then records `estimatedCostUsd: null` (never invents a figure). */
 export function resolvePricesForModels(servedModels) {
   const envIn = Number(process.env.RAPIDTOOL_PRICE_INPUT_PER_M);
@@ -1009,16 +1014,16 @@ export function resolvePricesForModels(servedModels) {
   }
   const models = Array.isArray(servedModels) ? servedModels : [];
   if (models.length === 0) {
-    return { prices: null, basis: "no served model id was read back — nothing to price" };
+    return { prices: null, basis: "no served model id was read back â€” nothing to price" };
   }
   const missing = models.filter((m) => !DEEPSEEK_PRICE_TABLE_USD_PER_M[m]);
   if (missing.length > 0) {
     return {
       prices: null,
-      basis: `no documented price for ${missing.join(", ")} — estimatedCostUsd stays null (never invented); set RAPIDTOOL_PRICE_INPUT_PER_M/RAPIDTOOL_PRICE_OUTPUT_PER_M to price it`,
+      basis: `no documented price for ${missing.join(", ")} â€” estimatedCostUsd stays null (never invented); set RAPIDTOOL_PRICE_INPUT_PER_M/RAPIDTOOL_PRICE_OUTPUT_PER_M to price it`,
     };
   }
-  // Mixed-served-model trials take the HIGHER catalogue line (conservative —
+  // Mixed-served-model trials take the HIGHER catalogue line (conservative â€”
   // the estimate never under-bills a flash+pro mix).
   const prices = models
     .map((m) => DEEPSEEK_PRICE_TABLE_USD_PER_M[m])
@@ -1027,7 +1032,7 @@ export function resolvePricesForModels(servedModels) {
 }
 
 /** Fold one trial's provider call records into the row evidence block. Pure.
- *  `null` input means "nothing was measured" (keyless / tap unavailable) —
+ *  `null` input means "nothing was measured" (keyless / tap unavailable) â€”
  *  the caller records nulls rather than zeros. */
 export function llmEvidenceFromCallRecords(records) {
   if (!Array.isArray(records)) return null;
@@ -1043,12 +1048,12 @@ export function llmEvidenceFromCallRecords(records) {
       ledger = recordSpend(ledger, {
         promptTokens: typeof r.promptTokens === "number" ? r.promptTokens : 0,
         completionTokens: typeof r.completionTokens === "number" ? r.completionTokens : 0,
-        // W43/A5 (fixes/309_a5_evdocs.md — B2's "FOR B4" read-side fold): the
+        // W43/A5 (fixes/309_a5_evdocs.md â€” B2's "FOR B4" read-side fold): the
         // vendor cache-read split is forwarded ONLY when the tap record
-        // measured it — absent stays absent, so a legacy record folds to the
+        // measured it â€” absent stays absent, so a legacy record folds to the
         // byte-identical 3-key ledger (`recordSpend` merges it sticky-
         // additive). `cacheMissTokens` is deliberately NOT forwarded: it is
-        // not a `CACHE_LEDGER_FIELD` (a no-op there) — tap-record-only key.
+        // not a `CACHE_LEDGER_FIELD` (a no-op there) â€” tap-record-only key.
         ...(typeof r.cachedPromptTokens === "number" ? { cachedPromptTokens: r.cachedPromptTokens } : {}),
       });
     }
@@ -1058,17 +1063,17 @@ export function llmEvidenceFromCallRecords(records) {
     completionTokens: ledger.completionTokens,
     totalTokens: totalTokens(ledger),
     // W43/A5: measured cache reads are visible to the row when the window
-    // reported them — omitted entirely otherwise (null-when-absent, never a
+    // reported them â€” omitted entirely otherwise (null-when-absent, never a
     // fabricated 0). `estimateCostUsd` prices the cached subset at the full
     // input rate until a documented cached-input price exists (the table
-    // carries none — it over-bills, never under-bills).
+    // carries none â€” it over-bills, never under-bills).
     ...(typeof ledger.cachedPromptTokens === "number" ? { cachedPromptTokens: ledger.cachedPromptTokens } : {}),
   };
   let estimatedCostUsd = null;
   let costBasis;
   if (records.length === 0) {
     estimatedCostUsd = 0;
-    // W24/B2 (fixes/263): name the assumption — an empty window proves the TAP
+    // W24/B2 (fixes/263): name the assumption â€” an empty window proves the TAP
     // observed nothing, which is not the same claim as "the vendor billed
     // nothing" (a call through a non-tapped provider path would not appear
     // here). `llmCalls: 0` below is the measurement; this string must not
@@ -1094,12 +1099,12 @@ export function llmEvidenceFromCallRecords(records) {
 }
 
 /** The active trial's tap buffer (one process = one sequential run, so one
- *  slot is honest — nothing to interleave). */
+ *  slot is honest â€” nothing to interleave). */
 let activeTrialTap = null;
 let llmCallTapInstalled = false;
 
 /** Install the provider call tap once per process (keyed runs only). Returns
- *  false when the provider surface lacks the tap — the caller records nulls
+ *  false when the provider surface lacks the tap â€” the caller records nulls
  *  and says so, never invents usage. */
 export async function installLlmCallTap() {
   if (llmCallTapInstalled) return true;
@@ -1120,7 +1125,7 @@ export function llmCallTapIsInstalled() {
   return llmCallTapInstalled;
 }
 
-/** Open a trial's measurement window (resets the buffer — a crashed trial's
+/** Open a trial's measurement window (resets the buffer â€” a crashed trial's
  *  leftover records can never leak into the next trial's row). */
 export function beginTrialCallTap() {
   activeTrialTap = [];
@@ -1134,8 +1139,8 @@ export function endTrialCallTap() {
 }
 
 /**
- * W23-L1 — the per-trial CLEAN emit target. Run #3 hit `foreign files in emit
- * dir: src/generated/get-property.ts` — a stale tree from an earlier run at
+ * W23-L1 â€” the per-trial CLEAN emit target. Run #3 hit `foreign files in emit
+ * dir: src/generated/get-property.ts` â€” a stale tree from an earlier run at
  * the same path. `--force` would NOT be the honest fix (force KEEPS foreign
  * files, so the tree-run verdict would weight a tree the current run never
  * emitted); instead the driver removes its OWN previous workspace at this
@@ -1155,24 +1160,24 @@ export function prepareCleanEmitDir(dir, outDir = OUT_DIR) {
     return {
       dir: target,
       cleaned: false,
-      note: `refused to clean ${target}: outside the eval out dir ${root} — the driver only cleans its own output tree`,
+      note: `refused to clean ${target}: outside the eval out dir ${root} â€” the driver only cleans its own output tree`,
     };
   }
   if (!existsSync(target)) {
-    return { dir: target, cleaned: false, note: "no prior workspace at this path — first emit into it" };
+    return { dir: target, cleaned: false, note: "no prior workspace at this path â€” first emit into it" };
   }
   try {
     rmSync(target, { recursive: true, force: true });
     return {
       dir: target,
       cleaned: true,
-      note: "prior workspace removed before emit (per-trial clean target — no foreign-file refusal, no mixed trees)",
+      note: "prior workspace removed before emit (per-trial clean target â€” no foreign-file refusal, no mixed trees)",
     };
   } catch (e) {
     return {
       dir: target,
       cleaned: false,
-      note: `clean failed (${e instanceof Error ? e.message : String(e)}) — emit proceeds under the normal foreign-file rules`,
+      note: `clean failed (${e instanceof Error ? e.message : String(e)}) â€” emit proceeds under the normal foreign-file rules`,
     };
   }
 }
@@ -1224,7 +1229,7 @@ export function treeTextFiles(dir, opts = {}) {
 
 /** The strings a run-side grader must never leave inside an emitted tree:
  *  its acceptance bar and its own path/file name. (Required identifiers /
- *  capabilities are NOT markers — the tree is supposed to contain them.) */
+ *  capabilities are NOT markers â€” the tree is supposed to contain them.) */
 export function graderLeakMarkers(grader) {
   const markers = [];
   const bar = typeof grader.acceptanceBar === "string" ? grader.acceptanceBar.trim() : "";
@@ -1256,23 +1261,23 @@ export function graderLeakScan(emittedDir, grader, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// OV-7 (W19-L4) — the grader FREEZE property + the brief leak scan.
+// OV-7 (W19-L4) â€” the grader FREEZE property + the brief leak scan.
 //
-// 107 lesson 5: graders freeze OUTSIDE the agent — a grader written (or edited)
+// 107 lesson 5: graders freeze OUTSIDE the agent â€” a grader written (or edited)
 // after seeing the run it grades is not a grader. Two facts make the recorded
 // bar trustworthy here:
-//   1. LOAD-ONCE — `planTargets` resolves each case's grader exactly once,
+//   1. LOAD-ONCE â€” `planTargets` resolves each case's grader exactly once,
 //      before the first trial; every trial of that case scores against the same
 //      in-memory object (never a per-trial re-read of the file).
-//   2. UNMOVED — the raw bytes of every grader file are fingerprinted before
+//   2. UNMOVED â€” the raw bytes of every grader file are fingerprinted before
 //      the first entry runs and re-verified before results.json / history.json
 //      are written. A byte change mid-run means the bar moved while the run was
 //      in flight: the run is stamped `graderFreeze.ok=false` with the changed
-//      paths, the affected scores are INVALID, and the fact is printed LOUDLY —
+//      paths, the affected scores are INVALID, and the fact is printed LOUDLY â€”
 //      never silently averaged in.
 // FNV-1a is an integrity hash (house rule: not cryptographic): it detects an
 // edit, not an adversary. A file edited and reverted between the two reads is
-// outside this check's reach — that residual is stated, not hidden.
+// outside this check's reach â€” that residual is stated, not hidden.
 // ---------------------------------------------------------------------------
 
 /** Raw-byte fingerprint of one grader file: the bytes an editor mutates. */
@@ -1302,11 +1307,11 @@ export function verifyGraderFreeze(fingerprints) {
   return { checked: fingerprints.length, ok: changed.length === 0, changed };
 }
 
-/** OV-7 leak audit — the AGENT-FACING surface of a corpus case. `graderLeakScan`
+/** OV-7 leak audit â€” the AGENT-FACING surface of a corpus case. `graderLeakScan`
  *  covers the emitted tree; the brief is the OTHER direction grader text can
  *  escape through: `createProject` receives `entry.brief` + `entry.name`, so any
  *  acceptance-bar text (or grader file name) baked into the brief hands the
- *  agent the bar it is graded against (230 §OV-7 trap: "a leak scan that only
+ *  agent the bar it is graded against (230 Â§OV-7 trap: "a leak scan that only
  *  checks the emitted tree misses grader text baked into the *brief*"). Pure;
  *  markers are the grader's own bar + file name (graderLeakMarkers). */
 export function briefLeakScan(entry, grader) {
@@ -1325,15 +1330,15 @@ export function briefLeakScan(entry, grader) {
 }
 
 /** Honest mode notices: what a keyless run does NOT do (and what a `--keyed`
- *  request degrades into without the key). Structurally key-free — only
+ *  request degrades into without the key). Structurally key-free â€” only
  *  booleans enter, so the key value can never be printed. */
 export function keylessSkipNotices({ keyedRequested, hasKey }) {
   const notices = [];
   if (keyedRequested && !hasKey) {
-    notices.push("--keyed requested but DEEPSEEK_API_KEY is unset — falling back to the keyless floor (the key value is never read into any output and never printed)");
+    notices.push("--keyed requested but DEEPSEEK_API_KEY is unset â€” falling back to the keyless floor (the key value is never read into any output and never printed)");
   }
   if (!hasKey) {
-    notices.push("keyless floor: no model calls and no live synthesis — M1..M4 score the deterministic scaffold + the P6 floor journey; no language-model claim is made and no model text is fabricated");
+    notices.push("keyless floor: no model calls and no live synthesis â€” M1..M4 score the deterministic scaffold + the P6 floor journey; no language-model claim is made and no model text is fabricated");
   }
   if (keyedRequested && !hasKey) {
     notices.push("keyed-only stages SKIPPED (not failed, not faked): live P6 synthesis + keyed journey verdict");
@@ -1342,7 +1347,7 @@ export function keylessSkipNotices({ keyedRequested, hasKey }) {
 }
 
 // ---------------------------------------------------------------------------
-// OV-35(a) / OV-27 — the Step-0 preflight: LLM reachability through the P6
+// OV-35(a) / OV-27 â€” the Step-0 preflight: LLM reachability through the P6
 // separate-specifier path (fixes/244, W16-L1).
 //
 // `upgradeP6Keyed` (engine.ts:2851-2885) imports the provider and the codegen
@@ -1351,13 +1356,13 @@ export function keylessSkipNotices({ keyedRequested, hasKey }) {
 // server modules in. The open doubt (226 A1 / fixes/228 D1.1): under the bare
 // Node host the CLI/eval drivers run on, the server-fn `llmStatus` reports
 // configured:false even with a key set and `callModel` needs an
-// AsyncLocalStorage Start context — does the P6 path actually behave? This
+// AsyncLocalStorage Start context â€” does the P6 path actually behave? This
 // probe answers from the SAME specifier idiom, keyless with a dummy key: it
 // proves (i) engine + both specifiers load on this host, (ii) the provider's
-// `configured` probe is true through them, (iii) the wire is REACHED — the
+// `configured` probe is true through them, (iii) the wire is REACHED â€” the
 // vendor answers, and a dummy key makes that answer a 401. What it CANNOT
 // prove without a real key: that a completion returns (model reach) and that a
-// full liveP6Synthesis converges — Step 0 itself measures those.
+// full liveP6Synthesis converges â€” Step 0 itself measures those.
 // ---------------------------------------------------------------------------
 
 const LIB_DIR = join(ROOT, "src", "lib");
@@ -1369,17 +1374,17 @@ function probeErrorText(e) {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** One coded class per preflight ending (OV-35(b), the `235` §2 row-3 pin).
- *  The four demanded endings are class- AND code-distinct: not-configured →
- *  RT_E_LLM_NOT_CONFIGURED · 401 → RT_E_LLM_REJECTED (the registry's own 401
- *  doc) · 402 → RT_E_LLM_NO_BALANCE (W23-L1: the vendor's balance class has
- *  its OWN code — never conflated with the session budget
+/** One coded class per preflight ending (OV-35(b), the `235` Â§2 row-3 pin).
+ *  The four demanded endings are class- AND code-distinct: not-configured â†’
+ *  RT_E_LLM_NOT_CONFIGURED Â· 401 â†’ RT_E_LLM_REJECTED (the registry's own 401
+ *  doc) Â· 402 â†’ RT_E_LLM_NO_BALANCE (W23-L1: the vendor's balance class has
+ *  its OWN code â€” never conflated with the session budget
  *  RT_E_BUDGET_EXHAUSTED or a generic refusal; a broke wallet is not a
- *  budget stop) · 400 →
+ *  budget stop) Â· 400 â†’
  *  RT_E_VALIDATION (the request the vendor received failed its validation; the
- *  detail carries the requested model id — D1.4's drift question). Every other
+ *  detail carries the requested model id â€” D1.4's drift question). Every other
  *  ending classifies too; a `null` code means "not a failure" (wire-ok) or "no
- *  wire evidence" (configured-unprobed). Pure — no network, no env reads.
+ *  wire evidence" (configured-unprobed). Pure â€” no network, no env reads.
  *  The JSDoc param is load-bearing under `checkJs`: a destructured parameter
  *  with any default infers its type from those defaults alone, so `configured`
  *  (no default) would read as an unknown property at every call site.
@@ -1392,7 +1397,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       ok: false,
       wireReached: false,
       detail:
-        "no DEEPSEEK_API_KEY in the environment — the keyed path is off by construction (never faked)",
+        "no DEEPSEEK_API_KEY in the environment â€” the keyed path is off by construction (never faked)",
     };
   }
   if (!wire || wire.attempted !== true) {
@@ -1401,7 +1406,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: null,
       ok: false,
       wireReached: false,
-      detail: "key present and configured:true through the P6 specifiers, but no wire probe ran — wire reach is UNPROVEN",
+      detail: "key present and configured:true through the P6 specifiers, but no wire probe ran â€” wire reach is UNPROVEN",
     };
   }
   if (wire.ok === true) {
@@ -1410,7 +1415,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: null,
       ok: true,
       wireReached: true,
-      detail: `wire reach PROVEN — the vendor answered with a completion${wire.model ? ` (served model ${wire.model})` : ""}${typeof wire.httpStatus === "number" ? ` · HTTP ${wire.httpStatus}` : ""}`,
+      detail: `wire reach PROVEN â€” the vendor answered with a completion${wire.model ? ` (served model ${wire.model})` : ""}${typeof wire.httpStatus === "number" ? ` Â· HTTP ${wire.httpStatus}` : ""}`,
     };
   }
   const status = typeof wire.httpStatus === "number" ? wire.httpStatus : null;
@@ -1420,7 +1425,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: "RT_E_LLM_REJECTED",
       ok: false,
       wireReached: true,
-      detail: "the vendor answered HTTP 401 — the wire IS reached; the KEY was refused (a stale/dummy key reads exactly like this, so do not read any score from a run in this state)",
+      detail: "the vendor answered HTTP 401 â€” the wire IS reached; the KEY was refused (a stale/dummy key reads exactly like this, so do not read any score from a run in this state)",
     };
   if (status === 402)
     return {
@@ -1429,7 +1434,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       ok: false,
       wireReached: true,
       detail:
-        "the vendor answered HTTP 402 — account balance exhausted (Insufficient Balance); the keyed leg CANNOT run (every call would refuse), so NO scored trial may proceed — top up and re-run",
+        "the vendor answered HTTP 402 â€” account balance exhausted (Insufficient Balance); the keyed leg CANNOT run (every call would refuse), so NO scored trial may proceed â€” top up and re-run",
     };
   if (status === 400)
     return {
@@ -1437,7 +1442,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: "RT_E_VALIDATION",
       ok: false,
       wireReached: true,
-      detail: `the vendor answered HTTP 400 — request/params refused (vendor model-id drift reads exactly like this; requested id: ${wire.requestedModel ?? "(unreported)"})`,
+      detail: `the vendor answered HTTP 400 â€” request/params refused (vendor model-id drift reads exactly like this; requested id: ${wire.requestedModel ?? "(unreported)"})`,
     };
   if (status === 422)
     return {
@@ -1445,7 +1450,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: "RT_E_VALIDATION",
       ok: false,
       wireReached: true,
-      detail: "the vendor answered HTTP 422 — request params refused by the vendor",
+      detail: "the vendor answered HTTP 422 â€” request params refused by the vendor",
     };
   if (status === 429)
     return {
@@ -1453,7 +1458,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: "RT_E_LLM_REJECTED",
       ok: false,
       wireReached: true,
-      detail: "the vendor answered HTTP 429 — rate limited; the wire is reached, retry later",
+      detail: "the vendor answered HTTP 429 â€” rate limited; the wire is reached, retry later",
     };
   if (status !== null && status >= 500)
     return {
@@ -1461,11 +1466,11 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: "RT_E_LLM_REJECTED",
       ok: false,
       wireReached: true,
-      detail: `the vendor answered HTTP ${status} — the wire is reached; the provider itself is erroring`,
+      detail: `the vendor answered HTTP ${status} â€” the wire is reached; the provider itself is erroring`,
     };
-  // W24/B2 (fixes/263): only a ≥400 status is a vendor REFUSAL. The old
+  // W24/B2 (fixes/263): only a â‰¥400 status is a vendor REFUSAL. The old
   // unguarded `status !== null` catch-all swallowed every observed sub-400
-  // ending — including a 200 whose content came back EMPTY — as
+  // ending â€” including a 200 whose content came back EMPTY â€” as
   // "provider-refused" before the coded branches below could classify it, so
   // `empty-completion` was UNREACHABLE whenever the status was recorded (it
   // always is, via the probe's recording wrapper). The fundedness probe's own
@@ -1479,9 +1484,9 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: "RT_E_LLM_REJECTED",
       ok: false,
       wireReached: true,
-      detail: `the vendor answered HTTP ${status} — refusal class not pre-enumerated; read the vendor text`,
+      detail: `the vendor answered HTTP ${status} â€” refusal class not pre-enumerated; read the vendor text`,
     };
-  // No HTTP status — transport-level endings.
+  // No HTTP status â€” transport-level endings.
   const wireCode = typeof wire.code === "string" && wire.code ? wire.code : null;
   if (wireCode === "RT_E_LLM_TIMEOUT")
     return {
@@ -1489,7 +1494,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: "RT_E_LLM_TIMEOUT",
       ok: false,
       wireReached: null,
-      detail: "the probe timed out — the wire may or may not have been reached; NOT evidence about quality either way",
+      detail: "the probe timed out â€” the wire may or may not have been reached; NOT evidence about quality either way",
     };
   if (wireCode === "RT_E_NETWORK_UNREACHABLE")
     return {
@@ -1497,7 +1502,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: "RT_E_NETWORK_UNREACHABLE",
       ok: false,
       wireReached: false,
-      detail: "the probe never reached the vendor (DNS/connect) — a keyed run cannot leave this host until the network path exists",
+      detail: "the probe never reached the vendor (DNS/connect) â€” a keyed run cannot leave this host until the network path exists",
     };
   if (wireCode === "RT_E_LLM_NOT_CONFIGURED")
     return {
@@ -1513,9 +1518,9 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       code: "RT_E_LLM_REJECTED",
       ok: false,
       wireReached: true,
-      detail: "the vendor answered but returned no text content — wire reach proven; the model OUTPUT was refused (thinking/truncation class — read the provider's diagnostic)",
+      detail: "the vendor answered but returned no text content â€” wire reach proven; the model OUTPUT was refused (thinking/truncation class â€” read the provider's diagnostic)",
     };
-  // W23-L1 (fixes/262): the provider's own no-balance class — reached when the
+  // W23-L1 (fixes/262): the provider's own no-balance class â€” reached when the
   // 402 status was not observed by the recording wrapper but the coded refusal
   // (or an "Insufficient Balance" body) says the account is unfunded. Same
   // class/code as the status-402 branch above: ONE no-balance ending.
@@ -1526,7 +1531,7 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       ok: false,
       wireReached: true,
       detail:
-        "the provider refused with the no-balance class (Insufficient Balance — the 402 status was not observed by the probe wrapper, but the coded refusal is unambiguous) — NO scored trial may proceed",
+        "the provider refused with the no-balance class (Insufficient Balance â€” the 402 status was not observed by the probe wrapper, but the coded refusal is unambiguous) â€” NO scored trial may proceed",
     };
   return {
     class: "internal",
@@ -1543,22 +1548,22 @@ export function preflightLimits(cls) {
     case "wire-ok":
       return {
         proves: "one completion round-trip through the P6 specifier path (configured + wire + model text)",
-        cannotProve: "that the full liveP6Synthesis journey converges, or that any score is quality — Step 0 measures those",
+        cannotProve: "that the full liveP6Synthesis journey converges, or that any score is quality â€” Step 0 measures those",
       };
     case "auth-rejected":
       return {
         proves: "the wire is reachable from this host and the request shape passes to the auth check",
-        cannotProve: "that the key can run anything (it was refused) — a real key must pass this probe before any keyed reading",
+        cannotProve: "that the key can run anything (it was refused) â€” a real key must pass this probe before any keyed reading",
       };
     case "no-balance":
       return {
         proves: "the wire is reachable from this host and the vendor's billing check answered (HTTP 402)",
-        cannotProve: "that ANY call can succeed (account balance exhausted) — top up before any keyed reading; a run in this state is not a measurement",
+        cannotProve: "that ANY call can succeed (account balance exhausted) â€” top up before any keyed reading; a run in this state is not a measurement",
       };
     case "unreachable":
       return {
         proves: "the probe ran on this host",
-        cannotProve: "any vendor reach (DNS/connect failed) — fix the network path first",
+        cannotProve: "any vendor reach (DNS/connect failed) â€” fix the network path first",
       };
     case "not-configured":
       return {
@@ -1573,22 +1578,22 @@ export function preflightLimits(cls) {
     default:
       return {
         proves: "the probe ran and classified its ending",
-        cannotProve: "anything beyond the reported class — read the class detail",
+        cannotProve: "anything beyond the reported class â€” read the class detail",
       };
   }
 }
 
-/** One-line stdout renderings for the probe (booleans/enums only — the key
+/** One-line stdout renderings for the probe (booleans/enums only â€” the key
  *  VALUE can never appear: nothing key-shaped enters this function). */
 export function formatPreflightLines(p) {
   const lines = [];
-  lines.push(`preflight: OV-27 reachability · configured=${p.configured} · class=${p.class}${p.code ? ` · code ${p.code}` : ""}`);
+  lines.push(`preflight: OV-27 reachability Â· configured=${p.configured} Â· class=${p.class}${p.code ? ` Â· code ${p.code}` : ""}`);
   for (const [name, s] of Object.entries(p.specifiers || {})) {
-    lines.push(`preflight: specifier ${name}: resolved=${s.resolved}${s.error ? ` · ${s.error}` : ""}`);
+    lines.push(`preflight: specifier ${name}: resolved=${s.resolved}${s.error ? ` Â· ${s.error}` : ""}`);
   }
   if (p.wire) {
     lines.push(
-      `preflight: wire attempted=${p.wire.attempted} · httpStatus=${p.wire.httpStatus ?? "n/a"} · ok=${p.wire.ok}${p.wire.code ? ` · code ${p.wire.code}` : ""}${p.wire.error ? ` · ${String(p.wire.error).slice(0, 200)}` : ""}`,
+      `preflight: wire attempted=${p.wire.attempted} Â· httpStatus=${p.wire.httpStatus ?? "n/a"} Â· ok=${p.wire.ok}${p.wire.code ? ` Â· code ${p.wire.code}` : ""}${p.wire.error ? ` Â· ${String(p.wire.error).slice(0, 200)}` : ""}`,
     );
   } else {
     lines.push("preflight: wire not attempted (key not configured or wire probe disabled)");
@@ -1599,7 +1604,7 @@ export function formatPreflightLines(p) {
   return lines;
 }
 
-/** The OV-27 probe. `fetchImpl` is injectable — tests stub it and NEVER hit the
+/** The OV-27 probe. `fetchImpl` is injectable â€” tests stub it and NEVER hit the
  *  network; the wire step runs only when `configured` is true and `wire !==
  *  false`. The key VALUE never enters the result.
  *  @param {{fetchImpl?: typeof fetch | null, wire?: boolean, timeoutMs?: number}} [options] */
@@ -1612,7 +1617,7 @@ export async function probeP6Reachability({ fetchImpl = null, wire = true, timeo
     specifiers: {},
     wire: null,
   };
-  // (1) The engine door — the CLI keyed path starts here (liveLayer → upgradeP6Keyed).
+  // (1) The engine door â€” the CLI keyed path starts here (liveLayer â†’ upgradeP6Keyed).
   try {
     const engine = await import(pathToFileURL(join(LIB_DIR, "engine.ts")).href);
     out.specifiers.engine = {
@@ -1696,27 +1701,27 @@ export async function probeP6Reachability({ fetchImpl = null, wire = true, timeo
 }
 
 // ---------------------------------------------------------------------------
-// W23-L1 (fixes/262) — the FUNDEDNESS probe: the cheapest possible live call
+// W23-L1 (fixes/262) â€” the FUNDEDNESS probe: the cheapest possible live call
 // (maxTokens 1), performed when `--keyed` runs with the key set.
 //
 // The reachability probe above answers "does a request arrive at the vendor".
-// It cannot answer "can this account PAY" — run #3 proved the difference: the
+// It cannot answer "can this account PAY" â€” run #3 proved the difference: the
 // wire was fine, the wallet was empty, and every synthesis call refused with
 // HTTP 402 while the run still produced a scored 3/9 row. This probe is the
 // Step-0 gate that closes that hole: ONE 1-output-token call through the SAME
 // P6 concatenated-specifier provider the keyed leg uses, classified by the
 // SAME `classifyLlmPreflight` (so HTTP 402 is `class: "no-balance"`,
 // `code: RT_E_LLM_NO_BALANCE`). `funded` is the probe's own verdict:
-//   true  — the vendor served (or billed) the call (HTTP 200 / wire-ok /
+//   true  â€” the vendor served (or billed) the call (HTTP 200 / wire-ok /
 //           empty-completion: an answered 200 means the account paid);
-//   false — HTTP 402 / the provider's no-balance class ⇒ A SCORED TRIAL MUST
+//   false â€” HTTP 402 / the provider's no-balance class â‡’ A SCORED TRIAL MUST
 //           NOT RUN (a broke wallet is not a measurement);
-//   null  — the probe cannot answer (401 auth, network, timeout) — reported,
+//   null  â€” the probe cannot answer (401 auth, network, timeout) â€” reported,
 //           never guessed into a pass or a fail.
 // The key VALUE never enters the result (booleans/enums/statuses only).
 // ---------------------------------------------------------------------------
 
-/** One minimal fundedness call. `fetchImpl` is injectable — tests stub it and
+/** One minimal fundedness call. `fetchImpl` is injectable â€” tests stub it and
  *  NEVER hit the network. The key value never enters the result.
  *  @param {{fetchImpl?: typeof fetch | null, timeoutMs?: number}} [options] */
 export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } = {}) {
@@ -1750,13 +1755,13 @@ export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } =
     out.class = "not-configured";
     out.code = "RT_E_LLM_NOT_CONFIGURED";
     out.detail =
-      "no DEEPSEEK_API_KEY in the environment — fundedness is unaskable by construction (never faked)";
+      "no DEEPSEEK_API_KEY in the environment â€” fundedness is unaskable by construction (never faked)";
     return out;
   }
   if (typeof ds.completeDeepSeek !== "function") {
     out.class = "internal";
     out.code = "RT_E_INTERNAL";
-    out.detail = "the provider specifier resolved without completeDeepSeek — cannot probe";
+    out.detail = "the provider specifier resolved without completeDeepSeek â€” cannot probe";
     return out;
   }
   const requestedModel =
@@ -1765,10 +1770,10 @@ export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } =
       : null;
   out.requestedModel = requestedModel;
   const statuses = [];
-  // W45·331-1: the SAME one-shot seam as `probeP6Reachability` above. A probe
+  // W45Â·331-1: the SAME one-shot seam as `probeP6Reachability` above. A probe
   // that defaults to undici's global `fetch` races its TLS teardown handle into
-  // the driver's in-tick `process.exit()` (libuv abort on Node 24/Windows) —
-  // this probe runs in the keyed flow (`main()` → `probeFundedness({})`), so it
+  // the driver's in-tick `process.exit()` (libuv abort on Node 24/Windows) â€”
+  // this probe runs in the keyed flow (`main()` â†’ `probeFundedness({})`), so it
   // must not reintroduce that handle.
   const baseFetch = fetchImpl ?? oneShotFetch;
   const recordingFetch = async (input, init) => {
@@ -1783,7 +1788,7 @@ export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } =
   let result;
   try {
     // THE cheapest call: one output token. maxTokens 1 keeps even a funded
-    // probe at ~1 completion token (+ the prompt) — the smallest possible bill.
+    // probe at ~1 completion token (+ the prompt) â€” the smallest possible bill.
     result = await ds.completeDeepSeek("OK", {
       maxTokens: 1,
       timeoutMs,
@@ -1819,27 +1824,27 @@ export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } =
 }
 
 /** One-line stdout renderings for the fundedness probe (booleans/enums/
- *  statuses only — the key VALUE can never appear: nothing key-shaped enters
- *  this function). W24/B2 (fixes/263): this is the ONE fundedness renderer —
+ *  statuses only â€” the key VALUE can never appear: nothing key-shaped enters
+ *  this function). W24/B2 (fixes/263): this is the ONE fundedness renderer â€”
  *  the call site in `main()` prints these lines instead of hand-rolling a
  *  second, already-drifted copy of line 1 (the old dead-export + duplicate). */
 export function formatFundednessLines(p) {
   const lines = [];
   lines.push(
-    `preflight: fundedness (1-token probe) · configured=${p.configured} · funded=${p.funded === null ? "unknown" : p.funded}${p.class ? ` · class=${p.class}` : ""}${p.code ? ` · code ${p.code}` : ""}${p.httpStatus !== null && p.httpStatus !== undefined ? ` · httpStatus=${p.httpStatus}` : ""}${p.servedModel ? ` · served=${p.servedModel}` : ""}`,
+    `preflight: fundedness (1-token probe) Â· configured=${p.configured} Â· funded=${p.funded === null ? "unknown" : p.funded}${p.class ? ` Â· class=${p.class}` : ""}${p.code ? ` Â· code ${p.code}` : ""}${p.httpStatus !== null && p.httpStatus !== undefined ? ` Â· httpStatus=${p.httpStatus}` : ""}${p.servedModel ? ` Â· served=${p.servedModel}` : ""}`,
   );
   if (p.detail) lines.push(`preflight: fundedness detail: ${p.detail}`);
   if (p.funded === false) {
     lines.push(
-      "preflight: NO-BALANCE — the account cannot pay for a single call; a scored keyed trial will NOT run (top up the account or switch keys and re-run)",
+      "preflight: NO-BALANCE â€” the account cannot pay for a single call; a scored keyed trial will NOT run (top up the account or switch keys and re-run)",
     );
   } else if (p.funded === true) {
     lines.push(
-      `preflight: fundedness proven — the account served a ${p.servedModel ? `"${p.servedModel}" ` : ""}completion (HTTP ${p.httpStatus ?? "200"})`,
+      `preflight: fundedness proven â€” the account served a ${p.servedModel ? `"${p.servedModel}" ` : ""}completion (HTTP ${p.httpStatus ?? "200"})`,
     );
   } else {
     lines.push(
-      "preflight: fundedness unproven — this class cannot answer whether the account can pay; it is neither a pass nor a fail",
+      "preflight: fundedness unproven â€” this class cannot answer whether the account can pay; it is neither a pass nor a fail",
     );
   }
   return lines;
@@ -1849,11 +1854,11 @@ export function formatFundednessLines(p) {
 // The drain: full pipeline with stock-HITL approvals via the driver.
 // ---------------------------------------------------------------------------
 
-/** fixes/237 (C-2 / `223` §4, M9 leg) — is a drain round's outcome TERMINAL?
+/** fixes/237 (C-2 / `223` Â§4, M9 leg) â€” is a drain round's outcome TERMINAL?
  *  The seven `RunOutcome` values live in `src/lib/headless.ts:527`. A round is
  *  terminal when no further round can change the project's fate:
  *  "complete"/"blocked"/"error" are the classic stops and "dod" is the T0.4
- *  hard-DoD stop (headless.ts:587-606 — stopped:true, cursor unmoved; WB-2:
+ *  hard-DoD stop (headless.ts:587-606 â€” stopped:true, cursor unmoved; WB-2:
  *  treating it as progress spun the 80-round guard and ended "stalled", M9=0).
  *  It is NOT terminal for "hitl" (the drain approves the park and continues),
  *  nor for "progress" / "cap" (keep looping under the round guard). Pure +
@@ -1865,16 +1870,16 @@ export function isTerminalDrainOutcome(outcome) {
 }
 
 // ---------------------------------------------------------------------------
-// OV-35(b) — failure-class triage (fixes/244, W16-L1): a coded class for EVERY
-// drain ending and every RunOutcome value. `stalled` was the silent ending —
+// OV-35(b) â€” failure-class triage (fixes/244, W16-L1): a coded class for EVERY
+// drain ending and every RunOutcome value. `stalled` was the silent ending â€”
 // the approve-throw and round-guard stalls returned no code, so the stop
 // evidence fell back to the RT_EVAL_STALL harness label (W15-L2's
 // registry-boundary decision keeps that label out of src/lib/errors.ts as a
-// real code — but it must not be the only record of a stall). Every stall path
+// real code â€” but it must not be the only record of a stall). Every stall path
 // now carries the registry code for its actual cause:
-//   · an unapprovable gate (approve threw)   → RT_E_GATE_PENDING
-//   · the 80-round harness guard             → RT_E_BUDGET_EXHAUSTED
-//   · a post-journey non-complete terminal   → the RunOutcome's own code
+//   Â· an unapprovable gate (approve threw)   â†’ RT_E_GATE_PENDING
+//   Â· the 80-round harness guard             â†’ RT_E_BUDGET_EXHAUSTED
+//   Â· a post-journey non-complete terminal   â†’ the RunOutcome's own code
 // classifyDrainEnding() is the single classifier the drain and the tests share;
 // an UNC coded stall can never classify silently (it reports RT_E_UNKNOWN plus
 // the emitter-bug detail).
@@ -1903,8 +1908,8 @@ export function classifyRunOutcome(outcome) {
 }
 
 /** Classify one drain ending. `position` is drainPipeline's own vocabulary:
- *  p6-gate (intentional handoff) · dod (coded hard stop, C-2) · terminal (a
- *  RunOutcome terminal) · stalled (the failure the triage exists to kill — now
+ *  p6-gate (intentional handoff) Â· dod (coded hard stop, C-2) Â· terminal (a
+ *  RunOutcome terminal) Â· stalled (the failure the triage exists to kill â€” now
  *  always accompanied by a code).
  *  @param {{outcome?: string|null, position?: string|null, code?: string|null}} [ending] */
 export function classifyDrainEnding({ outcome = null, position = null, code = null } = {}) {
@@ -1928,7 +1933,7 @@ export function classifyDrainEnding({ outcome = null, position = null, code = nu
         class: "stalled-uncoded",
         code: typeof code === "string" && /^RT_E_/.test(code) ? code : "RT_E_UNKNOWN",
         ok: false,
-        detail: "a stall reached the classifier without a registry code — that is an emitter bug, reported honestly instead of silently",
+        detail: "a stall reached the classifier without a registry code â€” that is an emitter bug, reported honestly instead of silently",
       };
     }
     default:
@@ -1958,8 +1963,8 @@ function endingRecord({ p, res, approved, onTime, stall, position, code = null }
   };
 }
 
-/** Drive the pipeline to a terminal state — or, with `p6Gate: true`, to the
- *  P6 live edge — approving every parked HITL gate under the harness's
+/** Drive the pipeline to a terminal state â€” or, with `p6Gate: true`, to the
+ *  P6 live edge â€” approving every parked HITL gate under the harness's
  *  autopilot seat (216 TA-2: `approve()` never mints `decidedBy:"human"` for a
  *  machine path; a forceHuman gate therefore STALLS the drain honestly instead
  *  of being overridden by a fabricated human actor), bounded by hard
@@ -1968,10 +1973,10 @@ function endingRecord({ p, res, approved, onTime, stall, position, code = null }
  *
  * `p6Gate` (fixes/147 E3, single-synthesis keyed flow): P5 is the last stock
  * HITL phase before P6, so approving the P5 gate leaves phase 6 READY with
- * priors sealed — the exact P6 live edge driveP6Journey expects. Stopping the
+ * priors sealed â€” the exact P6 live edge driveP6Journey expects. Stopping the
  * FLOOR drain there means the journey is the ONLY phase-6 synthesis (the old
- * keyed flow ran the whole drain live:true — synthesis #1 inside the drain —
- * and then let the journey re-synthesize #2; fixes/146 §2 divergence #4).
+ * keyed flow ran the whole drain live:true â€” synthesis #1 inside the drain â€”
+ * and then let the journey re-synthesize #2; fixes/146 Â§2 divergence #4).
  * `researchLive` (342-2): the post-journey drain passes it so the KEYLESS
  *   bare-Node research overlay runs for research phases (P7/P11) even though
  *   `keyed:false`. Without it the keyed eval never ran P7's live layer, so
@@ -1995,7 +2000,7 @@ export async function drainPipeline(project, { keyed, p6Gate = false, researchLi
       } catch (e) {
         // A stale/phantom gate that cannot be approved = a stalled run. Stop
         // loudly with a code instead of spinning silently (M9). OV-35(b): the
-        // stall carries RT_E_GATE_PENDING — a gate that stays unresolved is
+        // stall carries RT_E_GATE_PENDING â€” a gate that stays unresolved is
         // exactly the registry's meaning for it (the RT_EVAL_STALL label stays
         // only as the last-resort stopCode fallback, never the sole record).
         return endingRecord({
@@ -2015,19 +2020,19 @@ export async function drainPipeline(project, { keyed, p6Gate = false, researchLi
     }
     if (isTerminalDrainOutcome(res.outcome)) {
       if (res.outcome === "dod") {
-        // fixes/237 (C-2 / `223` §4 / WB-2): a hard-DoD stop is TERMINAL. The
-        // T0.4 outcome ("dod", stopped:true — headless.ts:587-606) means
+        // fixes/237 (C-2 / `223` Â§4 / WB-2): a hard-DoD stop is TERMINAL. The
+        // T0.4 outcome ("dod", stopped:true â€” headless.ts:587-606) means
         // enforceDod refused to leave a red-gated phase; nothing can advance,
         // so re-entering this loop for the 80-round guard only appends ~80
         // dod.blocked rows and returns a SILENT "stalled" (M9=0). Stop on the
         // FIRST dod round: the hard-DoD message is the stall evidence and
         // RT_E_GATE_PENDING is the code the wild path already uses for the
-        // same hard block (engine.ts:3571) — M9's loud coded-stop branch.
+        // same hard block (engine.ts:3571) â€” M9's loud coded-stop branch.
         const events = Array.isArray(res.events) ? res.events : [];
         const dodMsg =
           events.filter((e) => typeof e === "string" && e.includes("DoD unmet")).pop() ??
           events[events.length - 1] ??
-          `P${p.currentPhase} DoD unmet — hard gate blocks advance.`;
+          `P${p.currentPhase} DoD unmet â€” hard gate blocks advance.`;
         return endingRecord({
           p,
           res,
@@ -2039,7 +2044,7 @@ export async function drainPipeline(project, { keyed, p6Gate = false, researchLi
         });
       }
       // OV-35(b): a terminal ending carries its RunOutcome's own code (null
-      // only for `complete`) — a `blocked`/`error` end is no longer uncoded.
+      // only for `complete`) â€” a `blocked`/`error` end is no longer uncoded.
       return endingRecord({
         p,
         res,
@@ -2050,9 +2055,9 @@ export async function drainPipeline(project, { keyed, p6Gate = false, researchLi
         code: classifyRunOutcome(res.outcome).code,
       });
     }
-    // progress/cap — keep looping under the round guard.
+    // progress/cap â€” keep looping under the round guard.
   }
-  // OV-35(b): the 80-round guard is a budget exhaustion, coded — not a silent
+  // OV-35(b): the 80-round guard is a budget exhaustion, coded â€” not a silent
   // stall. (Was: no code at all; the stop evidence fell back to RT_EVAL_STALL.)
   return endingRecord({
     p,
@@ -2070,57 +2075,76 @@ export async function drainPipeline(project, { keyed, p6Gate = false, researchLi
 // ---------------------------------------------------------------------------
 
 /**
- * fixes/215: corpus delivery-kind → Project.kind. The corpus frontmatter
- * `kind` is a string contract (webapp/tool/game/cli-tool/library/service/"").
- * Project.kind is the 5-way DeliveryKind "app"|"tool"|"game"|"library"|
- * "service" (types.ts DELIVERY_KINDS — widened from the 3-way E-15 shape by
- * 342-4). Declared non-library kinds MUST become a Project.kind so codegen's
- * tree trigger (singleModuleLibraryKind) does not silently collapse them to
- * the ≤8 single-module path. "library"/"service"/"" stay absent — the honest
- * single-module library path. Never invents a kind the corpus didn't declare.
+ * fixes/215 / W359 (resolve-kind): corpus delivery-kind â†’ Project.kind.
+ *
+ * The corpus frontmatter `kind` is a DECLARED CONTRACT vocabulary
+ * (webapp/app/game/tool/cli-tool/library/service/""); `Project.kind` is the
+ * 5-way DeliveryKind "app"|"tool"|"game"|"library"|"service" (types.ts
+ * DELIVERY_KINDS).
+ *
+ * W359 deleted the local RESOLVER that used to live here (`deliveryKindOf`,
+ * which routed `library`/`service`/`""` to `undefined`): that mapper masked the
+ * exact defect the corpus exists to measure â€” a service fixture's record said
+ * "no kind" while the emitted shape said service, so no measurement could tell
+ * the two apart. This is a VOCABULARY BRIDGE, not a second decision: a declared
+ * word maps 1:1 onto the taxonomy, and the ONE decision (engine.deliveryKindOf)
+ * resolves the brief â€” a declared kind wins inside it, an unknown/empty word
+ * falls through to the scored resolution (never back to the library path).
  */
-function deliveryKindOf(corpusKind) {
-  switch (corpusKind) {
-    case "webapp":
-    case "app":
-      return "app";
-    case "game":
-      return "game";
-    case "tool":
-    case "cli-tool":
-      return "tool";
-    default:
-      return undefined; // library / service / "" → kind absent (library path)
-  }
+const CORPUS_KIND_ALIASES = new Map([
+  ["webapp", "app"],
+  ["app", "app"],
+  ["game", "game"],
+  ["tool", "tool"],
+  ["cli-tool", "tool"],
+  ["library", "library"],
+  ["service", "service"],
+]);
+
+/** The declared corpus kind as a legal DeliveryKind, or null when the frontmatter
+ *  declares nothing this taxonomy knows (the decision is then the engine's). */
+export function declaredCorpusKind(corpusKind) {
+  const key = typeof corpusKind === "string" ? corpusKind.trim().toLowerCase() : "";
+  return CORPUS_KIND_ALIASES.get(key) ?? null;
 }
 
-/** fixes/154 (F1) — parse one p6.synthesis.attempt journal detail ("chunk
- *  N/M · attempt N · <ms>ms · ok|refused|timeout[ · refusal: …]") and answer
+/** The project kind a corpus entry is built with: the DECLARED contract word when
+ *  the frontmatter carries a legal one, else the ONE scored decision over the
+ *  brief alone. Never `undefined` â€” an absent kind is the masking W359 removes,
+ *  and the brief-only call is the pinned form of the decision (see engine.ts
+ *  `kindResolutionOf`). */
+export function projectKindForEntry(entry) {
+  return deliveryKindOf({ brief: entry.brief, kind: declaredCorpusKind(entry.kind), domain: "", lattice: null });
+}
+
+/** fixes/154 (F1) â€” parse one p6.synthesis.attempt journal detail ("chunk
+ *  N/M Â· attempt N Â· <ms>ms Â· ok|refused|timeout[ Â· refusal: â€¦]") and answer
  *  "did this model call come back ok?". The outcome token is the one
- *  immediately after the <ms>ms budget token — a refusal body appended after
- *  " · refusal: " can never be mistaken for it. */
+ *  immediately after the <ms>ms budget token â€” a refusal body appended after
+ *  " Â· refusal: " can never be mistaken for it. */
 function attemptLogOutcomeIsOk(detail) {
   if (typeof detail !== "string") return false;
-  const m = detail.match(/·\s*\d+\s*ms\s*·\s*(ok|refused|timeout)(?:\s*·|$)/);
+  const m = detail.match(/Â·\s*\d+\s*ms\s*Â·\s*(ok|refused|timeout)(?:\s*Â·|$)/);
   return Boolean(m && m[1] === "ok");
 }
 
-/** ONE trial of the full pipeline: fresh project → drain → emit → tree-run →
+/** ONE trial of the full pipeline: fresh project â†’ drain â†’ emit â†’ tree-run â†’
  *  score. W5-L5 T-107.5: the emit dir is per-trial, and every grading input
  *  (identifiers, capabilities, acceptance assertions, pass threshold) comes
- *  from the RUN-SIDE `grader` passed in — never from the corpus frontmatter. */
+ *  from the RUN-SIDE `grader` passed in â€” never from the corpus frontmatter. */
 async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   const { slug } = entry;
   // W23-L1 (fixes/262): open the trial's model-call measurement window BEFORE
   // the first keyed call (the journey's synthesis). Keyless trials never tap.
   if (mode === "keyed") beginTrialCallTap();
-  // fixes/215: corpus `kind` is the delivery contract ("webapp"/"tool"/"game"/
-  // "cli-tool"/"library"/"service"). Map it onto Project.kind ("app"|"tool"|
-  // "game") so keyed synthesis routes to the chunked multi-file tree for every
-  // declared non-library surface — a dropped kind was the single-module leak
-  // (webapp briefs shipped "tree 1 file(s)" + leftover TODO(E-15) job stubs).
-  const kind = deliveryKindOf(entry.kind);
-  const project0 = createProject({ brief: entry.brief, name: entry.name, ...(kind ? { kind } : {}) });
+  // fixes/215 / W359 (resolve-kind): the corpus `kind` contract word ("webapp"/
+  // "app"/"tool"/"cli-tool"/"game"/"library"/"service") bridges onto Project.kind
+  // through the ONE decision â€” a dropped kind was the single-module leak (webapp
+  // briefs shipped "tree 1 file(s)" + leftover TODO(E-15) job stubs), and a
+  // dropped kind was also the MASK (library/service used to be recorded as
+  // "absent" while codegen still routed them as themselves).
+  const kind = projectKindForEntry(entry);
+  const project0 = createProject({ brief: entry.brief, name: entry.name, kind });
 
   // 1) DRAIN. Keyless = the full keyless floor regression (unchanged).
   //    Keyed = SINGLE-SYNTHESIS (fixes/147 E3): drain keyless/floor to the
@@ -2134,7 +2158,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   if (mode === "keyed") {
     const pre = await drainPipeline(project0, { keyed: false, p6Gate: true });
     if (pre.position === "p6-gate") {
-      // THE single keyed synthesis — the verdict that scores M3/M8 is taken
+      // THE single keyed synthesis â€” the verdict that scores M3/M8 is taken
       // from THIS journey, never from a drain-side live P6 (divergence #4).
       journey = await driveP6Journey(pre.p, { budget: JOURNEY_BUDGET });
       const afterJourney = journey && journey.project ? journey.project : pre.p;
@@ -2145,7 +2169,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
         drain.stall = `post-journey drain ended ${drain.res.outcome} (not complete) after the P6 journey verdict`;
       }
     } else {
-      // The floor drain could not reach the P6 gate — the journey never ran;
+      // The floor drain could not reach the P6 gate â€” the journey never ran;
       // whatever stop the drain ended on stands as-is (fixes/237 C-2: a
       // hard-DoD stop is now its own coded terminal position, so a floor
       // hard-stop is loud + coded rather than a silent stall).
@@ -2167,14 +2191,14 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       }
     : null;
 
-  // 2) Emit to research/eval-out/<slug>/ (handover evidence for M6) — ONCE,
+  // 2) Emit to research/eval-out/<slug>/ (handover evidence for M6) â€” ONCE,
   //    at the end, on the final drained project. 216 (T-07 / F-07):
-  //    `redTree:"banner"` — an uncleared red tree-run trail must not abort the
+  //    `redTree:"banner"` â€” an uncleared red tree-run trail must not abort the
   //    benchmark, but it must NOT emit silently either: the emitted README.md
   //    is stamped with the unmissable red-tree banner and the honest
   //    `redTreeBanner` metric rides handover evidence below.
   //
-  //    W23-L1 (fixes/262): the per-trial CLEAN target runs FIRST — the
+  //    W23-L1 (fixes/262): the per-trial CLEAN target runs FIRST â€” the
   //    driver's own prior workspace at this path is removed, so the emit can
   //    never refuse on stale foreign files (run #3's
   //    `src/generated/get-property.ts`) and the tree-run below can never
@@ -2209,18 +2233,18 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       oracleSpec: Boolean(oracleSpecPath),
       oracleSpecBytes,
       // 216 (T-07): true when the emitted README.md carries the red-tree
-      // banner (the tree-run trail's last verdict was red and uncleared) —
+      // banner (the tree-run trail's last verdict was red and uncleared) â€”
       // the eval completes AND records the honest red verdict.
       redTreeBanner: emitResult.redTreeBanner === true,
     };
-    // 3) Tree-run the emitted dir (M2 evidence) — ONCE, at the end.
+    // 3) Tree-run the emitted dir (M2 evidence) â€” ONCE, at the end.
     runOutcome = await treeRun(emitDir);
     treeEv = treeRunToEvidence(runOutcome);
-    // T9.3 promotion (W44 · G3 · applied from fixes/319_f3_promote §C): a
+    // T9.3 promotion (W44 Â· G3 Â· applied from fixes/319_f3_promote Â§C): a
     // green M2 run promotes the emitted artifact's OWN record to the tested
-    // stamp + evidence hash — the handover artifact then carries the machine
+    // stamp + evidence hash â€” the handover artifact then carries the machine
     // verdict it earned. Additive evidence only (`treeRunToEvidence` pins
-    // assert fields, never a frozen key set — run-eval.test.mjs:171-191),
+    // assert fields, never a frozen key set â€” run-eval.test.mjs:171-191),
     // best-effort: the M2 verdict itself stands regardless.
     if (runOutcome && runOutcome.ok === true && treeEv) {
       try {
@@ -2242,7 +2266,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
 
   // 3b) RUN-SIDE ACCEPTANCE (W5-L5 / T-107.5): the grader's declared
   //     expectedFiles / expectedContent are checked against the emitted tree
-  //     from OUTSIDE it, and the tree is scanned for grader leaks — the
+  //     from OUTSIDE it, and the tree is scanned for grader leaks â€” the
   //     emitted project must neither contain nor reference its grader. Both
   //     land in the run evidence; a leak is printed LOUDLY, never swallowed.
   const acceptance = checkAcceptance(
@@ -2253,21 +2277,21 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   const graderLeak = graderLeakScan(emitDir, grader);
   if (graderLeak.leaked) {
     console.log("");
-    console.log(`!!!!! GRADER LEAK — emitted tree of ${slug} (trial ${trial}) carries run-side grader content:`);
+    console.log(`!!!!! GRADER LEAK â€” emitted tree of ${slug} (trial ${trial}) carries run-side grader content:`);
     for (const h of graderLeak.hits.slice(0, 10)) console.log(`      ${h.marker} in ${h.file}`);
     console.log(`      grader file: ${graderPath}`);
     console.log("");
   }
 
-  // OV-7: the agent-facing surface is the OTHER leak direction — the brief must
+  // OV-7: the agent-facing surface is the OTHER leak direction â€” the brief must
   // not carry the bar the case is graded against. Printed once per case (trial
   // 1), recorded on every trial's row.
   const briefLeak = briefLeakScan(entry, grader);
   if (briefLeak.leaked && trial === 1) {
     console.log("");
-    console.log(`!!!!! GRADER TEXT IN THE AGENT-FACING BRIEF — ${slug}:`);
+    console.log(`!!!!! GRADER TEXT IN THE AGENT-FACING BRIEF â€” ${slug}:`);
     for (const h of briefLeak.hits) console.log(`      ${h.marker} in ${h.field}`);
-    console.log("      the agent would read the bar it is graded against — that case's score is not a measurement");
+    console.log("      the agent would read the bar it is graded against â€” that case's score is not a measurement");
     console.log("");
   }
 
@@ -2278,24 +2302,24 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   const refusedCode =
     (logs.find((l) => l && l.event === "p6.synthesis.refused" && typeof l.detail === "string") || {}).detail ||
     null;
-  // fixes/154 (F1) — synthesisSucceeded: did ANY P6 synthesis-model call log
-  // an ok attempt (P1's p6.synthesis.attempt journal, detail "chunk N/M ·
-  // attempt N · <ms>ms · ok|refused|timeout")? Keyed runs: true when ≥1 ok
+  // fixes/154 (F1) â€” synthesisSucceeded: did ANY P6 synthesis-model call log
+  // an ok attempt (P1's p6.synthesis.attempt journal, detail "chunk N/M Â·
+  // attempt N Â· <ms>ms Â· ok|refused|timeout")? Keyed runs: true when â‰¥1 ok
   // attempt exists; false when none (every call refused/timed out, or the
-  // journey never reached a model call) → scoreMaker's floor gate forces
+  // journey never reached a model call) â†’ scoreMaker's floor gate forces
   // M1-M4 = 0, because all green tree/run/mint evidence is then the
   // deterministic floor, never LLM-produced software. Keyless runs leave it
-  // undefined → legacy scoring, byte-identical (keyless makes no model
+  // undefined â†’ legacy scoring, byte-identical (keyless makes no model
   // calls, so the discriminator would be a vacuous false there).
   const synthesisSucceeded =
     mode === "keyed"
       ? logs.some((l) => l && l.event === "p6.synthesis.attempt" && attemptLogOutcomeIsOk(l.detail))
       : undefined;
-  // W23-L1 (fixes/262) — close the trial's measurement window and fold the
-  // provider's own call records (keyed only) into the row evidence. Keyless →
+  // W23-L1 (fixes/262) â€” close the trial's measurement window and fold the
+  // provider's own call records (keyed only) into the row evidence. Keyless â†’
   // null: nothing was measured, so the row records nulls, never zeros.
   // W24/B2 (fixes/263): the fold is ALSO gated on the tap actually being
-  // installed — an uninstalled tap measured nothing, and folding its empty
+  // installed â€” an uninstalled tap measured nothing, and folding its empty
   // list would fabricate `usage:{0,0,0}` / `estimatedCostUsd:0` (see the
   // install site in main()).
   const callRecords = mode === "keyed" ? endTrialCallTap() : null;
@@ -2304,7 +2328,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   );
   // A no-balance ending is signalled by ANY of the trial's own evidence: the
   // tap (the provider's coded refusal), a p6.synthesis.* log detail, or the
-  // journey's refusal string. The trial then ends `no-balance` — NOT a scored
+  // journey's refusal string. The trial then ends `no-balance` â€” NOT a scored
   // `dod` (run #3's shape: wallet at zero, a 3/9 floor card recorded as if a
   // measurement). A broke wallet must never again be scored as a trial.
   const noBalance =
@@ -2315,14 +2339,14 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
         (journeyEv && typeof journeyEv.refusal === "string" && journeyEv.refusal.includes("RT_E_LLM_NO_BALANCE")),
     );
   const sealedFlag = drain.res ? drain.res.sealedWithFailures === true : false;
-  // fixes/237 (C-2): the drain's OWN coded terminal stop wins — a hard-DoD
+  // fixes/237 (C-2): the drain's OWN coded terminal stop wins â€” a hard-DoD
   // stop parks with RT_E_GATE_PENDING (the wild path's code for the same
   // condition, engine.ts:3571), so M9's loud-stop branch reads the code of the
   // stop that actually ended the run. Refusal-synthesis codes and the legacy
   // stall code remain the fallbacks.
   const drainStopCode =
     typeof drain.code === "string" && /^RT_E/.test(drain.code) ? drain.code : null;
-  // W23-L1 (fixes/262): the no-balance ending wins — the coded stop that
+  // W23-L1 (fixes/262): the no-balance ending wins â€” the coded stop that
   // actually explains this trial is the wallet, not the drain's downstream
   // gate code (a 402-saturated keyed leg parks on a hard DoD whose REAL cause
   // is the unfunded account).
@@ -2337,14 +2361,14 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
         : drain.stall
           ? "RT_EVAL_STALL"
           : null;
-  // 342-2 (W56): resolve the prior ONCE — scoreMaker's M7 and the row's
+  // 342-2 (W56): resolve the prior ONCE â€” scoreMaker's M7 and the row's
   // persisted run kind must read the SAME evidence (a first run has no prior).
   const prior = priorFor(slug);
   const runKind = runKindOf(prior);
   const card = scoreMaker({
     project: finalProject,
     // W5-L5 T-107.5: grading inputs come from the RUN-SIDE grader
-    // (scoringCorpusFor) — the corpus frontmatter copies are documentation.
+    // (scoringCorpusFor) â€” the corpus frontmatter copies are documentation.
     corpus: scoringCorpusFor(entry, grader),
     treeRun: treeEv,
     journey: journeyEv,
@@ -2362,12 +2386,12 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   });
 
   // F1 (314): the iterate driver's DECISION rides the row (additive `iterate`
-  // block; see iterateFactsFor — OFF by default, live firing owner-gated, this
+  // block; see iterateFactsFor â€” OFF by default, live firing owner-gated, this
   // leg never regenerates). Recorded from the trial's own card mean + the
   // process session token budget.
   const iterateFacts = iterateFactsFor(card);
 
-  // 5) M1 capability-coverage report (fixes/147 E3 — the divergence-1 signal).
+  // 5) M1 capability-coverage report (fixes/147 E3 â€” the divergence-1 signal).
   //    maker-score stays pure: the coverage MAP is computed here in the driver
   //    (which holds corpus + tree) via maker-score's exported pure probes, so
   //    the report can never drift from the M1 verdict. Every entry persists
@@ -2376,7 +2400,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   //    identifier for a demanded capability = divergence #1 in the flesh).
   const coverage = capabilityCoverage(finalProject, grader.requiredCapabilities);
   // fixes/154 (F1): when synthesisSucceeded === false the floor gate forced
-  // M1=0 regardless of coverage — that zero is the "no LLM software exists"
+  // M1=0 regardless of coverage â€” that zero is the "no LLM software exists"
   // statement, NOT a divergence-1 mapping gap, so the alarm below must not
   // misattribute it. The alarm fires only when LLM content may exist
   // (true/undefined) and a converged keyed journey still left a capability
@@ -2391,14 +2415,14 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       ([cap, files]) => `    covered  ${cap} -> ${files.join(", ")}`,
     );
     console.log("");
-    console.log("!!!!! M1=0 ON A CONVERGED KEYED JOURNEY (divergence-1 capability coverage) —", slug);
-    console.log(`      expectedCapabilities=${grader.requiredCapabilities.length} · tree files=${treeFilesOf(finalProject).length}`);
+    console.log("!!!!! M1=0 ON A CONVERGED KEYED JOURNEY (divergence-1 capability coverage) â€”", slug);
+    console.log(`      expectedCapabilities=${grader.requiredCapabilities.length} Â· tree files=${treeFilesOf(finalProject).length}`);
     for (const line of coveredLines) console.log(line);
     if (coverage.missing.length > 0) {
       console.log(`      MISSING (no identifier in any tree file):`);
       for (const cap of coverage.missing) console.log(`        - ${cap}`);
     } else {
-      console.log("      (no expectedCapabilities demanded — M1=0 comes from another branch)");
+      console.log("      (no expectedCapabilities demanded â€” M1=0 comes from another branch)");
     }
     console.log("");
   }
@@ -2415,7 +2439,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     domain: entry.domain || null,
     domainMatch: domainMatch(entry, finalProject),
     kind: entry.kind || null,
-    // W23-L1 (fixes/262): a no-balance trial ends as its own status — it is
+    // W23-L1 (fixes/262): a no-balance trial ends as its own status â€” it is
     // NOT the drain's downstream `dod`, and it is NOT a measurement.
     status: noBalance ? "no-balance" : drain.res ? drain.res.outcome : "stalled",
     mode,
@@ -2430,15 +2454,15 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     // --- W23-L1 additive keys (keyed-run model/usage/cost evidence) ---
     // servedModels: ids the provider READ BACK (a refusal served nothing).
     // usage/estimatedCostUsd: null when nothing was measured (keyless, or a
-    // keyed run whose tap could not install) — never fabricated zeros.
+    // keyed run whose tap could not install) â€” never fabricated zeros.
     servedModels: llmEvidence ? llmEvidence.servedModels : [],
     usage: llmEvidence ? llmEvidence.usage : null,
     estimatedCostUsd: llmEvidence ? llmEvidence.estimatedCostUsd : null,
     costBasis: llmEvidence
       ? llmEvidence.costBasis
       : mode === "keyed"
-        ? "no measurement — the provider call tap was unavailable this run; usage/cost were NOT recorded (this is not a zero-cost claim)"
-        : "keyless trial — no model call and nothing measured",
+        ? "no measurement â€” the provider call tap was unavailable this run; usage/cost were NOT recorded (this is not a zero-cost claim)"
+        : "keyless trial â€” no model call and nothing measured",
     // --- end W23-L1 additive keys ---
     // --- W5-L5 additive keys ---
     trial,
@@ -2446,12 +2470,12 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     grader: {
       path: graderPath,
       hash: graderHash,
-      // The bar TEXT stays in the run-side grader file only — the evidence
+      // The bar TEXT stays in the run-side grader file only â€” the evidence
       // records its hash + length, never a second copy.
       barChars: grader.acceptanceBar.length,
       requiredIdentifiers: grader.requiredIdentifiers.length,
       requiredCapabilities: grader.requiredCapabilities.length,
-      // W40·N4: the declared-kind + behavior-row facts (evidence, not a copy).
+      // W40Â·N4: the declared-kind + behavior-row facts (evidence, not a copy).
       expectedKind: grader.expectedKind ?? null,
       expectedBehaviorRows: grader.expectedBehavior.length,
     },
@@ -2466,16 +2490,16 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       journey: journeyEv ? journeyEv.outcome : null,
       stall: drain.stall,
       // fixes/237 (C-2): the coded terminal stop (null when the drain had no
-      // code) — the row evidence M9's loud-stop branch cites. W23-L1: a
+      // code) â€” the row evidence M9's loud-stop branch cites. W23-L1: a
       // no-balance trial carries RT_E_LLM_NO_BALANCE here (see above).
       stopCode,
       emitError: handoverEv && !handoverEv.emitted ? handoverEv.emitError ?? null : null,
       p6Refused: refusedSignal,
       // fixes/154 (F1): the floor-gate discriminator this card was scored
-      // under — true = ≥1 ok synthesis attempt, false = none (floor card),
+      // under â€” true = â‰¥1 ok synthesis attempt, false = none (floor card),
       // absent = keyless run (legacy scoring).
       synthesisSucceeded,
-      // W23-L1: the no-balance marker — the trial could not run keyed because
+      // W23-L1: the no-balance marker â€” the trial could not run keyed because
       // the account is unfunded; excluded from scoring (see evaluateEntry).
       ...(noBalance
         ? {
@@ -2490,29 +2514,29 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       emitDirClean: cleanReport,
     },
     // --- F1 (314) additive key: the iterate driver's decision (never engaged
-    // here — the live keyed firing is owner-gated; see iterateFactsFor). ---
+    // here â€” the live keyed firing is owner-gated; see iterateFactsFor). ---
     iterate: iterateFacts,
     // --- end F1 additive key ---
   };
-  // W42·L1-E1 (Q4-c/X2 tail): every entries row carries the funded | unfunded |
-  // unmeasured end class — the SAME classifier history.json's rows use
-  // (`historyEndClass`, one definition — no drift). Both inputs are already on
-  // this object: `acceptance` (pass filled per-trial by evaluateEntry — the
+  // W42Â·L1-E1 (Q4-c/X2 tail): every entries row carries the funded | unfunded |
+  // unmeasured end class â€” the SAME classifier history.json's rows use
+  // (`historyEndClass`, one definition â€” no drift). Both inputs are already on
+  // this object: `acceptance` (pass filled per-trial by evaluateEntry â€” the
   // literal's placeholder `pass:false` classifies identically to either final
   // boolean verdict: a scored keyed trial IS "funded") + `notes.noBalance` (checked
-  // first by the classifier) — so the class computed here cannot drift from
+  // first by the classifier) â€” so the class computed here cannot drift from
   // the row persist() writes. A reader must still tolerate the key's absence
-  // on legacy artifacts (scorecard reader) — never invent a class.
+  // on legacy artifacts (scorecard reader) â€” never invent a class.
   entryRow.endClass = historyEndClass(entryRow, mode);
   return { entryRow, card, acceptance, noBalance };
 }
 
-/** W5-L5 T-107.5 — the run-side pass predicate for one trial: the rubric met
+/** W5-L5 T-107.5 â€” the run-side pass predicate for one trial: the rubric met
  *  the grader's threshold AND every declared run-side assertion held (files /
  *  content / the declared behavior rows / the declared kind). A crash/missing
- *  mean is a FAIL, never a default pass. W40·N4: the behavior and kind clauses
+ *  mean is a FAIL, never a default pass. W40Â·N4: the behavior and kind clauses
  *  only bite on an EXPLICIT failed verdict (`=== false`). fixes/299 (U1):
- *  `entry-runs` rows now really fail (bounded spawn — a broken artifact is
+ *  `entry-runs` rows now really fail (bounded spawn â€” a broken artifact is
  *  `behaviorOk:false`), while a `ui-shell` structural skip is NOT a failure
  *  (and a v1 grader's acceptance object, neither key present, still invents
  *  nothing). */
@@ -2529,11 +2553,11 @@ export function passesAcceptance(row, acceptance, grader) {
 /** 342-2 (W56): the rubric verdict a row is judged on, per its run kind. The
  *  bar (and the criteria a first run legally cannot score) comes from the
  *  grader's declared `passWhen` + the row's own persisted `runKind`; the mean
- *  comparison is maker-score's `meetsRunKindBar` (ONE comparison — never
+ *  comparison is maker-score's `meetsRunKindBar` (ONE comparison â€” never
  *  re-implemented here). A real entryRow always carries `criteria`; a
  *  legacy/synthetic caller without the map falls back to its stored `mean`.
  *  342-2b (verifier A/B): only an EXPLICIT `runKind: "first"` gets the lenient
- *  first-run bar — an absent/unknown kind is judged on the stricter warm bar
+ *  first-run bar â€” an absent/unknown kind is judged on the stricter warm bar
  *  (all nine), so a legacy re-judge cannot clear 8/9 by dropping M7. */
 function rubricMeanForRow(row, grader) {
   const runKind = row && row.runKind === "first" ? "first" : "warm";
@@ -2562,7 +2586,7 @@ function rubricMeanForRow(row, grader) {
   };
 }
 
-/** 255 (W20-L2): the pass verdict above is a boolean asked of SIX clauses —
+/** 255 (W20-L2): the pass verdict above is a boolean asked of SIX clauses â€”
  *  a finite mean, the rubric threshold, the expectedFiles check, the
  *  expectedContent check, the declared behavior rows and the declared kind.
  *  Only some write into the record's shortfall lists, so a threshold-only
@@ -2574,15 +2598,15 @@ function rubricMeanForRow(row, grader) {
  *  verdict. */
 export function acceptanceFailReason(row, acceptance, grader) {
   if (!row || typeof row.mean !== "number" || !Number.isFinite(row.mean)) {
-    return "mean missing — the rubric never produced a number (crashed trial)";
+    return "mean missing â€” the rubric never produced a number (crashed trial)";
   }
   const { runKind, mean, meanAtLeast, excludeCriteria, hasCriteria, ok } = rubricMeanForRow(row, grader);
   if (!ok) {
     if (excludeCriteria.length > 0 && hasCriteria) {
       const scoreable = Object.keys(row.criteria).length - excludeCriteria.length;
-      return `mean ${Number(mean.toFixed(4))} < ${meanAtLeast} over ${scoreable} scoreable criteria (${runKind} run; excluded ${excludeCriteria.join(", ")}) — rubric threshold, files/content are not the cause`;
+      return `mean ${Number(mean.toFixed(4))} < ${meanAtLeast} over ${scoreable} scoreable criteria (${runKind} run; excluded ${excludeCriteria.join(", ")}) â€” rubric threshold, files/content are not the cause`;
     }
-    return `mean ${row.mean} < ${meanAtLeast} (rubric threshold — files/content are not the cause)`;
+    return `mean ${row.mean} < ${meanAtLeast} (rubric threshold â€” files/content are not the cause)`;
   }
   if (grader.passWhen.requireExpectedFiles && acceptance.filesOk !== true) {
     return `expected files missing: ${acceptance.missingFiles.join(", ")}`;
@@ -2597,8 +2621,8 @@ export function acceptanceFailReason(row, acceptance, grader) {
       .slice(0, 3)
       .map((r) => {
         const loc = r.path ? ` (${r.path})` : r.target ? ` (${r.target})` : r.entry ? ` (${r.entry})` : "";
-        // fixes/301 (X2 — Q4-b tail): the failed row's OWN coded detail (exit
-        // code / missing pin / spawn error — what evaluateEntryRunsRow saw)
+        // fixes/301 (X2 â€” Q4-b tail): the failed row's OWN coded detail (exit
+        // code / missing pin / spawn error â€” what evaluateEntryRunsRow saw)
         // must ride the reason; an id alone cannot be acted on. Bounded so a
         // noisy child cannot bloat the record.
         const detail =
@@ -2615,17 +2639,17 @@ export function acceptanceFailReason(row, acceptance, grader) {
 }
 
 /**
- * F1 (314) — the per-trial ITERATE facts (SE2 §4a; additive row key). The
- * bounded iterate-until-satisfaction driver's decision is computed — by the
- * PURE `decideIterate` — against this trial's OWN card mean (the 0..1 rubric
+ * F1 (314) â€” the per-trial ITERATE facts (SE2 Â§4a; additive row key). The
+ * bounded iterate-until-satisfaction driver's decision is computed â€” by the
+ * PURE `decideIterate` â€” against this trial's OWN card mean (the 0..1 rubric
  * scale) plus the process token budget, and recorded on every row. Two
  * honest invariants:
- *   · `wouldFire` is the decision IF a regeneration seam were attached;
- *     `seamAttached:false` and `engaged:false` are recorded explicitly — the
+ *   Â· `wouldFire` is the decision IF a regeneration seam were attached;
+ *     `seamAttached:false` and `engaged:false` are recorded explicitly â€” the
  *     live keyed firing is the owner-gated step (F1 PROVE's run) and this leg
  *     NEVER regenerates anything.
- *   · OFF by default: `RAPIDTOOL_ITERATE_THRESHOLD` unset ⇒ armed:false,
- *     code `iterate.disabled` — the parked owner decision, named per row.
+ *   Â· OFF by default: `RAPIDTOOL_ITERATE_THRESHOLD` unset â‡’ armed:false,
+ *     code `iterate.disabled` â€” the parked owner decision, named per row.
  */
 export function iterateFactsFor(card, { env = process.env, budgetExhausted = null } = {}) {
   const config = readIterateConfig(env);
@@ -2645,16 +2669,16 @@ export function iterateFactsFor(card, { env = process.env, budgetExhausted = nul
     engaged: false,
     configNotes: config.notes,
     note: config.enabled
-      ? `iterate ARMED (threshold ${config.threshold}, max ${config.maxCycles} cycle(s)) — decision ${
-          decision.fire ? "below-threshold → WOULD fire" : `no-fire (${decision.code})`
-        }; live regeneration is owner-gated (F1 PROVE keyed run) — engaged=false, nothing fired by this leg`
-      : `${ITERATE_THRESHOLD_ENV} unset — iterate driver OFF (parked owner decision); decision recorded, nothing fired`,
+      ? `iterate ARMED (threshold ${config.threshold}, max ${config.maxCycles} cycle(s)) â€” decision ${
+          decision.fire ? "below-threshold â†’ WOULD fire" : `no-fire (${decision.code})`
+        }; live regeneration is owner-gated (F1 PROVE keyed run) â€” engaged=false, nothing fired by this leg`
+      : `${ITERATE_THRESHOLD_ENV} unset â€” iterate driver OFF (parked owner decision); decision recorded, nothing fired`,
   };
 }
 
-/** W5-L5 T-107.5 — run TRIALS fresh trials of one case (fresh project + fresh
+/** W5-L5 T-107.5 â€” run TRIALS fresh trials of one case (fresh project + fresh
  *  emit workspace per trial) and summarize honestly. The returned row keeps
- *  trial 1's rubric card (`rowSource: "trial-1"` — documented, never an
+ *  trial 1's rubric card (`rowSource: "trial-1"` â€” documented, never an
  *  average) and carries the `trials` block: pass@1 / pass@k / pass^k /
  *  flakiness over every trial's own run-side pass verdict. */
 async function evaluateEntry(entry, mode, grader, graderPath) {
@@ -2668,16 +2692,16 @@ async function evaluateEntry(entry, mode, grader, graderPath) {
     const durationSec = Number(((Date.now() - t0) / 1000).toFixed(1));
     // W23-L1 (fixes/262): a no-balance trial is NOT scored. Its floor card is
     // preserved as evidence, but `pass` stays null and the trial is excluded
-    // from pass@k / pass^n / flakiness below — a broke wallet never counts as
+    // from pass@k / pass^n / flakiness below â€” a broke wallet never counts as
     // a measurement (run #3's 3/9 read as a score; it was an empty wallet).
     let pass = null;
     let passReason = null;
     if (r.noBalance === true) {
       passReason =
-        "no-balance: the account is unfunded — this trial is NOT a measurement (capability: cannot-run-keyed (account unfunded))";
+        "no-balance: the account is unfunded â€” this trial is NOT a measurement (capability: cannot-run-keyed (account unfunded))";
     } else {
       pass = passesAcceptance(r.entryRow, r.acceptance, grader);
-      // 255 (W20-L2): name the false clause in the record AND the log — a
+      // 255 (W20-L2): name the false clause in the record AND the log â€” a
       // threshold-only failure must not read as an unexplained `pass=no`.
       passReason = acceptanceFailReason(r.entryRow, r.acceptance, grader);
     }
@@ -2693,10 +2717,10 @@ async function evaluateEntry(entry, mode, grader, graderPath) {
       ...r.acceptance.failedContent.slice(0, 2),
     ];
     console.log(
-      `     trial ${trial}/${TRIALS}: ${r.entryRow.status} · ${r.entryRow.total}/9 (mean ${r.entryRow.mean.toFixed(2)}) · pass=${pass === null ? "n/a (no-balance)" : pass ? "yes" : "no"}` +
-        (shortfalls.length > 0 ? ` · acceptance: ${shortfalls.slice(0, 3).join("; ")}` : "") +
-        (passReason !== null ? ` · why: ${passReason}` : "") +
-        ` · ${durationSec}s`,
+      `     trial ${trial}/${TRIALS}: ${r.entryRow.status} Â· ${r.entryRow.total}/9 (mean ${r.entryRow.mean.toFixed(2)}) Â· pass=${pass === null ? "n/a (no-balance)" : pass ? "yes" : "no"}` +
+        (shortfalls.length > 0 ? ` Â· acceptance: ${shortfalls.slice(0, 3).join("; ")}` : "") +
+        (passReason !== null ? ` Â· why: ${passReason}` : "") +
+        ` Â· ${durationSec}s`,
     );
   }
   // W23-L1 (fixes/262): only SCORED trials enter the outcomes vector; an
@@ -2708,10 +2732,10 @@ async function evaluateEntry(entry, mode, grader, graderPath) {
   if (noBalanceTrials > 0) {
     trialsBlock.noBalanceTrials = noBalanceTrials;
     trialsBlock.note =
-      `${noBalanceTrials}/${TRIALS} trial(s) ended no-balance (account unfunded) — excluded from pass@1/pass@k/flakiness (NOT measurements)` +
+      `${noBalanceTrials}/${TRIALS} trial(s) ended no-balance (account unfunded) â€” excluded from pass@1/pass@k/flakiness (NOT measurements)` +
       (trialsBlock.note ? `; ${trialsBlock.note}` : "");
     console.log("");
-    console.log(`!!!!! NO-BALANCE — ${entry.slug}: ${noBalanceTrials}/${TRIALS} trial(s) could not run keyed (account unfunded)`);
+    console.log(`!!!!! NO-BALANCE â€” ${entry.slug}: ${noBalanceTrials}/${TRIALS} trial(s) could not run keyed (account unfunded)`);
     console.log("      those trials are excluded from every score; top up the account and re-run before reading any number");
     console.log("");
   }
@@ -2730,7 +2754,7 @@ async function evaluateEntry(entry, mode, grader, graderPath) {
       status: r.status,
       total: r.total,
       mean: r.mean,
-      // W23-L1 (fixes/262): null = NOT scored (no-balance trial) — distinct
+      // W23-L1 (fixes/262): null = NOT scored (no-balance trial) â€” distinct
       // from a measured `false`; `scored` names it explicitly.
       pass: r.acceptance.pass === null ? null : r.acceptance.pass === true,
       scored: r.acceptance.pass !== null,
@@ -2747,9 +2771,9 @@ async function evaluateEntry(entry, mode, grader, graderPath) {
   };
   if (trialsBlock.flaky === true) {
     console.log("");
-    console.log(`!!!!! FLAKY CASE — ${entry.slug}: ${trialsBlock.passes}/${trialsBlock.trials} trials passed`);
-    console.log(`      pass@1=${trialsBlock.passAt1} · pass@${trialsBlock.kEffective}=${trialsBlock.passAtK} · passAllTrials=${trialsBlock.passAllTrials}`);
-    console.log("      a case that flips between trials is FLAKY — never averaged into a pass");
+    console.log(`!!!!! FLAKY CASE â€” ${entry.slug}: ${trialsBlock.passes}/${trialsBlock.trials} trials passed`);
+    console.log(`      pass@1=${trialsBlock.passAt1} Â· pass@${trialsBlock.kEffective}=${trialsBlock.passAtK} Â· passAllTrials=${trialsBlock.passAllTrials}`);
+    console.log("      a case that flips between trials is FLAKY â€” never averaged into a pass");
     console.log("");
   }
   return { entryRow: row, card: firstCard, trialRows, trialsBlock };
@@ -2777,7 +2801,7 @@ function printTable(rows) {
   console.log(headerLine);
   console.log("-".repeat(headerLine.length));
   for (const { entryRow } of rows) {
-    const dm = entryRow.domainMatch === null ? "·" : String(entryRow.domainMatch);
+    const dm = entryRow.domainMatch === null ? "Â·" : String(entryRow.domainMatch);
     const tb = entryRow.trials;
     const cells = [
       entryRow.slug,
@@ -2785,8 +2809,8 @@ function printTable(rows) {
       ...["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"].map((m) => String(entryRow.criteria[m].score)),
       entryRow.mean.toFixed(2),
       String(entryRow.baseline).slice(0, 12),
-      tb ? String(tb.trials) : "·",
-      tb && typeof tb.passAtK === "number" ? tb.passAtK.toFixed(2) : "·",
+      tb ? String(tb.trials) : "Â·",
+      tb && typeof tb.passAtK === "number" ? tb.passAtK.toFixed(2) : "Â·",
     ];
     console.log(line(cells));
   }
@@ -2798,7 +2822,7 @@ function trialsKEffective(rows) {
   return hit ? hit.entryRow.trials.kEffective : null;
 }
 
-/** W5-L5 T-107.5 — trials/pass@k summary lines (honest: flaky cases named,
+/** W5-L5 T-107.5 â€” trials/pass@k summary lines (honest: flaky cases named,
  *  unmeasurable flakiness at 1 trial stated, grader leaks surfaced). */
 function printTrialsSummary(rows) {
   if (rows.length === 0) return;
@@ -2809,28 +2833,28 @@ function printTrialsSummary(rows) {
     ? withTrials.reduce((a, r) => a + (r.entryRow.trials.passAt1 ?? 0), 0) / withTrials.length
     : 0;
   console.log(
-    `trials: ${TRIALS} per case · k=${K} (effective ≤ trials) · pass@${trialsKEffective(rows) ?? K}: ` +
+    `trials: ${TRIALS} per case Â· k=${K} (effective â‰¤ trials) Â· pass@${trialsKEffective(rows) ?? K}: ` +
       withTrials.map((r) => `${r.entryRow.slug}=${r.entryRow.trials.passAtK.toFixed(2)}`).join(" ") +
-      ` · pass^n(all trials): ` +
+      ` Â· pass^n(all trials): ` +
       withTrials.map((r) => `${r.entryRow.slug}=${r.entryRow.trials.passAllTrials.toFixed(2)}`).join(" "),
   );
-  console.log(`trials: pass@1 mean=${meanPassAt1.toFixed(3)} · flaky=${flaky.length > 0 ? flaky.join(",") : "none"} · grader leaks=${leaked.length > 0 ? leaked.join(",") : "none"}`);
+  console.log(`trials: pass@1 mean=${meanPassAt1.toFixed(3)} Â· flaky=${flaky.length > 0 ? flaky.join(",") : "none"} Â· grader leaks=${leaked.length > 0 ? leaked.join(",") : "none"}`);
   if (TRIALS < 2) {
-    console.log("trials note: flakiness is UNMEASURABLE at 1 trial (pass@1 only) — use --trials=N ≥ 2 for pass@k + flakiness");
+    console.log("trials note: flakiness is UNMEASURABLE at 1 trial (pass@1 only) â€” use --trials=N â‰¥ 2 for pass@k + flakiness");
   }
 }
 
-/** W5-L5 T-107.5 — additive JSON summary block. The legacy keys
+/** W5-L5 T-107.5 â€” additive JSON summary block. The legacy keys
  *  (`entries`, `meanTotal`) keep their meaning; everything here is new. */
 export function buildSummary(rows, skips = [], trials = TRIALS) {
   const cases = rows.length;
   const flaky = rows.filter((r) => r.entryRow.trials && r.entryRow.trials.flaky === true).map((r) => r.entryRow.slug);
   const leaked = rows.filter((r) => r.entryRow.graderLeak && r.entryRow.graderLeak.leaked === true).map((r) => r.entryRow.slug);
-  // W23-L1 (fixes/262): the `trials > 0` guard — a case whose EVERY trial
+  // W23-L1 (fixes/262): the `trials > 0` guard â€” a case whose EVERY trial
   // ended no-balance (0 scored trials, 0 passes) must never satisfy
   // `passes === trials` and read as "passed". Unfunded cases are also named
   // in their own summary list, whose key appears ONLY when non-empty (the
-  // keyless key-set contract for buildSummary holds — W16-L1's pin).
+  // keyless key-set contract for buildSummary holds â€” W16-L1's pin).
   const passed = rows
     .filter((r) => r.entryRow.trials && r.entryRow.trials.trials > 0 && r.entryRow.trials.passes === r.entryRow.trials.trials)
     .map((r) => r.entryRow.slug);
@@ -2846,26 +2870,26 @@ export function buildSummary(rows, skips = [], trials = TRIALS) {
     flakyCases: flaky,
     graderLeaks: leaked,
     ...(unfunded.length > 0
-      ? { noBalanceCases: unfunded, noBalanceNote: "these cases recorded 0 scored trials — the account was unfunded; they are not passes and not failures" }
+      ? { noBalanceCases: unfunded, noBalanceNote: "these cases recorded 0 scored trials â€” the account was unfunded; they are not passes and not failures" }
       : {}),
     skipped: skips.length,
     skips,
   };
 }
 
-/** W40·N4 (L3 item): the END CLASS of one recorded trial, on the
+/** W40Â·N4 (L3 item): the END CLASS of one recorded trial, on the
  *  funded | unfunded | unmeasured axis the campaign reads history by:
- *    "funded"     — a SCORED trial (pass true|false) in a KEYED run: the
+ *    "funded"     â€” a SCORED trial (pass true|false) in a KEYED run: the
  *                   account could pay, the model ran, the verdict is a real
  *                   measurement;
- *    "unfunded"   — a no-balance trial: the wallet refused; never a
+ *    "unfunded"   â€” a no-balance trial: the wallet refused; never a
  *                   measurement (excluded from every score);
- *    "unmeasured" — every other ending: a keyless trial (the deterministic
- *                   floor — real data, but NO WALLET was involved, so it is
+ *    "unmeasured" â€” every other ending: a keyless trial (the deterministic
+ *                   floor â€” real data, but NO WALLET was involved, so it is
  *                   deliberately NOT classed funded), a crashed/skipped
  *                   trial, or a row that never reached a verdict.
  *  Exported so history.json's recorder and the CLI scorecard's reader name
- *  the same classes — one definition, no drift. */
+ *  the same classes â€” one definition, no drift. */
 export function historyEndClass(row, mode) {
   if (row && row.notes && row.notes.noBalance === true) return "unfunded";
   const pass = row && row.acceptance ? row.acceptance.pass : undefined;
@@ -2873,26 +2897,26 @@ export function historyEndClass(row, mode) {
   return "unmeasured";
 }
 
-/** W42·L1-E6(b): the history.json trend is append-only, and the scorecard's M7
- *  prior + trends read it WHOLE — unbounded growth makes every read O(all runs
- *  ever). Keep the newest N rows (200 ≈ years of daily full-corpus runs); older
+/** W42Â·L1-E6(b): the history.json trend is append-only, and the scorecard's M7
+ *  prior + trends read it WHOLE â€” unbounded growth makes every read O(all runs
+ *  ever). Keep the newest N rows (200 â‰ˆ years of daily full-corpus runs); older
  *  rows are dropped from the FILE only, never invented back. Exported so the
  *  bound is pinnable (run-eval.test.mjs) without driving the slow pipeline. */
 export const MAX_HISTORY_ROWS = 200;
 
-/** W42·L1-E6(a): write `value` as pretty JSON onto `target` ATOMICALLY —
+/** W42Â·L1-E6(a): write `value` as pretty JSON onto `target` ATOMICALLY â€”
  *  same-dir temp + rename, styled after writeMarkerAtomic below. A plain
  *  writeFileSync truncates the target before it writes, so a kill mid-write
- *  leaves a torn/0-byte results.json or history.json — and the stale-read
+ *  leaves a torn/0-byte results.json or history.json â€” and the stale-read
  *  class this repo already bit on (W16-L1) reads such a tear as "the previous
  *  run" or as garbage. rename(2) is atomic within one filesystem: a reader
  *  sees the previous bytes or the new ones, never a tear. The serialized
  *  bytes are byte-identical to the previous direct write (same
- *  JSON.stringify(value, null, 2), no trailing newline — the scorecard and the
+ *  JSON.stringify(value, null, 2), no trailing newline â€” the scorecard and the
  *  gate consume these files, formats must not move). Exported for the unit
  *  seam: run-eval.test.mjs drives the failed-rename path (rename(2) onto an
- *  existing directory → EPERM on this host) against a real target. */
-/** True when a pid is alive (EPERM counts — the process exists). */
+ *  existing directory â†’ EPERM on this host) against a real target. */
+/** True when a pid is alive (EPERM counts â€” the process exists). */
 export function evalPidAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -2906,7 +2930,7 @@ export function evalPidAlive(pid) {
  * Reclaim pid-named temp files a crashed earlier run left beside `target`.
  * writeJsonAtomic writes `<target>.<pid>.tmp` then renames; a kill between the
  * two leaves that temp forever (the next run uses a new pid). Sweep only pids
- * that are no longer alive — a concurrent run's temp is never touched.
+ * that are no longer alive â€” a concurrent run's temp is never touched.
  */
 export function sweepStaleJsonTemps(target, { isAlive = evalPidAlive } = {}) {
   const dir = dirname(target);
@@ -2966,7 +2990,7 @@ export function persist(
     corpusDir: CORPUS_DIR,
     // W5-L5 additive: where the run-side acceptance bars came from.
     graderDir: GRADER_DIR,
-    // OV-7 additive: the grader-freeze verdict for this run — { checked, ok,
+    // OV-7 additive: the grader-freeze verdict for this run â€” { checked, ok,
     // changed }; a moved grader invalidates the scores it graded.
     ...(extra.graderFreeze ? { graderFreeze: extra.graderFreeze } : {}),
     entries: rows.map((r) => r.entryRow),
@@ -2976,7 +3000,7 @@ export function persist(
       ...buildSummary(rows, skips),
     },
   };
-  // W42·L1-E6(a): atomic (same-dir tmp + rename) — a kill mid-write can no
+  // W42Â·L1-E6(a): atomic (same-dir tmp + rename) â€” a kill mid-write can no
   // longer tear results.json; the reader sees the previous run or this one.
   writeJsonAtomic(resultsPath, results);
 
@@ -2992,10 +3016,10 @@ export function persist(
         // W5-L5 additive: which trial of how many produced this row.
         trial: typeof t.trial === "number" ? t.trial : 1,
         trials: TRIALS,
-        // W40·N4 (L3 item): tri-state pass — null means NOT scored (an
+        // W40Â·N4 (L3 item): tri-state pass â€” null means NOT scored (an
         // unfunded trial is not a failure); a boolean is a real verdict.
         pass: t.acceptance && typeof t.acceptance.pass === "boolean" ? t.acceptance.pass : null,
-        // W40·N4 (L3 item): the funded | unfunded | unmeasured end class —
+        // W40Â·N4 (L3 item): the funded | unfunded | unmeasured end class â€”
         // see historyEndClass; history rows are only as readable as this axis.
         endClass: historyEndClass(t, mode),
         m1: t.criteria.M1.score,
@@ -3012,20 +3036,20 @@ export function persist(
       });
     }
   }
-  // W42·L1-E6(b): bound the append-only trend — keep the newest
+  // W42Â·L1-E6(b): bound the append-only trend â€” keep the newest
   // MAX_HISTORY_ROWS rows (this run's included) before the atomic write.
   writeJsonAtomic(historyPath, history.slice(-MAX_HISTORY_ROWS));
   return results;
 }
 
 // ---------------------------------------------------------------------------
-// OV-35(c) — kill-safety run marker (WB-6, fixes/244 W16-L1). results.json is
+// OV-35(c) â€” kill-safety run marker (WB-6, fixes/244 W16-L1). results.json is
 // written once at the END of a run (persist, above) and history.json after it;
-// a kill anywhere leaves the PREVIOUS run's results.json on disk — the stale
+// a kill anywhere leaves the PREVIOUS run's results.json on disk â€” the stale
 // 2026-09-17 keyless 6/9 that can be misread as the new result. The marker is
 // written BEFORE the first corpus entry of a KEYED run and finalized only after
 // BOTH persists return; `finishedAt:null` therefore means "this run did not
-// complete — do not read results.json as its result". Keyed-only: the keyless
+// complete â€” do not read results.json as its result". Keyed-only: the keyless
 // leg writes nothing new (byte-identity contract).
 // ---------------------------------------------------------------------------
 
@@ -3037,7 +3061,7 @@ export function markerPathFor(outDir) {
 
 /** Write `marker` onto the marker path ATOMICALLY (same-dir temp + rename).
  *  A plain writeFileSync truncates the target before it writes, so a kill
- *  between the open and the write leaves a 0-byte (or partial) file — and
+ *  between the open and the write leaves a 0-byte (or partial) file â€” and
  *  `runMarkerState` reads an unparseable marker as `none`, i.e. "no run ever",
  *  silently dropping the killed-run warning this marker exists to carry
  *  (W16-L1 / WB-6: the stale results.json then reads as current again).
@@ -3068,7 +3092,7 @@ export function writeRunStartMarker(outDir, info = {}) {
   return marker;
 }
 
-/** Read the marker. Unreadable/absent → null (never throws). */
+/** Read the marker. Unreadable/absent â†’ null (never throws). */
 export function readRunMarker(outDir) {
   try {
     const raw = readFileSync(markerPathFor(outDir), "utf8");
@@ -3088,9 +3112,9 @@ export function finishRunMarker(outDir, patch = {}) {
 }
 
 /** The torn-pair read (WB-6): `unfinished` means a run started and was never
- *  finalized — the results.json on disk may be the PREVIOUS run's and must not
+ *  finalized â€” the results.json on disk may be the PREVIOUS run's and must not
  *  be read as this one's. A marker file that EXISTS but cannot be read/parsed is
- *  `unfinished` too — fail-SAFE, never fail-open: a kill between writeFileSync's
+ *  `unfinished` too â€” fail-SAFE, never fail-open: a kill between writeFileSync's
  *  truncating open and its write left exactly that shape (the atomic write above
  *  makes a tear impossible now), and reading it as `none` ("no run ever")
  *  silently dropped the killed-run warning the marker exists to carry. */
@@ -3107,21 +3131,21 @@ export function runMarkerState(outDir) {
     return {
       state: "unfinished",
       marker: null,
-      note: `${RUN_MARKER_NAME} is present but unreadable / not valid JSON — treat it as a run that started and was never finalized (a kill can leave a torn marker file); any results.json present predates or is torn relative to it and must not be read as this run's result`,
+      note: `${RUN_MARKER_NAME} is present but unreadable / not valid JSON â€” treat it as a run that started and was never finalized (a kill can leave a torn marker file); any results.json present predates or is torn relative to it and must not be read as this run's result`,
     };
   }
   if (marker.done !== true || !marker.finishedAt) {
     return {
       state: "unfinished",
       marker,
-      note: `a run started ${marker.startedAt ?? "(unknown)"} was never finalized (finishedAt:null) — it was killed mid-run; any results.json present predates or is torn relative to it and must not be read as this run's result`,
+      note: `a run started ${marker.startedAt ?? "(unknown)"} was never finalized (finishedAt:null) â€” it was killed mid-run; any results.json present predates or is torn relative to it and must not be read as this run's result`,
     };
   }
   return { state: "finished", marker, note: null };
 }
 
 /** Run the entry loop under the marker: the marker is written BEFORE the first
- *  entry runs (ordering is the pin) and left unfinished — main() finalizes it
+ *  entry runs (ordering is the pin) and left unfinished â€” main() finalizes it
  *  only after BOTH persists return. Keyless: a no-op wrapper that writes
  *  nothing. `runner` is injectable so the ordering is testable durably.
  *  @param {any[]} selected
@@ -3135,7 +3159,7 @@ export async function runWithMarker(selected, { mode, outDir, runner, markerExtr
     if (prev.state === "unfinished") {
       previousUnfinished = prev.marker;
       console.log(
-        `note: an earlier keyed run marker (started ${prev.marker?.startedAt ?? "(marker unreadable)"}) was NEVER finalized — that run was killed; its results.json must not be read as a completed result`,
+        `note: an earlier keyed run marker (started ${prev.marker?.startedAt ?? "(marker unreadable)"}) was NEVER finalized â€” that run was killed; its results.json must not be read as a completed result`,
       );
     }
     writeRunStartMarker(outDir, { mode, entries: selected.length, ...markerExtra });
@@ -3151,61 +3175,61 @@ export async function runWithMarker(selected, { mode, outDir, runner, markerExtr
   return { rows, markerPath, previousUnfinished };
 }
 
-/** OV-35 — the ≤4/9 decision rule (227 §2a item 3; 223's pre-mortem predicts
- *  3–6/9 centred 4–5). A ≤4/9 keyed result is inside the predicted band: the
- *  branch is RE-TRACE (read the log, close the observed zeros) — a blind re-run
+/** OV-35 â€” the â‰¤4/9 decision rule (227 Â§2a item 3; 223's pre-mortem predicts
+ *  3â€“6/9 centred 4â€“5). A â‰¤4/9 keyed result is inside the predicted band: the
+ *  branch is RE-TRACE (read the log, close the observed zeros) â€” a blind re-run
  *  re-measures the same tree and buys nothing. Keyed-only; keyless stays
  *  silent (byte-identity).
  *  @param {{mode?: string, meanOfNine?: number}} [options] */
 export function keyedRunDecision({ mode, meanOfNine } = {}) {
   if (mode !== "keyed") return { branch: "n/a", line: null };
   if (typeof meanOfNine !== "number" || !Number.isFinite(meanOfNine))
-    return { branch: "no-score", line: "no finite score to route — read the run log directly" };
+    return { branch: "no-score", line: "no finite score to route â€” read the run log directly" };
   const of9 = Math.round(meanOfNine * 100) / 100;
   if (of9 <= 4)
     return {
       branch: "retrace-first",
-      line: `${of9}/9 ≤ 4 — inside 223's predicted 3–6 band: RE-TRACE the run log and close the zeros it names (OV-3/OV-4/OV-5 gate on the log) — do NOT re-run blind hoping for a better number; a re-run re-measures the same tree.`,
+      line: `${of9}/9 â‰¤ 4 â€” inside 223's predicted 3â€“6 band: RE-TRACE the run log and close the zeros it names (OV-3/OV-4/OV-5 gate on the log) â€” do NOT re-run blind hoping for a better number; a re-run re-measures the same tree.`,
     };
   if (of9 <= 6)
     return {
       branch: "band-expected",
-      line: `${of9}/9 — within the pre-mortem's predicted 3–6 band: read the log, fix the named zeros, then run #2.`,
+      line: `${of9}/9 â€” within the pre-mortem's predicted 3â€“6 band: read the log, fix the named zeros, then run #2.`,
     };
   return {
     branch: "above-prediction",
-    line: `${of9}/9 — above the predicted band: still read the log for the zeros before publishing any claim.`,
+    line: `${of9}/9 â€” above the predicted band: still read the log for the zeros before publishing any claim.`,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Main — results are data: exit 0 always.
+// Main â€” results are data: exit 0 always.
 // ---------------------------------------------------------------------------
 
 async function main() {
-  // W45·331-1 (Keywright) wiring for the driver: declare the checkout's `.env`
-  // to the provider's key resolver BEFORE any keyed probe or entry — the SAME
+  // W45Â·331-1 (Keywright) wiring for the driver: declare the checkout's `.env`
+  // to the provider's key resolver BEFORE any keyed probe or entry â€” the SAME
   // seam the CLI and scripts/with-app-env.mjs use. Without it the driver read a
   // stale machine-scope DEEPSEEK_API_KEY (the repo `.env` key was never
   // consulted), every keyed call 401'd, and the coded RT_E_LLM_KEY_SHADOWED
   // notice never fired. Keyless runs never read a key (byte-identical). Only a
-  // PATH crosses here — never a secret.
+  // PATH crosses here â€” never a secret.
   if (KEYED) {
     const envFilePath = join(ROOT, ".env");
     if (existsSync(envFilePath)) process.env.RAPIDTOOL_LLM_ENV_FILE = envFilePath;
     keyedOk = resolveProcessKey("DEEPSEEK_API_KEY").effective !== null;
   }
-  // OV-35(a) — standalone probe mode: run the reachability probe and exit (no
+  // OV-35(a) â€” standalone probe mode: run the reachability probe and exit (no
   // corpus walk, no entries). Works keyless (dummy key) and keyed.
   if (process.argv.includes("--preflight")) {
-    console.log(`rapidtool eval · preflight probe (OV-27) · ${new Date().toISOString()}`);
+    console.log(`rapidtool eval Â· preflight probe (OV-27) Â· ${new Date().toISOString()}`);
     const probe = await probeP6Reachability({});
     for (const line of formatPreflightLines(probe)) console.log(line);
-    console.log("exit 0 — the probe reports; a failed probe is data, not a crash");
+    console.log("exit 0 â€” the probe reports; a failed probe is data, not a crash");
     process.exit(0);
   }
-  // W50 · 336-4: an UN-CHOSEN OUT_DIR inside the repo (the bare default) is
-  // refused BEFORE any write — the guard's message names both remedies. Preflight
+  // W50 Â· 336-4: an UN-CHOSEN OUT_DIR inside the repo (the bare default) is
+  // refused BEFORE any write â€” the guard's message names both remedies. Preflight
   // above writes nothing, so it is exempt; `--out` / EVAL_OUT_DIR are explicit.
   const outRefusal = evalOutRefusal(OUT_DIR, { explicit: OUT_EXPLICIT });
   if (outRefusal !== null) {
@@ -3213,19 +3237,19 @@ async function main() {
     process.exit(2);
   }
   const mode = keyedOk ? "keyed" : "keyless";
-  console.log(`rapidtool eval · mode=${mode}${KEYED && !keyedOk ? " (--keyed requested but no usable DEEPSEEK_API_KEY resolved — falling back to keyless)" : ""} · corpus=${CORPUS_DIR}`);
+  console.log(`rapidtool eval Â· mode=${mode}${KEYED && !keyedOk ? " (--keyed requested but no usable DEEPSEEK_API_KEY resolved â€” falling back to keyless)" : ""} Â· corpus=${CORPUS_DIR}`);
   console.log(`out: ${OUT_DIR} (${OUT_EXPLICIT ? "--out / EVAL_OUT_DIR" : "default"})`);
   console.log(
-    `graders: run-side acceptance bars under ${GRADER_DIR} (read by this driver only — never emitted into a project tree) · trials=${TRIALS}` +
-      (TRIALS !== TRIALS_REQUESTED ? ` (--trials=${TRIALS_REQUESTED} invalid or over max ${MAX_TRIALS} → ${TRIALS})` : ""),
+    `graders: run-side acceptance bars under ${GRADER_DIR} (read by this driver only â€” never emitted into a project tree) Â· trials=${TRIALS}` +
+      (TRIALS !== TRIALS_REQUESTED ? ` (--trials=${TRIALS_REQUESTED} invalid or over max ${MAX_TRIALS} â†’ ${TRIALS})` : ""),
   );
   for (const notice of keylessSkipNotices({ keyedRequested: KEYED, hasKey: keyedOk })) {
     console.log(`note: ${notice}`);
   }
   if (TRIALS < 2) {
-    console.log("note: trials=1 — the legacy single-run contract; pass@1 is recorded and flakiness is UNMEASURABLE (use --trials=N ≥ 2)");
+    console.log("note: trials=1 â€” the legacy single-run contract; pass@1 is recorded and flakiness is UNMEASURABLE (use --trials=N â‰¥ 2)");
   } else if (mode === "keyed") {
-    console.log(`note: keyed × trials=${TRIALS} multiplies live model cost — the keyed cost guard below still bounds the target count`);
+    console.log(`note: keyed Ã— trials=${TRIALS} multiplies live model cost â€” the keyed cost guard below still bounds the target count`);
   }
 
   const found = listCorpusEntries();
@@ -3236,20 +3260,20 @@ async function main() {
   for (const s of skipped) console.log(`note: skipping unreadable corpus entry: ${s.reason}`);
 
   if (entries.length === 0) {
-    console.log("note: no corpus entries present at research/eval-corpus — D3 parallel corpus writes may not have landed yet; nothing to evaluate. Results are data, exit 0.");
+    console.log("note: no corpus entries present at research/eval-corpus â€” D3 parallel corpus writes may not have landed yet; nothing to evaluate. Results are data, exit 0.");
     emitEvalRunRow({
       level: "info",
       scope: "eval-run",
       event: "eval.run_end",
-      message: `eval run end (empty corpus) · mode=${mode} · 0 entries`,
+      message: `eval run end (empty corpus) Â· mode=${mode} Â· 0 entries`,
       capture: "run-eval.mjs:2950",
       payload: { mode, entries: 0, empty: true },
     });
 
     mkdirSync(OUT_DIR, { recursive: true });
-    // W44 A5 (bug-hunter · scripts box): this path used a bare writeFileSync
+    // W44 A5 (bug-hunter Â· scripts box): this path used a bare writeFileSync
     // while writeJsonAtomic's own doc-block claims "no bare writeFileSync of
-    // results/history remains" — a kill between the truncating open and the
+    // results/history remains" â€” a kill between the truncating open and the
     // write tears results.json (the stale-read class this repo already bit
     // on: a tear reads as "the previous run"). Same atomic discipline as
     // persist(); `corpusDir` joins the shape for parity with persist()'s
@@ -3265,7 +3289,7 @@ async function main() {
     process.exit(0);
   }
 
-  // W5-L5 T-107.5 — the RUN-SIDE grader decides what is gradeable. A case with
+  // W5-L5 T-107.5 â€” the RUN-SIDE grader decides what is gradeable. A case with
   // no valid grader file is SKIPPED with a reason (recorded in the summary),
   // never scored against an undeclared bar.
   const plan = planTargets(entries, (slug) => loadGrader(slug));
@@ -3275,7 +3299,7 @@ async function main() {
 
   // OV-7 grader freeze: fingerprint every run-side grader BEFORE the first
   // entry runs (same ordering discipline as the keyed run marker) and re-verify
-  // before persist below — a bar that moved mid-run cannot grade that run.
+  // before persist below â€” a bar that moved mid-run cannot grade that run.
   const graderFreezeAtStart = targets.map((t) => ({
     slug: t.entry.slug,
     ...graderFreezeFingerprint(t.graderPath),
@@ -3292,13 +3316,13 @@ async function main() {
     level: "info",
     scope: "eval-run",
     event: "eval.run_start",
-    message: `eval run start · mode=${mode} · ${selected.length} target(s) of ${targets.length} · trials=${TRIALS}`,
+    message: `eval run start Â· mode=${mode} Â· ${selected.length} target(s) of ${targets.length} Â· trials=${TRIALS}`,
     capture: "run-eval.mjs:3001",
     payload: { mode, targets: selected.length, trials: TRIALS },
   });
 
-  // OV-35(a) — the keyed preflight runs BEFORE any entry: a bad key must be a
-  // class, not a quality reading (227 §2a). Keyless legs never probe (no
+  // OV-35(a) â€” the keyed preflight runs BEFORE any entry: a bad key must be a
+  // class, not a quality reading (227 Â§2a). Keyless legs never probe (no
   // network, byte-identical).
   let preflight = null;
   if (keyedOk) {
@@ -3306,39 +3330,39 @@ async function main() {
     for (const line of formatPreflightLines(preflight)) console.log(line);
     if (!preflight.ok) {
       console.log(
-        `PREFLIGHT NOT READY: class=${preflight.class} (${preflight.code ?? "no code"}) — entries below would refuse per call; their scores are NOT a quality signal. Fix the class first.`,
+        `PREFLIGHT NOT READY: class=${preflight.class} (${preflight.code ?? "no code"}) â€” entries below would refuse per call; their scores are NOT a quality signal. Fix the class first.`,
       );
     }
   }
 
-  // W23-L1 — the FUNDEDNESS wire (the run-#3 lesson): after reachability, ask
-  // the one question a 401-class probe cannot answer — does the account have
+  // W23-L1 â€” the FUNDEDNESS wire (the run-#3 lesson): after reachability, ask
+  // the one question a 401-class probe cannot answer â€” does the account have
   // balance? `funded:false` (HTTP 402 / the vendor's no-balance class) must
   // stop the scored trials: a broke wallet is not a measurement (run #3's
   // 3/9 @ 2.6s was an unfunded account, not a regression). `funded:null`
-  // (unaskable: auth/network/timeout) is REPORTED and proceeds — never
+  // (unaskable: auth/network/timeout) is REPORTED and proceeds â€” never
   // guessed into a pass or a fail. The key VALUE never enters the output.
   let fundedness = null;
   if (keyedOk) {
     fundedness = await probeFundedness({});
-    // W24/B2 (fixes/263): the ONE renderer (`formatFundednessLines`) — the
+    // W24/B2 (fixes/263): the ONE renderer (`formatFundednessLines`) â€” the
     // old inline copy had already drifted from it and the helper was a dead
     // export.
     for (const line of formatFundednessLines(fundedness)) console.log(line);
     if (fundedness.funded === false) {
       console.log(
-        `FUNDEDNESS STOP: the account is UNFUNDED (${fundedness.code ?? "no-balance"}) — a scored trial would measure the wallet, not the product. Top up, then re-run. No trial runs; results will record the skip.`,
+        `FUNDEDNESS STOP: the account is UNFUNDED (${fundedness.code ?? "no-balance"}) â€” a scored trial would measure the wallet, not the product. Top up, then re-run. No trial runs; results will record the skip.`,
       );
-      // The existing downstream path records "nothing gradeable" with reasons —
+      // The existing downstream path records "nothing gradeable" with reasons â€”
       // reuse it rather than duplicating the results writer here. W24/B2
       // (fixes/263): that path only records the reasons it is HANDED, so this
-      // stop must record its own skip row — without it the empty results.json
+      // stop must record its own skip row â€” without it the empty results.json
       // carried NO reason (the line above claims "results will record the
       // skip"; it did not).
       skips.push({
         slug: null,
         kind: "account-unfunded",
-        reason: `fundedness probe stopped the run: the account cannot pay (${fundedness.code ?? "no-balance"}) — no scored trial ran; top up and re-run (this is a wallet skip, not a measurement)`,
+        reason: `fundedness probe stopped the run: the account cannot pay (${fundedness.code ?? "no-balance"}) â€” no scored trial ran; top up and re-run (this is a wallet skip, not a measurement)`,
       });
       selected.length = 0;
     }
@@ -3346,11 +3370,11 @@ async function main() {
 
   const rows = [];
   if (selected.length === 0) {
-    console.log("note: nothing gradeable — every corpus entry was skipped above (results recorded with the skip reasons, exit 0)");
+    console.log("note: nothing gradeable â€” every corpus entry was skipped above (results recorded with the skip reasons, exit 0)");
   }
-  // W24/B2 (fixes/263) — THE TAP MUST BE INSTALLED. The W23-L1 per-trial model
+  // W24/B2 (fixes/263) â€” THE TAP MUST BE INSTALLED. The W23-L1 per-trial model
   // evidence (servedModels / usage / estimatedCostUsd) is fed by the provider's
-  // opt-in call tap through `beginTrialCallTap`/`endTrialCallTap` — but nothing
+  // opt-in call tap through `beginTrialCallTap`/`endTrialCallTap` â€” but nothing
   // ever called `installLlmCallTap` (the install has no other call site), so
   // every keyed trial folded an EMPTY record list and recorded `usage:{0,0,0}`
   // + `estimatedCostUsd:0` + "nothing billed": fabricated zeros, exactly what
@@ -3361,8 +3385,8 @@ async function main() {
     tapInstalled = await installLlmCallTap();
     console.log(
       tapInstalled
-        ? "preflight: provider call tap installed — per-trial served-model/usage/cost evidence will be recorded"
-        : "preflight: provider call tap UNAVAILABLE on this host — per-trial model evidence will record nulls (never zeros)",
+        ? "preflight: provider call tap installed â€” per-trial served-model/usage/cost evidence will be recorded"
+        : "preflight: provider call tap UNAVAILABLE on this host â€” per-trial model evidence will record nulls (never zeros)",
     );
   }
   const runner = async ({ entry, grader, graderPath }) => {
@@ -3371,13 +3395,13 @@ async function main() {
       const { entryRow, card, trialRows } = await evaluateEntry(entry, mode, grader, graderPath);
       const tb = entryRow.trials;
       console.log(
-        `ok   ${entry.slug}: ${entryRow.status} · ${entryRow.total}/9 (mean ${entryRow.mean.toFixed(2)}) · ${tb.trials} trial(s) · pass@${tb.kEffective}=${tb.passAtK}${tb.flaky ? " · FLAKY" : ""} · ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+        `ok   ${entry.slug}: ${entryRow.status} Â· ${entryRow.total}/9 (mean ${entryRow.mean.toFixed(2)}) Â· ${tb.trials} trial(s) Â· pass@${tb.kEffective}=${tb.passAtK}${tb.flaky ? " Â· FLAKY" : ""} Â· ${((Date.now() - t0) / 1000).toFixed(1)}s`,
       );
-      // OV-35(b): a non-complete ending is never silent — its code is printed
+      // OV-35(b): a non-complete ending is never silent â€” its code is printed
       // where the row is printed (complete rows stay byte-identical).
       if (entryRow.status !== "complete" && entryRow.notes && entryRow.notes.stopCode) {
         console.log(
-          `     ending: ${entryRow.status} · code ${entryRow.notes.stopCode} — classified (see notes.stall in the row)`,
+          `     ending: ${entryRow.status} Â· code ${entryRow.notes.stopCode} â€” classified (see notes.stall in the row)`,
         );
       }
       return { entryRow, card, trialRows };
@@ -3404,7 +3428,7 @@ async function main() {
           grader: { path: graderPath, hash: String(fnv1a(JSON.stringify(grader))) },
           perTrial: [],
           notes: { error: msg.slice(0, 300), trialsCrashed: true },
-          // W42·L1-E1: a crashed/skipped trial never reached a verdict — by
+          // W42Â·L1-E1: a crashed/skipped trial never reached a verdict â€” by
           // the classifier's own doc (historyEndClass) it is "unmeasured",
           // never fabricated into funded/unfunded.
           endClass: "unmeasured",
@@ -3414,7 +3438,7 @@ async function main() {
       };
     }
   };
-  // OV-35(c) — the keyed run marker is written BEFORE the first corpus entry
+  // OV-35(c) â€” the keyed run marker is written BEFORE the first corpus entry
   // and left unfinished until both persists below return (WB-6).
   const ran = await runWithMarker(selected, {
     mode,
@@ -3427,7 +3451,7 @@ async function main() {
   // OV-7 grader freeze verification: the bar must not have moved while the run
   // was in flight. Each row is stamped with the fingerprint its grader carried
   // at run start + the run-level verdict; a moved grader is printed LOUDLY and
-  // recorded (results.json.graderFreeze) — the affected scores are invalid.
+  // recorded (results.json.graderFreeze) â€” the affected scores are invalid.
   const graderFreeze = verifyGraderFreeze(graderFreezeAtStart);
   const startFpBySlug = new Map(graderFreezeAtStart.map((f) => [f.slug, f]));
   for (const r of ran.rows) {
@@ -3439,11 +3463,11 @@ async function main() {
   }
   if (!graderFreeze.ok) {
     console.log("");
-    console.log("!!!!! GRADER MOVED MID-RUN — the acceptance bar changed while the run was in flight:");
+    console.log("!!!!! GRADER MOVED MID-RUN â€” the acceptance bar changed while the run was in flight:");
     for (const c of graderFreeze.changed) {
       console.log(`      ${c.slug ?? c.path}: ${c.reason} (hash ${c.hashAtStart ?? "?"} -> ${c.hashNow ?? "unreadable"})`);
     }
-    console.log("      the scores recorded for the affected cases are INVALID — re-run against a frozen grader");
+    console.log("      the scores recorded for the affected cases are INVALID â€” re-run against a frozen grader");
     console.log("");
   }
 
@@ -3452,7 +3476,7 @@ async function main() {
   printTrialsSummary(rows);
   const results = persist(rows, mode, skips, { graderFreeze });
   if (mode === "keyed") {
-    // OV-35 — the ≤4/9 decision rule: the score is routed to a named branch
+    // OV-35 â€” the â‰¤4/9 decision rule: the score is routed to a named branch
     // (re-trace vs band-expected vs above) instead of a bare number.
     const decision = keyedRunDecision({ mode, meanOfNine: results.summary.meanTotal * 9 });
     if (decision.line) console.log(`decision: ${decision.line}`);
@@ -3461,7 +3485,7 @@ async function main() {
       meanOfNine: Number((results.summary.meanTotal * 9).toFixed(4)),
       decision: decision.branch,
       preflightClass: preflight ? preflight.class : null,
-      // W40·N4 (L3 item — finalize-after-persist): this call site is reached
+      // W40Â·N4 (L3 item â€” finalize-after-persist): this call site is reached
       // ONLY after persist() returned (results.json, then history.json were
       // written in that order). The two flags are read from the filesystem at
       // finalize time, never hardcoded: if a file were absent here, the marker
@@ -3470,14 +3494,14 @@ async function main() {
       historyWritten: existsSync(HISTORY_PATH),
     });
     console.log(
-      "marker: keyed run finalized (finishedAt set) — results.json AND history.json are both written; a killed run would have left finishedAt:null",
+      "marker: keyed run finalized (finishedAt set) â€” results.json AND history.json are both written; a killed run would have left finishedAt:null",
     );
   }
   emitEvalRunRow({
     level: "info",
     scope: "eval-run",
     event: "eval.run_end",
-    message: `eval run end · mode=${mode} · ${rows.length} entr${rows.length === 1 ? "y" : "ies"} · meanOfNine=${Number((results.summary.meanTotal * 9).toFixed(4))} · skips=${skips.length}`,
+    message: `eval run end Â· mode=${mode} Â· ${rows.length} entr${rows.length === 1 ? "y" : "ies"} Â· meanOfNine=${Number((results.summary.meanTotal * 9).toFixed(4))} Â· skips=${skips.length}`,
     capture: "run-eval.mjs:3186",
     payload: {
       mode,
@@ -3486,13 +3510,13 @@ async function main() {
       skips: skips.length,
     },
   });
-  console.log(`\nwrote ${RESULTS_PATH} · ${results.entries.length} entr${results.entries.length === 1 ? "y" : "ies"} · history appended to ${HISTORY_PATH}`);
-  if (skips.length > 0) console.log(`skips recorded: ${skips.length} — ${skips.map((s) => s.slug ?? "corpus").join(", ")}`);
-  console.log("exit 0 — results are data, not failures");
+  console.log(`\nwrote ${RESULTS_PATH} Â· ${results.entries.length} entr${results.entries.length === 1 ? "y" : "ies"} Â· history appended to ${HISTORY_PATH}`);
+  if (skips.length > 0) console.log(`skips recorded: ${skips.length} â€” ${skips.map((s) => s.slug ?? "corpus").join(", ")}`);
+  console.log("exit 0 â€” results are data, not failures");
   process.exit(0);
 }
 
-/** Run the driver only when executed directly (`npm run eval`) — importing this
+/** Run the driver only when executed directly (`npm run eval`) â€” importing this
  *  module (scripts/run-eval.test.mjs) must never start an eval run. W5-L5. */
 const isMainModule = (() => {
   try {
@@ -3503,11 +3527,11 @@ const isMainModule = (() => {
 })();
 
 /**
- * The fatal-crash tombstone (W52 · A5 / bug16). Re-derives the out-dir guard
+ * The fatal-crash tombstone (W52 Â· A5 / bug16). Re-derives the out-dir guard
  * HERE, because `main()`'s refusal runs late: a crash BEFORE it (key resolution,
  * argument parsing) used to write a tombstone into the bare default
  * `research/eval-out/`, rewriting tracked files the guard exists to protect.
- * No verdict, no rewrite — and the write is atomic, so a kill mid-write can
+ * No verdict, no rewrite â€” and the write is atomic, so a kill mid-write can
  * never leave a torn `results.json` that reads as "the previous run".
  *
  * B1-F10: exported (with its paths as a seam) so the contract is testable by
@@ -3540,7 +3564,7 @@ if (isMainModule) {
     try {
       const tombstone = writeCrashTombstone(e);
       if (tombstone.refused) {
-        console.error(`eval driver crashed before the out-dir guard — not writing a tombstone: ${tombstone.message}`);
+        console.error(`eval driver crashed before the out-dir guard â€” not writing a tombstone: ${tombstone.message}`);
       }
     } catch {
       /* nowhere to write */
@@ -3549,7 +3573,7 @@ if (isMainModule) {
       level: "error",
       scope: "eval-run",
       event: "eval.run_error",
-      message: `eval driver crashed · ${e instanceof Error ? e.message : String(e)}`,
+      message: `eval driver crashed Â· ${e instanceof Error ? e.message : String(e)}`,
       capture: "run-eval.mjs:3225",
       payload: { mode: keyedOk ? "keyed" : "keyless" },
     });

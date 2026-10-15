@@ -1,5 +1,6 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// dod.test.ts — W48 / 334-3 "Transit": the P6 DoD probe vs an UNVERIFIED tree.
+// dod.test.ts â€” W48 / 334-3 "Transit": the P6 DoD probe vs an UNVERIFIED tree.
 //
 // The DoD registry lives in dod.ts; its long-standing behavioural tests live in
 // gates.test.ts. This file pins the W48 T1b decision that gates.test.ts cannot:
@@ -10,7 +11,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -47,8 +48,8 @@ import type { TreeRunOutcome } from "./compile-check.server.ts";
 const base = (): Project => emptyProject({ name: "Dod334", brief: "A dispatch board for field service." });
 
 /**
- * A green tree-run outcome that EXECUTED its spec(s) — the shape the P6 journey
- * feeds `mintTreeRunTested` — but whose declared package.json scripts did not
+ * A green tree-run outcome that EXECUTED its spec(s) â€” the shape the P6 journey
+ * feeds `mintTreeRunTested` â€” but whose declared package.json scripts did not
  * run. `declaredScriptsVerified:false` + `unverifiedDeclaredScripts` is exactly
  * what compile-check.server's `treeRun` reports for a fresh, uninstalled tree.
  */
@@ -65,7 +66,7 @@ const greenUnverifiedOutcome = (over: Partial<TreeRunOutcome> = {}): TreeRunOutc
         run: "pass",
       },
     ],
-    run: { kind: "ui-shell", run: "skip", detail: "UI shell — not executable headless" },
+    run: { kind: "ui-shell", run: "skip", detail: "UI shell â€” not executable headless" },
     declaredScriptsVerified: false,
     unverifiedDeclaredScripts: ["typecheck", "build"],
     ...over,
@@ -73,7 +74,7 @@ const greenUnverifiedOutcome = (over: Partial<TreeRunOutcome> = {}): TreeRunOutc
 
 const met = (p: Project, id: string): boolean => !runGate(p, 6).unmet.some((g) => g.id === id);
 
-describe("W48 / 334-3 (T1b) — p6-test / p6-verified vs an unverified declared toolchain", () => {
+describe("W48 / 334-3 (T1b) â€” p6-test / p6-verified vs an unverified declared toolchain", () => {
   it("a GREEN executed tree-run whose declared typecheck/build never ran still mints the tested verdict the P6 DoD requires", () => {
     const minted = mintTreeRunTested(base(), greenUnverifiedOutcome());
     const lt = minted.lastTest as { label?: string; detail?: string; evidenceHash?: string } | null;
@@ -81,13 +82,13 @@ describe("W48 / 334-3 (T1b) — p6-test / p6-verified vs an unverified declared 
     assert.match(String(lt?.detail), /tree-run green/, "the stamp records the executed run, not a bare label");
 
     // The honest line: the criteria measure the EXECUTED self-test / machine-run
-    // verdict over the tree's own specs — which genuinely ran green — so they are
+    // verdict over the tree's own specs â€” which genuinely ran green â€” so they are
     // met. They do NOT attest the declared project toolchain.
     assert.equal(met(minted, "p6-test"), true, "the executed self-test passed");
     assert.equal(met(minted, "p6-verified"), true, "a machine run promoted a genuinely executed tested verdict");
   });
 
-  it("the DoD verdict is deliberately blind to declaredScriptsVerified — the limit is carried by the artifact/envelope, not folded into a criterion", () => {
+  it("the DoD verdict is deliberately blind to declaredScriptsVerified â€” the limit is carried by the artifact/envelope, not folded into a criterion", () => {
     // Same green, executed run; the ONLY difference is the declared-script state.
     const verified = mintTreeRunTested(
       base(),
@@ -98,23 +99,23 @@ describe("W48 / 334-3 (T1b) — p6-test / p6-verified vs an unverified declared 
     assert.deepEqual(
       p6Ids(unverified),
       p6Ids(verified),
-      "the declared-toolchain state must not change any P6 DoD outcome — requiring it would be unsatisfiable on a fresh tree and would block the P6 mint",
+      "the declared-toolchain state must not change any P6 DoD outcome â€” requiring it would be unsatisfiable on a fresh tree and would block the P6 mint",
     );
     // 2026-10-06 correction (concurrent lane A1-E13): the tested stamp NOW
     // EXPOSES the declared-toolchain state (`declaredScriptsVerified`) so the
     // limit rides the artifact/envelope loudly. The pin is that it never reaches
     // a criterion: the identical p6- outcome above holds while the stamp's own
     // field differs between the two fixtures. The pre-A1-E13 assertion that the
-    // field was absent is therefore superseded — it pinned the old shape, not
+    // field was absent is therefore superseded â€” it pinned the old shape, not
     // the honesty property.
     const declaredField = (p: Project): unknown =>
       (p.lastTest as { declaredScriptsVerified?: unknown } | null)?.declaredScriptsVerified;
     assert.equal(declaredField(unverified), false, "the stamp exposes declaredScriptsVerified=false (A1-E13)");
-    assert.equal(declaredField(verified), true, "…and true for the verified fixture");
+    assert.equal(declaredField(verified), true, "â€¦and true for the verified fixture");
     assert.deepEqual(
       p6Ids(unverified),
       p6Ids(verified),
-      "…while the P6 DoD verdict stays blind to it — the limit is carried by the envelope, not a criterion",
+      "â€¦while the P6 DoD verdict stays blind to it â€” the limit is carried by the envelope, not a criterion",
     );
   });
 
@@ -129,7 +130,7 @@ describe("W48 / 334-3 (T1b) — p6-test / p6-verified vs an unverified declared 
     assert.equal(
       met(withLastTest({ ok: true, detail: "", label: "tested", evidenceHash: "h" }), "p6-verified"),
       false,
-      "a stamp recording no run detail is hollow — never verification",
+      "a stamp recording no run detail is hollow â€” never verification",
     );
     assert.equal(
       met(withLastTest({ ok: true, detail: "tree-run green: 1 spec file(s) pass", label: "tested", evidenceHash: "h" }), "p6-verified"),
@@ -140,13 +141,13 @@ describe("W48 / 334-3 (T1b) — p6-test / p6-verified vs an unverified declared 
 });
 
 // ---------------------------------------------------------------------------
-// 339-3 (W53) — p6-brief-fit floor honesty + satisfiability.
+// 339-3 (W53) â€” p6-brief-fit floor honesty + satisfiability.
 //
 // The keyless deterministic floor can NEVER pass p6-brief-fit: the placeholder
 // module implements phase bookkeeping only and carries no brief vocabulary. So
-// a RED criterion must NAME the state the project is in — the deterministic
+// a RED criterion must NAME the state the project is in â€” the deterministic
 // floor (no keyed synthesis ran, or a refused synthesis that kept the floor)
-// versus a real run that simply dropped the brief's nouns — instead of leaving
+// versus a real run that simply dropped the brief's nouns â€” instead of leaving
 // a human with a bare criterion. The other satisfiability half (a legitimate
 // brief-faithful module passes) is pinned here too.
 // ---------------------------------------------------------------------------
@@ -162,7 +163,7 @@ const floorProject = (over: Partial<Project> = {}): Project => ({
 
 const p6BriefFitUnmet = (p: Project) => runGate(p, 6).unmet.find((g) => g.id === "p6-brief-fit");
 
-describe("339-3 (W53) — p6-brief-fit names the floor state and is satisfiable by a real module", () => {
+describe("339-3 (W53) â€” p6-brief-fit names the floor state and is satisfiable by a real module", () => {
   it("the deterministic floor can never pass p6-brief-fit, and the unmet criterion NAMES that state", () => {
     const item = p6BriefFitUnmet(floorProject());
     assert.ok(item, "the keyless floor fails p6-brief-fit (the placeholder carries no brief vocabulary)");
@@ -183,7 +184,7 @@ describe("339-3 (W53) — p6-brief-fit names the floor state and is satisfiable 
           phase: 6 as PhaseId,
           level: "warn",
           event: "p6.synthesis.refused",
-          detail: "RT_E_RUNNER_FAILED · case payload rejected by harness safety check",
+          detail: "RT_E_RUNNER_FAILED Â· case payload rejected by harness safety check",
         },
       ],
     });
@@ -211,7 +212,7 @@ describe("339-3 (W53) — p6-brief-fit names the floor state and is satisfiable 
 
   it("a legitimate module carrying the brief's nouns as identifiers passes (the other half)", () => {
     // W61 C1: the core bar measures the project-grounded nouns (entities +
-    // lattice jobs), so a genuinely brief-faithful module names them all —
+    // lattice jobs), so a genuinely brief-faithful module names them all â€”
     // dispatch/board/service plus the grounded tech/parts/dispatcher.
     const p = floorProject({
       generatedSource:
@@ -241,7 +242,7 @@ describe("339-3 (W53) — p6-brief-fit names the floor state and is satisfiable 
 });
 
 // ---------------------------------------------------------------------------
-// 346 L3 (A1-12 enforcement) — the browser console's `[seat console]` row.
+// 346 L3 (A1-12 enforcement) â€” the browser console's `[seat console]` row.
 //
 // The console approval is human-class but UNATTESTED (no out-of-band token
 // path). These pins fix the DoD routing: a truthfully tagged console row is
@@ -263,7 +264,7 @@ const consoleApprovalRow = (over: Partial<HitlDecision> = {}): HitlDecision => (
     action: "hitl.approve",
     resource: "gate:P4",
     reason:
-      "console-seat-unattested — hitl.approve on gate:P4 under the browser console's human seat; unattested, never token-verified.",
+      "console-seat-unattested â€” hitl.approve on gate:P4 under the browser console's human seat; unattested, never token-verified.",
     label: "human/console",
     tokenPath: false,
   },
@@ -278,7 +279,7 @@ const withDecision = (...rows: HitlDecision[]): Project => ({
 const p4ApprovedMet = (p: Project): boolean => !runGate(p, 4).unmet.some((g) => g.id === "p4-approved");
 const p5CompleteMet = (p: Project): boolean => !runGate(p, 5).unmet.some((g) => g.id === "p5-complete");
 
-describe("346 L3 (A1-12) — a `[seat console]` row is attributed and routed truthfully", () => {
+describe("346 L3 (A1-12) â€” a `[seat console]` row is attributed and routed truthfully", () => {
   it("a truthfully tagged console human row satisfies p4-approved (recognized seat, not tagged-unknown)", () => {
     assert.equal(p4ApprovedMet(withDecision(consoleApprovalRow())), true);
   });
@@ -332,7 +333,7 @@ describe("346 L3 (A1-12) — a `[seat console]` row is attributed and routed tru
       decidedVia: {
         action: "hitl.approve",
         resource: "gate:P4",
-        reason: "human-seat-token-verified — hitl.approve on gate:P4 under the verified human seat.",
+        reason: "human-seat-token-verified â€” hitl.approve on gate:P4 under the verified human seat.",
         label: "human/human-cli-i-am-human",
         tokenPath: false,
       },
@@ -347,7 +348,7 @@ describe("346 L3 (A1-12) — a `[seat console]` row is attributed and routed tru
       decidedVia: {
         action: "hitl.approve",
         resource: "gate:P4",
-        reason: "human-seat-token-verified — hitl.approve on gate:P4 under the verified human seat.",
+        reason: "human-seat-token-verified â€” hitl.approve on gate:P4 under the verified human seat.",
         label: "human/human-cli-i-am-human",
         tokenPath: true,
       },
@@ -358,12 +359,12 @@ describe("346 L3 (A1-12) — a `[seat console]` row is attributed and routed tru
   it("CONTROL: a routine autopilot row still satisfies p4-approved (Rule A unchanged)", () => {
     const row = consoleApprovalRow({
       id: "hitl-4-auto",
-      note: "[seat harness] autopilot seat — no human decision claimed",
+      note: "[seat harness] autopilot seat â€” no human decision claimed",
       decidedBy: "autopilot",
       decidedVia: {
         action: "hitl.approve",
         resource: "gate:P4",
-        reason: "autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.",
+        reason: "autopilot-seat â€” hitl.approve on gate:P4 under the harness's own seat.",
         label: "autopilot/harness",
         tokenPath: false,
       },
@@ -373,17 +374,17 @@ describe("346 L3 (A1-12) — a `[seat console]` row is attributed and routed tru
 });
 
 // ---------------------------------------------------------------------------
-// 346 L6 — the P7 `p7-research` waiver: ATTEMPTED-but-unavailable vs never-tried.
+// 346 L6 â€” the P7 `p7-research` waiver: ATTEMPTED-but-unavailable vs never-tried.
 //
 // The pre-existing waiver read only `meta.liveUnavailable` (the engine live
 // layer's stamp). The bare-Node research overlay (`headless.bareNodeLiveOverlay`,
 // the `--live` / eval research path) instead records a coded
-// `p7.live.research.failed` row and stamps NO meta — so a genuine offline
+// `p7.live.research.failed` row and stamps NO meta â€” so a genuine offline
 // attempt there stayed RED without ever applying the documented waiver, and the
 // project carried a `liveUnavailable`-less record that reads like "we never
 // tried". These pins fix the honest distinction: a real attempt whose backend
 // was unavailable is waived; a run that never attempted stays RED (the waiver
-// is never fabricated — see wild-step.test.ts's keyless-floor pin).
+// is never fabricated â€” see wild-step.test.ts's keyless-floor pin).
 // ---------------------------------------------------------------------------
 const p7Project = (over: Partial<Project> = {}): Project => ({
   ...emptyProject({ name: "P7Waiver", brief: "A dispatch board for field service." }),
@@ -404,25 +405,25 @@ const researchFailedRow = (
   level: "warn",
   event: "p7.live.research.failed",
   detail:
-    "RT_E_RESEARCH_UNAVAILABLE · live research failed: Free web search unavailable — all providers failed — deterministic result used instead",
+    "RT_E_RESEARCH_UNAVAILABLE Â· live research failed: Free web search unavailable â€” all providers failed â€” deterministic result used instead",
   ...over,
 });
 
 const p7ResearchUnmet = (p: Project) => runGate(p, 7).unmet.find((g) => g.id === "p7-research");
 
-describe("346 L6 — p7-research waives a real attempted-but-unavailable live pass, never a fabricated one", () => {
+describe("346 L6 â€” p7-research waives a real attempted-but-unavailable live pass, never a fabricated one", () => {
   it("no attempt (deterministic/keyless floor): p7-research stays RED and the criterion stays VERBATIM", () => {
     const p = p7Project();
     const item = p7ResearchUnmet(p);
     assert.ok(item, "the never-attempted floor is honestly unmet");
     // Deliberate: no `unmetReason` is added. `runGate` appends a reason to the
     // criterion, and the recorded `p7.seal.unmet` digest pins this criterion
-    // verbatim (lesson-writers.test.ts — not this lane's file). The criterion
+    // verbatim (lesson-writers.test.ts â€” not this lane's file). The criterion
     // already names the missing artifact precisely; the state is carried by the
     // probe's own waiver contract, not by a reworded digest.
-    assert.equal(item!.criterion, "Live research corpus exists for P7 (≥1 fetched finding)");
+    assert.equal(item!.criterion, "Live research corpus exists for P7 (â‰¥1 fetched finding)");
     assert.equal(item!.reason, undefined, "no state line is appended to the pinned digest");
-    assert.equal(liveResearchAttemptUnavailable(p), false, "no attempt ⇒ no waiver evidence");
+    assert.equal(liveResearchAttemptUnavailable(p), false, "no attempt â‡’ no waiver evidence");
   });
 
   it("a genuine ATTEMPT whose backend was UNAVAILABLE (coded row) is WAIVED", () => {
@@ -436,7 +437,7 @@ describe("346 L6 — p7-research waives a real attempted-but-unavailable live pa
     assert.ok(!p7ResearchUnmet(p7Project({ meta: { liveUnavailable: true } })));
   });
 
-  it("a live pass that RAN but found nothing (no failure row) stays RED — an attempt is not a corpus", () => {
+  it("a live pass that RAN but found nothing (no failure row) stays RED â€” an attempt is not a corpus", () => {
     const p = p7Project();
     assert.equal(liveResearchAttemptUnavailable(p), false);
     assert.ok(p7ResearchUnmet(p));
@@ -458,7 +459,7 @@ describe("346 L6 — p7-research waives a real attempted-but-unavailable live pa
         p7Project({
           logs: [
             researchFailedRow({
-              detail: "RT_E_VALIDATION · live research failed: empty query — deterministic result used instead",
+              detail: "RT_E_VALIDATION Â· live research failed: empty query â€” deterministic result used instead",
             }),
           ],
         }),
@@ -509,7 +510,7 @@ describe("346 L6 — p7-research waives a real attempted-but-unavailable live pa
       assert.equal(
         (attempted.project.research ?? []).length,
         0,
-        "the offline attempt fetched no corpus — the gate is not satisfied by a fabricated corpus",
+        "the offline attempt fetched no corpus â€” the gate is not satisfied by a fabricated corpus",
       );
       assert.ok(
         (attempted.project.logs ?? []).some((l) => l.event === "p7.live.research.failed"),
@@ -531,7 +532,7 @@ describe("346 L6 — p7-research waives a real attempted-but-unavailable live pa
       assert.equal(
         liveResearchAttemptUnavailable(floor.project),
         false,
-        "no attempt ⇒ no waiver evidence",
+        "no attempt â‡’ no waiver evidence",
       );
     } finally {
       globalThis.fetch = realFetch;
@@ -695,7 +696,7 @@ describe("W61 C14 - p6-arch fails closed on dead re-export bridges", () => {
   });
 });
 
-describe("E-08 oracle helpers — junk-row tolerance (hostile persisted payload)", () => {
+describe("E-08 oracle helpers â€” junk-row tolerance (hostile persisted payload)", () => {
   // engine.hydrateProject keeps `project.oracle` rows raw (engine.ts:2953), and
   // codegen.server/headless pass that array straight to oracleToCaseSeeds at the
   // keyed P6 verify seam, so ONE null/foreign row threw a TypeError out of the
@@ -711,7 +712,7 @@ describe("E-08 oracle helpers — junk-row tolerance (hostile persisted payload)
   it("oracleToCaseSeeds skips junk rows instead of throwing", () => {
     assert.equal(
       oracleToCaseSeeds(junkyOracle),
-      "# orc-1 happy — g ⇒ e\n# orc-2 sad — g2 ⇒ e2",
+      "# orc-1 happy â€” g â‡’ e\n# orc-2 sad â€” g2 â‡’ e2",
     );
     assert.equal(oracleToCaseSeeds(null as unknown as OracleTest[]), "");
   });
@@ -723,21 +724,21 @@ describe("E-08 oracle helpers — junk-row tolerance (hostile persisted payload)
 });
 
 // ---------------------------------------------------------------------------
-// Lane G5 — p6-brief-fit on the REAL stalled bytes: the binding P6 miss is
+// Lane G5 â€” p6-brief-fit on the REAL stalled bytes: the binding P6 miss is
 // GENUINE noun absence, not a coverage miscompute.
 //
 // Both stalled bakery-florist-orders trees (the 9-file `bakery-florist-orders`
 // run and the 4-file `default-check` run) fail p6-brief-fit. This pin proves
 // the failure is the model DROPPING the brief's nouns: the role nouns the brief
 // names (**Stock keeper**, **Manager**, **Counter staff**) do not occur in the
-// tree union at all — not as identifiers and not even as raw text — while the
+// tree union at all â€” not as identifiers and not even as raw text â€” while the
 // matcher is substring+stem tolerant (`identifierHits` matches any identifier
 // containing the token), so a genuine export could not be missed. The faithful
 // P12 tree (`default-check/sample1`) passes both the probe and the whole P6
 // gate, so the bar is satisfiable, not over-strict. If a future change widens
 // the core set / relaxes the bar, this RED->GREEN pin fails with it.
 // ---------------------------------------------------------------------------
-describe("Lane G5 — p6-brief-fit fails the stalled trees on GENUINE noun absence", () => {
+describe("Lane G5 â€” p6-brief-fit fails the stalled trees on GENUINE noun absence", () => {
   const loadBuild = (rel: string): Project | null => {
     const file = join(TESTRUNS_ROOT, rel, "build.json");
     return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Project) : null;
@@ -793,25 +794,25 @@ describe("Lane G5 — p6-brief-fit fails the stalled trees on GENUINE noun absen
     const stalled = loadBuild("default-check/bakery-florist-orders");
     if (stalled) {
       const ids = runGate(stalled, 6).unmet.map((u) => u.id);
-      assert.ok(ids.includes("p6-test"), "no green tree-run ⇒ lastTest absent ⇒ p6-test honestly unmet");
+      assert.ok(ids.includes("p6-test"), "no green tree-run â‡’ lastTest absent â‡’ p6-test honestly unmet");
       assert.ok(stalled.lastTest == null, "the stalled run recorded no passing self-test");
       assert.ok(archTrace(stalled).missing.length > 0, "the tree materialised fewer files than the plan demands");
     }
     const faithful = loadBuild("default-check/sample1/bakery-florist-orders");
     if (faithful) {
       assert.equal(faithful.lastTest?.ok, true, "the faithful run minted a passing self-test");
-      assert.equal((faithful.lastTest as { label?: string } | null)?.label, "tested", "…promoted to a tested verdict");
+      assert.equal((faithful.lastTest as { label?: string } | null)?.label, "tested", "â€¦promoted to a tested verdict");
       assert.deepEqual(archTrace(faithful).missing, [], "every demanded capability maps to a real tree file");
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2026-10-05 product-quality lane — the p6-arch no-tree SKIP, surfaced.
+// 2026-10-05 product-quality lane â€” the p6-arch no-tree SKIP, surfaced.
 // ---------------------------------------------------------------------------
-describe("2026-10-05 — p6-arch no-tree SKIP advisory", () => {
+describe("2026-10-05 â€” p6-arch no-tree SKIP advisory", () => {
   it("an absent tree still PASSES p6-arch, but the pass is reported as a SKIP advisory", () => {
-    const p = base(); // emptyProject — no generatedTree
+    const p = base(); // emptyProject â€” no generatedTree
     const r = runGate(p, 6);
     assert.ok(!r.unmet.some((g) => g.id === "p6-arch"), "the keyless floor is not hard-broken");
     const adv = r.advisories.find((a) => a.id === "p6-arch");
@@ -824,7 +825,7 @@ describe("2026-10-05 — p6-arch no-tree SKIP advisory", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2026-10-06 — the ADDITIVE kind-aware product surface criteria. The lexical /
+// 2026-10-06 â€” the ADDITIVE kind-aware product surface criteria. The lexical /
 // structural probes never noticed the emitted product did not match the brief's
 // KIND. Each criterion has a fixture that FAILS it today and a control that
 // passes with the surface the emitter must produce.
@@ -836,7 +837,28 @@ const surfaceProject = (brief: string, kind: Project["kind"], tree: ReturnType<t
 
 const unmetIds = (p: Project): string[] => runGate(p, 6).unmet.map((g) => g.id);
 
-describe("2026-10-06 — kind-aware product surface criteria (additive)", () => {
+/** W359 (resolve-kind): the REAL corpus briefs, read from the tracked fixtures â€”
+ *  the gate's kind parity is pinned over them instead of over hand-written
+ *  samples. `frontmatter` is the same `key: value` reader the eval driver uses. */
+function corpusBySlug(): Map<string, string> {
+  const dir = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "research", "eval-corpus");
+  const out = new Map<string, string>();
+  if (!existsSync(dir)) return out;
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".md") || file === "README.md") continue;
+    const text = readFileSync(join(dir, file), "utf8");
+    const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    const brief = fm?.[1].split(/\r?\n/).find((l) => /^brief:\s*/.test(l));
+    if (!brief) continue;
+    const raw = brief.replace(/^brief:\s*/, "").trim();
+    out.set(file.replace(/\.md$/, ""), raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw);
+  }
+  return out;
+}
+
+const corpusBriefs = (): string[] => [...corpusBySlug().values()];
+
+describe("2026-10-06 â€” kind-aware product surface criteria (additive)", () => {
   it("productSurfaceKindOf: game wins over a stray 'screen'; a bare app with no page noun imposes nothing", () => {
     assert.equal(productSurfaceKindOf({ brief: "A 2D browser arcade game with a start screen" }), "game");
     assert.equal(productSurfaceKindOf({ brief: "Build a bakery website with Pages: Home, Menu" }), "web");
@@ -845,7 +867,7 @@ describe("2026-10-06 — kind-aware product surface criteria (additive)", () => 
     assert.equal(productSurfaceKindOf({ brief: "A dispatch board for field service" }), "none");
   });
 
-  it("briefDeliveryKind mirrors engine.deliveryKindOf (same keyword rules — no silent drift)", () => {
+  it("briefDeliveryKind mirrors engine.deliveryKindOf (same keyword rules â€” no silent drift)", () => {
     const briefs = [
       "Build an analytics dashboard for Northwind Traders, a wholesale food distributor.",
       "Build an appointment booking service for Cedar Clinic, a three-provider family practice.",
@@ -856,7 +878,12 @@ describe("2026-10-06 — kind-aware product surface criteria (additive)", () => 
       "A kanban board for dispatch teams",
       "A kanban board library exposing a typed board client",
       "A mobile app with a bottom tab bar",
+      // W359 (resolve-kind): the parity set is the REAL corpus now, not nine
+      // hand-written briefs â€” the copy this test used to guard was green while
+      // the corpus disagreed with the engine it claimed to mirror.
+      ...corpusBriefs(),
     ];
+    assert.ok(corpusBriefs().length >= 11, `the corpus must be present (found ${corpusBriefs().length})`);
     for (const brief of briefs) {
       const engineKind = deliveryKindOf({ brief, domain: "", lattice: null });
       assert.equal(
@@ -867,12 +894,44 @@ describe("2026-10-06 — kind-aware product surface criteria (additive)", () => 
     }
   });
 
+  it("W359: the gate's surface contract never overrides the ONE decided kind on the corpus", () => {
+    // Before W359 the gate carried its own keyword ROWS; the two could disagree
+    // silently. Now the kind comes from the engine and the game/web regexes are an
+    // additive safety net â€” this pins that the net never CHANGES the answer for a
+    // real brief (changing it would be a second decision by another name).
+    for (const brief of corpusBriefs()) {
+      const resolved = deliveryKindOf({ brief, domain: "", lattice: null });
+      assert.equal(
+        productSurfaceKindOf({ brief }),
+        productSurfaceKindOf({ brief, kind: resolved }),
+        `the brief-only surface agrees with the decided-kind surface (${brief.slice(0, 40)}â€¦)`,
+      );
+    }
+    // The unambiguous corpus contracts, end to end (brief-only, no stored kind):
+    const bySlug = corpusBySlug();
+    assert.equal(productSurfaceKindOf({ brief: bySlug.get("arcade-breakout")! }), "game");
+    assert.equal(productSurfaceKindOf({ brief: bySlug.get("invoice-csv-cli")! }), "runnable");
+    assert.equal(productSurfaceKindOf({ brief: bySlug.get("date-rrule-library")! }), "runnable");
+    assert.equal(productSurfaceKindOf({ brief: bySlug.get("order-webhook-service")! }), "runnable");
+    assert.equal(productSurfaceKindOf({ brief: bySlug.get("real-estate-crm")! }), "web");
+  });
+
+  it("W359: the replicated resolver is GONE from dod.ts (one decision, read not re-implemented)", () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "dod.ts"), "utf8");
+    assert.equal(/KIND_ROWS|KIND_UI_SURFACE_WORDS/.test(src), false, "no keyword rows are re-implemented here");
+    assert.match(
+      src,
+      /import \{ deliveryKindOf \} from "\.\/engine\.ts"/,
+      "the gate imports the ONE decision (a re-copy must fail this test)",
+    );
+  });
+
   it("p6-web-surface FAILS a web brief with no page surface (the measured ten-tree shape)", () => {
     const p = surfaceProject("Build a bakery website. Pages: Home, Menu, Order, Contact.", "app", [
       wf("src/generated.ts", 'export * from "./generated/bake.ts";'),
       wf("src/generated/bake.ts", "export function bakeBread() { return 1; }"),
     ]);
-    assert.ok(unmetIds(p).includes("p6-web-surface"), "no page surface / router ⇒ unmet");
+    assert.ok(unmetIds(p).includes("p6-web-surface"), "no page surface / router â‡’ unmet");
     const reason = runGate(p, 6).unmet.find((g) => g.id === "p6-web-surface")?.reason ?? "";
     assert.match(reason, /RT_E_UI_UNWIRED/);
     assert.match(reason, /page surface=none/);
@@ -897,7 +956,7 @@ describe("2026-10-06 — kind-aware product surface criteria (additive)", () => 
     const failing = surfaceProject("A 2D browser arcade game with jumping and coins.", "game", [
       wf("src/generated/render.ts", "export function scorePoints(n) { return n * 2; }"),
     ]);
-    assert.ok(unmetIds(failing).includes("p6-game-surface"), "no input/loop/canvas ⇒ unmet");
+    assert.ok(unmetIds(failing).includes("p6-game-surface"), "no input/loop/canvas â‡’ unmet");
 
     const passing = surfaceProject("A 2D browser arcade game with jumping and coins.", "game", [
       wf(
@@ -913,7 +972,7 @@ describe("2026-10-06 — kind-aware product surface criteria (additive)", () => 
         ].join("\n"),
       ),
     ]);
-    assert.ok(!unmetIds(passing).includes("p6-game-surface"), "input + loop + canvas ⇒ met");
+    assert.ok(!unmetIds(passing).includes("p6-game-surface"), "input + loop + canvas â‡’ met");
   });
 
   it("p6-runnable-entry FAILS a CLI whose entry throws TODO(E-15), PASSES a real entry exposing the declared surface", () => {
@@ -924,12 +983,12 @@ describe("2026-10-06 — kind-aware product surface criteria (additive)", () => 
         'export function runCli() { throw new Error("TODO(E-15) stub: implement runCli"); }',
       ),
     ]);
-    assert.ok(unmetIds(stubEntry).includes("p6-runnable-entry"), "a throw-TODO entry ⇒ unmet");
+    assert.ok(unmetIds(stubEntry).includes("p6-runnable-entry"), "a throw-TODO entry â‡’ unmet");
     const stubReason = runGate(stubEntry, 6).unmet.find((g) => g.id === "p6-runnable-entry")?.reason ?? "";
     assert.match(stubReason, /RT_E_PLAN_UNDERPRODUCED/);
     assert.match(stubReason, /TODO stub/);
 
-    // A declared surface the brief names but the tree does not implement ⇒ unmet.
+    // A declared surface the brief names but the tree does not implement â‡’ unmet.
     const missingSurface = surfaceProject(
       "Build a TypeScript library: `subscribe(url)` and `publish(event)`.",
       "library",
@@ -937,7 +996,7 @@ describe("2026-10-06 — kind-aware product surface criteria (additive)", () => 
         wf("src/index.ts", "export function subscribe(url) { return url; }"),
       ],
     );
-    assert.ok(unmetIds(missingSurface).includes("p6-runnable-entry"), "declared-but-missing surface ⇒ unmet");
+    assert.ok(unmetIds(missingSurface).includes("p6-runnable-entry"), "declared-but-missing surface â‡’ unmet");
     assert.match(
       runGate(missingSurface, 6).unmet.find((g) => g.id === "p6-runnable-entry")?.reason ?? "",
       /declared surface not implemented: publish/,
@@ -950,10 +1009,10 @@ describe("2026-10-06 — kind-aware product surface criteria (additive)", () => 
         wf("src/index.ts", "export function subscribe(url) { return url; }\nexport function publish(event) { return event; }"),
       ],
     );
-    assert.ok(!unmetIds(real).includes("p6-runnable-entry"), "a real entry exposing the declared surface ⇒ met");
+    assert.ok(!unmetIds(real).includes("p6-runnable-entry"), "a real entry exposing the declared surface â‡’ met");
   });
 
-  it("a non-matching brief imposes nothing — the criterion passes with an N/A advisory, never a silent skip", () => {
+  it("a non-matching brief imposes nothing â€” the criterion passes with an N/A advisory, never a silent skip", () => {
     const p = base(); // dispatch-board brief, no surface contract
     const r = runGate(p, 6);
     for (const id of ["p6-web-surface", "p6-game-surface", "p6-runnable-entry"]) {
@@ -972,13 +1031,13 @@ describe("2026-10-06 — kind-aware product surface criteria (additive)", () => 
 });
 
 // ---------------------------------------------------------------------------
-// 2026-10-06 — item 1/2/6: the kind-surface reading reads the EMITTER's own
+// 2026-10-06 â€” item 1/2/6: the kind-surface reading reads the EMITTER's own
 // emitted surface, the entry barrel is exempted like p6-arch, and vacuous
 // passes carry CODED advisories.
 // ---------------------------------------------------------------------------
 const emittedFile = (path: string, source: string) => ({ path, source });
 
-describe("2026-10-06 — kind-surface reads the emitter's emitted surface (item 1)", () => {
+describe("2026-10-06 â€” kind-surface reads the emitter's emitted surface (item 1)", () => {
   it("p6-web-surface: the scaffold's own emitted pages+router satisfy the criterion although generatedTree carries none", () => {
     const p = {
       ...surfaceProject("Build a bakery website. Pages: Home, Menu, Order.", "app", [
@@ -1032,7 +1091,7 @@ describe("2026-10-06 — kind-surface reads the emitter's emitted surface (item 
   });
 });
 
-describe("2026-10-06 — entry barrel exemption + coded advisories (items 2/6)", () => {
+describe("2026-10-06 â€” entry barrel exemption + coded advisories (items 2/6)", () => {
   it("p6-runnable-entry: a reexport barrel entry whose target is a real in-tree module is NOT a stub", () => {
     const p = surfaceProject("Build logscope, a command-line tool reading log files.", "tool", [
       wf("src/generated.ts", 'export * from "./generated/run-cli.ts";'),
@@ -1112,13 +1171,13 @@ describe("2026-10-06 — entry barrel exemption + coded advisories (items 2/6)",
       pass: true,
       unmet: [],
       evidenceHash: "abcdef01",
-      advisories: [{ id: "p8-ui", criterion: "c", note: "SKIP — empty", code: "RT_E_SUBSTANCE_EMPTY" }],
+      advisories: [{ id: "p8-ui", criterion: "c", note: "SKIP â€” empty", code: "RT_E_SUBSTANCE_EMPTY" }],
     });
     assert.match(art.body, /code: RT_E_SUBSTANCE_EMPTY/);
   });
 });
 
-describe("2026-10-06 — more coded advisories (item 2): vacuous P6/P7 passes", () => {
+describe("2026-10-06 â€” more coded advisories (item 2): vacuous P6/P7 passes", () => {
   it("a vocabulary-free brief also qualifies the vacuous p6-brief-fit pass", () => {
     const p = emptyProject({ name: "Blip", brief: "x" });
     const r = runGate(p, 6);
@@ -1140,7 +1199,7 @@ describe("2026-10-06 — more coded advisories (item 2): vacuous P6/P7 passes", 
   });
 });
 
-describe("2026-10-06 — coded advisories for the remaining vacuous P0/P2/P7 passes", () => {
+describe("2026-10-06 â€” coded advisories for the remaining vacuous P0/P2/P7 passes", () => {
   it("p0-scorecard: five unlabelled axes pass the count probe with a coded SKIP", () => {
     const p = {
       ...base(),

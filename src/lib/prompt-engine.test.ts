@@ -1,10 +1,11 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// prompt-engine.test.ts — hyper-prompt expansion + policy constraints
+// prompt-engine.test.ts â€” hyper-prompt expansion + policy constraints
 // (handoff pillar 3 + pillar 6; fixes/64_pillars_prompt.md).
 // Run: node --experimental-strip-types --test src/lib/prompt-engine.test.ts
 //
 // Keyed tests stub globalThis.fetch (algo-tools.test.ts recipe) and delete the
-// env key in beforeEach — node --test isolates each file in its own child
+// env key in beforeEach â€” node --test isolates each file in its own child
 // process, so the env dance never leaks into sibling suites.
 // ---------------------------------------------------------------------------
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -28,9 +29,12 @@ import {
   EXPAND_LESSON_MAX_CHARS,
   EXPAND_LESSON_MAX_COUNT,
   EXPAND_LESSON_RANK_LIMIT,
+  EXPANDED_SPEC_KEYS,
+  EXPANSION_REPAIR_LINE,
+  DELIVERY_KIND_SPEC,
 } from "./prompt-engine.ts";
 // PR-18 prompt/validator parity: the validator side lives in codegen.server.ts
-// (S's file) — imported READ-ONLY so the pure repair prompt's advertised rules
+// (S's file) â€” imported READ-ONLY so the pure repair prompt's advertised rules
 // can be checked against the checks that actually enforce them.
 import {
   compactModuleUnderBound,
@@ -59,6 +63,7 @@ import {
 } from "./codegen.server.ts";
 import { LESSON_TEXT_MAX, lessonRow } from "./knowledge.ts";
 import { BRIEF_TEMPLATES } from "./templates.ts";
+import { DELIVERY_KINDS, type DeliveryKind } from "./types.ts";
 import type { MemoryEntry } from "./types.ts";
 
 const KEY = "DEEPSEEK_API_KEY";
@@ -133,7 +138,7 @@ function sequencedFetch(replies: unknown[]): {
 }
 
 // ---------------------------------------------------------------------------
-// parseExpandedSpecJson — pure parser/normalizer
+// parseExpandedSpecJson â€” pure parser/normalizer
 // ---------------------------------------------------------------------------
 
 describe("parseExpandedSpecJson", () => {
@@ -169,10 +174,10 @@ describe("parseExpandedSpecJson", () => {
 });
 
 // ---------------------------------------------------------------------------
-// expandedSpecViolations — the strict, deterministic envelope check
+// expandedSpecViolations â€” the strict, deterministic envelope check
 // ---------------------------------------------------------------------------
 
-describe("expandedSpecViolations — deterministic envelope check", () => {
+describe("expandedSpecViolations â€” deterministic envelope check", () => {
   it("returns [] for a conforming six-key spec object", () => {
     assert.deepEqual(expandedSpecViolations(FULL_SPEC), []);
   });
@@ -202,7 +207,7 @@ describe("expandedSpecViolations — deterministic envelope check", () => {
 
   it("names a non-string/blank element by index (the silent-default class this lane closes)", () => {
     // verifier-B Case A: six arrays, five of them containing only wrong-typed
-    // elements — HEAD accepted this and silently defaulted them to [].
+    // elements â€” HEAD accepted this and silently defaulted them to [].
     assert.deepEqual(
       expandedSpecViolations({
         requirements: ["Track delivery deadlines per order."],
@@ -222,7 +227,7 @@ describe("expandedSpecViolations — deterministic envelope check", () => {
     );
   });
 
-  it("rejects a nested-object element — no key is an array of objects", () => {
+  it("rejects a nested-object element â€” no key is an array of objects", () => {
     // verifier-B Case D: every one of the six keys is a STRING array
     // (Project.implementationSpec), so an object element is a type violation.
     assert.deepEqual(
@@ -232,7 +237,7 @@ describe("expandedSpecViolations — deterministic envelope check", () => {
   });
 
   it("tolerates extra top-level keys (the persisted record carries provenance keys)", () => {
-    // Decision, pinned: the six keys are a MINIMUM shape, not an exact set —
+    // Decision, pinned: the six keys are a MINIMUM shape, not an exact set â€”
     // codegen.server.ts re-validates the persisted implementationSpec (which
     // carries source/briefHash/createdAt) with this same function, so a
     // forbidden-extras rule would strand every cached spec.
@@ -264,7 +269,7 @@ describe("expandedSpecViolations — deterministic envelope check", () => {
 });
 
 // ---------------------------------------------------------------------------
-// expansionPrompt — brief fidelity, truncation honesty, build-ready framing
+// expansionPrompt â€” brief fidelity, truncation honesty, build-ready framing
 // (fixes/95 F5: prompt quality)
 // ---------------------------------------------------------------------------
 
@@ -308,7 +313,7 @@ describe("expansionPrompt fidelity + build-ready framing (fixes/95)", () => {
       );
       assert.ok(
         content.includes("at least one signature for EVERY requirement"),
-        `${t.id}: signature-coverage rule present (fixes/215d — one module per capability)`,
+        `${t.id}: signature-coverage rule present (fixes/215d â€” one module per capability)`,
       );
     }
   });
@@ -321,8 +326,8 @@ describe("expansionPrompt fidelity + build-ready framing (fixes/95)", () => {
     const head = after.slice(0, after.indexOf("\n"));
     assert.equal(head.length, EXPAND_BRIEF_MAX_CHARS, "brief head cut exactly at the cap");
     assert.ok(
-      after.includes("[TRUNCATED — input longer than the budget cap"),
-      "the cut is marked — the model can see evidence was dropped",
+      after.includes("[TRUNCATED â€” input longer than the budget cap"),
+      "the cut is marked â€” the model can see evidence was dropped",
     );
     assert.ok(!content.includes(tail), "the tail beyond the cap never reaches the model");
   });
@@ -330,7 +335,7 @@ describe("expansionPrompt fidelity + build-ready framing (fixes/95)", () => {
   it("fixes/348: a realistic 8k-char brief reaches the model IN FULL (the non-negotiables are not sliced)", async () => {
     const filler = "Build the menu, the admin order queue and the staff ordering app. ".repeat(120);
     const brief =
-      "# Bloedow Bakery — Website\n\n" +
+      "# Bloedow Bakery â€” Website\n\n" +
       filler +
       "\n\n## Non-negotiables\n- No invented prices. NONNEGOTIABLE_TAIL_SENTINEL";
     assert.ok(brief.length > 4_000 && brief.length <= EXPAND_BRIEF_MAX_CHARS, `fixture is a realistic over-4k brief (${brief.length})`);
@@ -356,9 +361,9 @@ describe("expansionPrompt fidelity + build-ready framing (fixes/95)", () => {
     const block = content.slice(content.indexOf("Policy constraints ("));
     const bullets = block.split("\n").filter((l) => l.startsWith("- "));
     assert.equal(bullets.length, EXPAND_POLICY_MAX_COUNT, "policy count capped at 12");
-    assert.ok(content.includes("…[TRUNCATED]"), "over-long policy is cut WITH a marker");
+    assert.ok(content.includes("â€¦[TRUNCATED]"), "over-long policy is cut WITH a marker");
     assert.ok(!content.includes("LONGTAIL_MUST_NOT_APPEAR"), "policy tail never reaches the model");
-    // The 13th distinct policy (shortOnes[11]) is dropped by the count cap —
+    // The 13th distinct policy (shortOnes[11]) is dropped by the count cap â€”
     // and the drop is MARKED, never silent (W49/335-1: the module contract).
     assert.ok(!content.includes("DO NOT add policy 11 unless"), "beyond-count policy dropped");
     assert.ok(
@@ -369,7 +374,7 @@ describe("expansionPrompt fidelity + build-ready framing (fixes/95)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// expandBrief — keyed hyper-prompt expansion
+// expandBrief â€” keyed hyper-prompt expansion
 // ---------------------------------------------------------------------------
 
 describe("expandBrief", () => {
@@ -447,7 +452,7 @@ describe("expandBrief", () => {
     globalThis.fetch = (async () =>
       okResponse({
         model: "deepseek-v4-flash",
-        choices: [{ message: { content: "Here is a lovely prose spec…" } }],
+        choices: [{ message: { content: "Here is a lovely prose specâ€¦" } }],
       })) as typeof fetch;
     const res = await expandBrief("Build a fleet healthcheck tool");
     assert.deepEqual(res, {
@@ -492,13 +497,13 @@ describe("expandBrief", () => {
 });
 
 // ---------------------------------------------------------------------------
-// expandBrief — strict spec-envelope validation (never defaults)
+// expandBrief â€” strict spec-envelope validation (never defaults)
 // ---------------------------------------------------------------------------
 // The spec graph is the input to plan/oracle generation, so a reply that omits
 // a machine-checked field must be REFUSED with a coded reason after ONE bounded
-// repair — never accepted with `[]` defaults.
+// repair â€” never accepted with `[]` defaults.
 
-describe("expandBrief — strict spec-envelope validation", () => {
+describe("expandBrief â€” strict spec-envelope validation", () => {
   const PARTIAL = { requirements: ["Track delivery deadlines per order."] };
 
   it("refuses a partial spec after ONE bounded repair re-prompt, coded RT_E_VALIDATION", async () => {
@@ -602,10 +607,10 @@ describe("expandBrief — strict spec-envelope validation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// expandBrief — prior-run lesson injection (fixes/98 §5 Tier 3)
+// expandBrief â€” prior-run lesson injection (fixes/98 Â§5 Tier 3)
 // ---------------------------------------------------------------------------
 
-describe("expandBrief — prior-run lesson injection (fixes/98 §5 Tier 3)", () => {
+describe("expandBrief â€” prior-run lesson injection (fixes/98 Â§5 Tier 3)", () => {
   async function captureWithLessons(lessons?: readonly string[]): Promise<string> {
     process.env[KEY] = "sk-test";
     let userContent = "";
@@ -655,7 +660,7 @@ describe("expandBrief — prior-run lesson injection (fixes/98 §5 Tier 3)", () 
     const bullets = block.split("\n").filter((l) => l.startsWith("- "));
     assert.equal(bullets.length, EXPAND_LESSON_MAX_COUNT, "count capped at 12");
     assert.ok(!content.includes("TAIL_MUST_NOT_APPEAR"), "over-long lesson tail never reaches the model");
-    assert.ok(content.includes("…[TRUNCATED]"), "the cut is marked, never silent");
+    assert.ok(content.includes("â€¦[TRUNCATED]"), "the cut is marked, never silent");
     assert.equal(bullets.filter((b) => b === "- dup row").length, 1, "deduped to one bullet");
     assert.ok(!content.includes("lesson 10"), "beyond-count lesson dropped");
     assert.ok(content.includes("- lesson 9"), "the 12th slot still fits");
@@ -666,15 +671,15 @@ describe("expandBrief — prior-run lesson injection (fixes/98 §5 Tier 3)", () 
   });
 
   it("325 BUG E: a 500-char row (legal in-record at the 600 cap) is still cut at the prompt cap, WITH the marker", async () => {
-    // Deliberate differential (322 X3 §Coupling sweep): record vs prompt are
-    // different budgets — the record cap is LESSON_TEXT_MAX (600), the
+    // Deliberate differential (322 X3 Â§Coupling sweep): record vs prompt are
+    // different budgets â€” the record cap is LESSON_TEXT_MAX (600), the
     // prompt-side re-cap stays EXPAND_LESSON_MAX_CHARS (240). This pin makes
     // the differential explicit: a row that is LEGAL in the record still
     // reaches the prompt cut, and that cut is never silent.
     const legalRow = "R".repeat(500);
     assert.ok(legalRow.length <= LESSON_TEXT_MAX, "fixture premise: 500 is legal in-record");
     const content = await captureWithLessons([legalRow]);
-    assert.ok(content.includes("…[TRUNCATED]"), "the prompt-side cut is marked");
+    assert.ok(content.includes("â€¦[TRUNCATED]"), "the prompt-side cut is marked");
     assert.ok(!content.includes(legalRow), "the full 500-char row never reaches the model whole");
     assert.ok(
       content.includes("R".repeat(EXPAND_LESSON_MAX_CHARS)),
@@ -684,12 +689,12 @@ describe("expandBrief — prior-run lesson injection (fixes/98 §5 Tier 3)", () 
 });
 
 // ---------------------------------------------------------------------------
-// rankBriefLessons / lessonLinesForBrief — FusionRank-ranked lesson injection
-// (fixes/98 §5 Tier 3): top-k lesson rows from project memory + knowledge
+// rankBriefLessons / lessonLinesForBrief â€” FusionRank-ranked lesson injection
+// (fixes/98 Â§5 Tier 3): top-k lesson rows from project memory + knowledge
 // store, ranked by the same fusionRank the packet uses.
 // ---------------------------------------------------------------------------
 
-describe("rankBriefLessons — FusionRank-ranked lesson injection (fixes/98 §5)", () => {
+describe("rankBriefLessons â€” FusionRank-ranked lesson injection (fixes/98 Â§5)", () => {
   const kanbanRow = () =>
     lessonRow({
       classShort: "vague-brief",
@@ -715,7 +720,7 @@ describe("rankBriefLessons — FusionRank-ranked lesson injection (fixes/98 §5)
     const memory: MemoryEntry[] = [
       hvacRow(),
       kanbanRow(),
-      // A NON-lesson row — even a highly scored relevant one — must never enter
+      // A NON-lesson row â€” even a highly scored relevant one â€” must never enter
       // the lesson ranking (tag filter is the lesson gate).
       { id: "plain", kind: "semantic", phase: 0, text: "Kanban board best practices for small teams.", score: 0.9 },
     ];
@@ -797,7 +802,7 @@ describe("rankBriefLessons — FusionRank-ranked lesson injection (fixes/98 §5)
 });
 
 // ---------------------------------------------------------------------------
-// applyPolicies — pure negative-constraint injection
+// applyPolicies â€” pure negative-constraint injection
 // ---------------------------------------------------------------------------
 
 describe("applyPolicies", () => {
@@ -855,7 +860,7 @@ describe("applyPolicies", () => {
   });
 
   it("filters non-strings and blanks; no policies yields an equal fresh copy", () => {
-    // Hostile entries are out of the typed contract — exercise the runtime
+    // Hostile entries are out of the typed contract â€” exercise the runtime
     // filter through an unknown-level cast (never through the public type).
     const hostile = [42, "", "   ", null, undefined, "DO NOT use external ORMs"] as unknown as string[];
     const out = applyPolicies(spec, hostile);
@@ -882,13 +887,13 @@ describe("applyPolicies", () => {
 });
 
 // ---------------------------------------------------------------------------
-// PR-18 — the pure dedicated repair prompt + the prompt/validator parity
+// PR-18 â€” the pure dedicated repair prompt + the prompt/validator parity
 // extension. Drift-proof: the repair prompt may not advertise a rule the
 // validators do not enforce, and may not omit one they do (the repo's 215b
 // principle). Every advertised rule family is linked to its live validator, and
 // every codegen repair re-prompt is checked against the same contract.
 // ---------------------------------------------------------------------------
-describe("PR-18 — dedicated repair prompt + prompt/validator parity", () => {
+describe("PR-18 â€” dedicated repair prompt + prompt/validator parity", () => {
   it("carries the pure repair contract: delta first, full envelope second, no success claims, checks protected, refusal channel", () => {
     const s = repairSystemPrompt();
     assert.ok(s.includes("bounded repair agent"), "repair persona named");
@@ -916,7 +921,7 @@ describe("PR-18 — dedicated repair prompt + prompt/validator parity", () => {
     for (const name of FORBIDDEN_PRIMITIVE_NAMES) {
       assert.ok(
         s.includes(name),
-        `repair prompt omits forbidden primitive \`${name}\` — the model would be blind-sided by the validator`,
+        `repair prompt omits forbidden primitive \`${name}\` â€” the model would be blind-sided by the validator`,
       );
     }
   });
@@ -983,14 +988,14 @@ describe("PR-18 — dedicated repair prompt + prompt/validator parity", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 353 — prompt contract: every validator predicate is stated in the prompt the
+// 353 â€” prompt contract: every validator predicate is stated in the prompt the
 // model actually receives (no hidden rules). Two prompts live in this module:
 // the expansion prompt (its reply is checked by `expandedSpecViolations`) and
 // the dedicated repair prompt (its reply is checked by `validateSynthesisModule`
 // in codegen.server.ts). Each predicate below is linked BOTH to the prompt line
 // that tells the model and to a live validator reading.
 // ---------------------------------------------------------------------------
-describe("353 — every expandedSpecViolations predicate is stated in the expansion prompt", () => {
+describe("353 â€” every expandedSpecViolations predicate is stated in the expansion prompt", () => {
   it("states the object / exact-six-key / array / non-empty-string / non-empty-requirements rules", async () => {
     const content = await captureUserContent("Build a fleet healthcheck tool");
     assert.ok(content.includes("ONE JSON object with EXACTLY these six keys"), "object + exact-key rule stated");
@@ -1020,7 +1025,7 @@ describe("353 — every expandedSpecViolations predicate is stated in the expans
   });
 });
 
-describe("353 — every validateSynthesisModule predicate is advertised in the repair prompt", () => {
+describe("353 â€” every validateSynthesisModule predicate is advertised in the repair prompt", () => {
   const PROMPT = repairSystemPrompt();
   const cases: { name: string; phrase: string; live: () => boolean }[] = [
     { name: "forbidden primitive", phrase: "forbidden primitive", live: () => forbiddenPrimitiveHit("const x = eval('1');").hard !== null },
@@ -1054,7 +1059,7 @@ describe("353 — every validateSynthesisModule predicate is advertised in the r
     },
     {
       name: "money semantics",
-      phrase: "unit price × quantity",
+      phrase: "unit price Ã— quantity",
       live: () =>
         moneySemanticsHits("function computeCartTotalPence() {\n  var total = 0;\n  total = total + quantity;\n  return total;\n}").length > 0,
     },
@@ -1099,5 +1104,133 @@ describe("353 — every validateSynthesisModule predicate is advertised in the r
       false,
       "contract-type redeclaration refused",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W359 (kind fidelity) â€” the resolved delivery kind in the EXPANSION prompt.
+// It rides as PROMPT TEXT: the envelope stays exactly six keys, `ExpandedSpec`'s
+// persisted shape (`Project.implementationSpec`) is untouched, and
+// `expandedSpecViolations` is unchanged. The kind changes what the model is
+// ASKED to write, never what it may return.
+// ---------------------------------------------------------------------------
+
+/** The corpus `game` brief verbatim (research/eval-corpus/arcade-breakout.md). */
+const ARCADE_BRIEF =
+  "A browser arcade game for players: drag the paddle to bounce the ball and break rows of bricks across three levels of increasing speed; track the score live and persist the high score between sessions; keyboard controls, pause and resume, and win or lose screens â€” canvas only.";
+
+/** Run expandBrief against the fetch stub with a delivery kind and return the
+ *  captured user content (the exact bytes the expansion model receives). */
+async function captureKindPrompt(kind?: DeliveryKind | null): Promise<string> {
+  process.env[KEY] = "sk-test";
+  let userContent = "";
+  globalThis.fetch = expandedViaFetch(FULL_SPEC, (init) => {
+    const body = JSON.parse(String(init.body)) as {
+      messages?: Array<{ content?: string }>;
+    };
+    userContent =
+      body.messages?.find((m) => m.content?.includes("Brief:"))?.content ?? "";
+  });
+  const res = await expandBrief(ARCADE_BRIEF, undefined, undefined, kind);
+  assert.equal(res.ok, true, "stub expansion succeeds so the prompt can be inspected");
+  return userContent;
+}
+
+describe("W359 â€” the delivery kind is expansion PROMPT TEXT, never a seventh key", () => {
+  it("renders every kind's paragraph + REQUIRED rows, and only that kind's", async () => {
+    for (const kind of DELIVERY_KINDS) {
+      const content = await captureKindPrompt(kind);
+      const spec = DELIVERY_KIND_SPEC[kind];
+      assert.ok(content.includes(spec.paragraph), `${kind}: the DELIVERY KIND paragraph is on the wire`);
+      assert.ok(
+        content.indexOf(spec.paragraph) < content.indexOf("Brief:"),
+        `${kind}: the paragraph sits by Brief: (immediately before the brief text)`,
+      );
+      assert.ok(
+        content.indexOf(spec.paragraph) > content.indexOf("STRICT honesty + fidelity"),
+        `${kind}: the paragraph follows the field rules it qualifies`,
+      );
+      for (const rule of spec.rules) {
+        assert.ok(content.includes(rule), `${kind}: REQUIRED row on the wire (${rule.slice(0, 48)}â€¦)`);
+      }
+      assert.ok(
+        content.indexOf(spec.rules[0]!) < content.indexOf("- dataFlow:"),
+        `${kind}: the REQUIRED rows sit INSIDE the field-rules block`,
+      );
+      for (const other of DELIVERY_KINDS) {
+        if (other === kind) continue;
+        assert.ok(!content.includes(DELIVERY_KIND_SPEC[other].paragraph), `${kind}: no ${other} paragraph leaks in`);
+        for (const rule of DELIVERY_KIND_SPEC[other].rules) {
+          assert.ok(!content.includes(rule), `${kind}: no ${other} REQUIRED row leaks in`);
+        }
+      }
+    }
+  });
+
+  it("states the per-kind REQUIRED contract the wave asked for", () => {
+    const game = [DELIVERY_KIND_SPEC.game.paragraph, ...DELIVERY_KIND_SPEC.game.rules].join("\n");
+    assert.match(game, /keyboard AND pointer/, "game: input");
+    assert.match(game, /game loop/, "game: the loop");
+    assert.match(game, /<canvas>/, "game: the canvas");
+    assert.match(
+      game,
+      /renderFrame\(ctx: CanvasRenderingContext2D, dtMs: number\): void/,
+      "game: a loop/render signature",
+    );
+    const tool = [DELIVERY_KIND_SPEC.tool.paragraph, ...DELIVERY_KIND_SPEC.tool.rules].join("\n");
+    assert.match(tool, /main\(argv: string\[\]\): Promise<number>/, "tool: the main(argv) entry");
+    assert.match(tool, /exit-code edge cases/, "tool: the exit-code edge cases");
+    const service = [DELIVERY_KIND_SPEC.service.paragraph, ...DELIVERY_KIND_SPEC.service.rules].join("\n");
+    assert.match(service, /startServer\(port: number\)/, "service: a listen signature");
+    assert.match(service, /readiness/i, "service: readiness");
+    const library = [DELIVERY_KIND_SPEC.library.paragraph, ...DELIVERY_KIND_SPEC.library.rules].join("\n");
+    assert.match(library, /importable named exports/, "library: an importable public API");
+    assert.match(library, /JSX\/\.tsx|\.tsx/, "library: a JSX prohibition");
+  });
+
+  it("no kind / null kind / an unknown kind keep the legacy prompt byte-identical", async () => {
+    const legacy = await captureUserContent(ARCADE_BRIEF);
+    assert.ok(!legacy.includes("DELIVERY KIND"), "the legacy prompt carries no kind block");
+    assert.equal(await captureKindPrompt(), legacy, "an omitted kind keeps the legacy bytes");
+    assert.equal(await captureKindPrompt(null), legacy, "a null kind keeps the legacy bytes");
+    assert.equal(await captureKindPrompt("nonsense" as DeliveryKind), legacy, "an unknown kind keeps the legacy bytes");
+  });
+
+  it("adds NO seventh envelope key â€” the six-key reply contract and its strict check are unchanged", async () => {
+    const content = await captureKindPrompt("game");
+    assert.ok(content.includes("Reply with ONE JSON object with EXACTLY these six keys"), "the exact-six-keys rule stands");
+    assert.ok(
+      content.includes(
+        '{"requirements": ["..."], "edgeCases": ["..."], "errorHandling": ["..."], "typeSignatures": ["..."], "dataFlow": ["..."], "negativeConstraints": ["..."]}.',
+      ),
+      "the six-key reply contract line is unchanged",
+    );
+    assert.ok(!content.includes("deliveryKind"), "the kind is never asked for as a JSON key");
+    assert.deepEqual([...EXPANDED_SPEC_KEYS].sort(), ["dataFlow", "edgeCases", "errorHandling", "negativeConstraints", "requirements", "typeSignatures"], "the envelope is still exactly six keys");
+    assert.deepEqual(expandedSpecViolations(FULL_SPEC), [], "a six-key reply is still conforming with a kind in play");
+    assert.equal(
+      expandedSpecViolations({ requirements: FULL_SPEC.requirements }).length,
+      5,
+      "the strict check is unchanged (five missing keys are still five violations)",
+    );
+  });
+
+  it("the one bounded repair re-prompt re-sends the SAME kind contract", async () => {
+    process.env[KEY] = "sk-test";
+    const seq = sequencedFetch([{ notASpec: true }, FULL_SPEC]);
+    globalThis.fetch = seq.fetch;
+    const res = await expandBrief(ARCADE_BRIEF, undefined, undefined, "game");
+    assert.equal(res.ok, true, "the repaired reply conforms");
+    const bodies = seq.bodies();
+    assert.equal(bodies.length, 2, "one primary call + one bounded repair");
+    const contents = bodies.map((b) => {
+      const msgs = (b.messages ?? []) as Array<{ content?: string }>;
+      return msgs.find((m) => typeof m.content === "string" && m.content.includes("Brief:"))?.content ?? "";
+    });
+    for (const [i, content] of contents.entries()) {
+      assert.ok(content.includes(DELIVERY_KIND_SPEC.game.paragraph), `call ${i + 1} carries the kind paragraph`);
+      assert.ok(content.includes(DELIVERY_KIND_SPEC.game.rules[0]!), `call ${i + 1} carries the REQUIRED rows`);
+    }
+    assert.ok(contents[1]!.includes(EXPANSION_REPAIR_LINE), "the repair line is appended to the SAME prompt (kind included)");
   });
 });

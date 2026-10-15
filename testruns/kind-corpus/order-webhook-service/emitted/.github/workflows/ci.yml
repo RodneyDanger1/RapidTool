@@ -1,0 +1,22 @@
+# Emitted by the RapidTool scaffold (fixes/352) — runs THIS tree's own gates.
+# No lockfile is shipped, so `npm install` (not `npm ci`) is the correct step.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test

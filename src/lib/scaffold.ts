@@ -1,15 +1,16 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// scaffold.ts — E-15 scaffold emitter + E-27 shipped-artifact deploy notes.
+// scaffold.ts â€” E-15 scaffold emitter + E-27 shipped-artifact deploy notes.
 //
 // Turns one RapidTool Project into a deterministic, zero-dependency file tree
-// (packet → code on disk): README.md, DEPLOY.md, .env.example, a per-kind
+// (packet â†’ code on disk): README.md, DEPLOY.md, .env.example, a per-kind
 // package.json skeleton + tsconfig, .rapidtool/project.json (the live export),
 // browser boot files for webapp/game kinds (index.html + vite.config.ts + a
-// src/main entry — fixes/135, so `npm run build` really runs in the emitted
+// src/main entry â€” fixes/135, so `npm run build` really runs in the emitted
 // dir), src/ modules derived from the spec graph (generatedSource embedded
-// verbatim where it exists), and tests/oracle.spec.ts — REAL assertions over
-// the emitted modules from the A7 oracle (fixes/135; no todo stubs), plus —
-// for game projects — a placeholder game-asset manifest. Nothing touches the
+// verbatim where it exists), and tests/oracle.spec.ts â€” REAL assertions over
+// the emitted modules from the A7 oracle (fixes/135; no todo stubs), plus â€”
+// for game projects â€” a placeholder game-asset manifest. Nothing touches the
 // filesystem: callers (CLI emit, UI) write the returned {path, body} pairs.
 //
 // fixes/216b (106 T-08 / F-05) + fixes/356 (W356 A3 / 355-A3 L5): no emitted
@@ -19,39 +20,39 @@
 // a MARKED skip under its pinned id, with the shortfall COUNTED on the emitted
 // spec header and the README census. The 354 wave's reachable `assert.fail` was
 // honest about the shortfall but made the whole emission fail its own `npm test`
-// (and withhold `emit --git`) whenever one such row was present — the honesty
+// (and withhold `emit --git`) whenever one such row was present â€” the honesty
 // lives in the visible count, not in an unavoidable red.
 //
-// Pure + deterministic: same Project in ⇒ byte-identical files out. No
+// Pure + deterministic: same Project in â‡’ byte-identical files out. No
 // Date.now(), no fs, no randomness; every timestamp is derived from project
 // fields. All dynamic inserts are escaped (JSON stringify for code, single-
 // line collapse for comments, safe-path segments, slugged package names) so
 // hostile briefs/jobs/entity names cannot break out of strings, fences or
-// paths. .env.example carries PLACEHOLDER values ONLY — never derived from
+// paths. .env.example carries PLACEHOLDER values ONLY â€” never derived from
 // project text, so it can never leak a real secret.
 //
 // fixes/144 (M2): when the project carries a non-empty Project.generatedTree,
-// assembly switches to TREE mode — every valid tree file is emitted VERBATIM
+// assembly switches to TREE mode â€” every valid tree file is emitted VERBATIM
 // at its own repo-relative path (src/api|domain|jobs|state|ui|generated +
 // tests/; sorted by path), spec-graph node files the tree does not cover
 // become thin re-exports of the tree ENTRY module (the file at the path the
-// legacy P6 host would have used — same selection rule), src/ui keeps its
+// legacy P6 host would have used â€” same selection rule), src/ui keeps its
 // honest contract-level shell, and tests/oracle.spec.ts imports the tree
 // entry so the emitted npm test exercises the REAL cross-file tree. Unsafe /
 // reserved / duplicate tree rows are refused loudly (result.warnings). An
-// empty or absent tree ⇒ the legacy single-module embed, byte-identical to
+// empty or absent tree â‡’ the legacy single-module embed, byte-identical to
 // pre-M2 output.
 //
 // fixes/196: leftover job-* nodes after the first hosted generatedSource
-// module re-export that host (emitTreeBridge) — never a TODO(E-15) throw stub
-// and never invented job bodies. No generatedSource ⇒ leftover jobs stay
+// module re-export that host (emitTreeBridge) â€” never a TODO(E-15) throw stub
+// and never invented job bodies. No generatedSource â‡’ leftover jobs stay
 // emitJobStub (byte-identical keyless floor). Tree-covered paths still skip.
 //
-// fixes/247 (G5 · 216y §2.3): the emitted failure paths carry the harness's
-// coded-refusal contract across the artifact boundary — every TODO(E-15) stub
+// fixes/247 (G5 Â· 216y Â§2.3): the emitted failure paths carry the harness's
+// coded-refusal contract across the artifact boundary â€” every TODO(E-15) stub
 // rejection and every entry boot guard prefixes a REGISTERED RT_E code
-// (EMITTED_REFUSAL_CODE below; errors.ts is the code source — never an
-// invented id) in the `<code> · <reason>` refusal-log shape, and the emitted
+// (EMITTED_REFUSAL_CODE below; errors.ts is the code source â€” never an
+// invented id) in the `<code> Â· <reason>` refusal-log shape, and the emitted
 // oracle spec asserts the coded form. A consumer of the tree can classify
 // failures instead of receiving text-only errors.
 //
@@ -61,7 +62,7 @@
 // deploys anywhere by itself. Assets/ and public/ are expected at the emitted
 // scaffold and are NOT engine-generated (explicit boundary in DEPLOY.md).
 //
-// EXACT EXPORT SURFACE (the CLI/UI agents compile against these — do not
+// EXACT EXPORT SURFACE (the CLI/UI agents compile against these â€” do not
 // rename, and keep semantics below stable):
 //
 //   export type ProjectKind            "webapp"|"cli-tool"|"library"|"game"|"service"
@@ -79,7 +80,7 @@ import { exportProjectJson, slugName } from "./io.ts";
 import { canonicalStem } from "./algorithms.ts";
 import { fnv1a } from "./algorithms.ts";
 import { BRIEF_STOPWORDS } from "./sandbox.ts";
-// 342-4: scaffold reads the ONE kind decision from the engine (scaffold → engine
+// 342-4: scaffold reads the ONE kind decision from the engine (scaffold â†’ engine
 // is acyclic; engine never imports scaffold, and scaffold already reaches engine
 // through io.ts). This replaces the module's own brief-noun inference, so the two
 // resolvers cannot drift.
@@ -97,7 +98,7 @@ export type ProjectKind = "webapp" | "cli-tool" | "library" | "game" | "service"
 export type ScaffoldFile = { path: string; body: string };
 
 /**
- * fixes/277 / 340-6 (A3-f07 / W-14 · W-27-C W-28b): the emitted-UI generation
+ * fixes/277 / 340-6 (A3-f07 / W-14 Â· W-27-C W-28b): the emitted-UI generation
  * seam. A caller MAY supply a `uiGeneration` hook (via `ScaffoldOptions`); it
  * receives the emit context and returns replacement source lines for the
  * emitted shell's generated-substance body, or `null` to keep the default.
@@ -118,13 +119,13 @@ export type UiGenerationHook = (request: UiGenerationRequest) => string[] | null
 
 /** Optional inputs to `scaffoldProject` (additive; an omitted hook keeps the
  *  default UI generator). The README's declared-scripts banner is emitted
- *  unconditionally — see `declaredScriptsBanner`. */
+ *  unconditionally â€” see `declaredScriptsBanner`. */
 export type ScaffoldOptions = {
   /** A3-f07: the emitted-UI generation hook (default = `defaultUiGeneration`). */
   uiGeneration?: UiGenerationHook;
   /** fixes/356 (W356 A3; restores 355-A3 L6): what to do with a recorded
    *  below-floor plan (`underProductionRefusalOf`). An ABSENT option is the
-   *  safety default **`"refuse"`** — the writer opens no file at all and the
+   *  safety default **`"refuse"`** â€” the writer opens no file at all and the
    *  run stays withheld. `"refuse"` is the same explicit refusal.
    *  `"partial"` (equivalently `"banner"`, the headless/CLI spelling) lands the
    *  best PARTIAL tree WITH the `> [!CAUTION]` / `## BELOW-FLOOR PLAN` banner at
@@ -132,7 +133,7 @@ export type ScaffoldOptions = {
    *  on the result, so a deliberately shipped partial can never read as a clean
    *  pass. A caller must opt in explicitly to get those bytes. */
   underProduced?: "partial" | "refuse" | "banner";
-  /** R2-04 / fixes/354 A2-F4: the LEGACY boolean spelling of the same policy —
+  /** R2-04 / fixes/354 A2-F4: the LEGACY boolean spelling of the same policy â€”
    *  `true` is the INTERNAL candidate emit (the pre-seal self-typecheck must
    *  see the candidate bytes), `false` is an explicit `underProduced:"refuse"`.
    *  Only consulted when `underProduced` is absent; an absent pair still means
@@ -154,16 +155,16 @@ export type ScaffoldResult =
       warnings?: string[];
       /**
        * fixes/277 (R3-f03 / W-06): machine-readable trail verdicts on the emit
-       * envelope (see `trailVerdictOf`) — present only when true, so clean
+       * envelope (see `trailVerdictOf`) â€” present only when true, so clean
        * emissions stay byte-identical for every existing consumer.
        *
-       * `redTree` — the project's own trail's last tree verdict is an uncleared
+       * `redTree` â€” the project's own trail's last tree verdict is an uncleared
        * `p6.tree.failure`: this artifact is a RECORD of a failed tree-run, not
        * a verified build (the same condition headless's red-tree emit guard
        * refuses/banners on; this field makes it readable WITHOUT the guard).
-       * `partial` — the last synthesis verdict is a phase-6
+       * `partial` â€” the last synthesis verdict is a phase-6
        * `p6.synthesis.refused` while real generated substance exists (prior
-       * chunks kept — `partialTreeRefuse`): the emission is a PARTIAL tree,
+       * chunks kept â€” `partialTreeRefuse`): the emission is a PARTIAL tree,
        * neither the floor nor a full pass. The oracle spec's `capability.N`
        * rows skip-with-reason on a partial emission instead of reddening.
        */
@@ -172,9 +173,9 @@ export type ScaffoldResult =
       /**
        * fixes/354 A2-F4 (Decision D1) / fixes/356 (W356 A3): present when this
        * emit LANDED the below-floor PARTIAL under an EXPLICIT `"partial"` /
-       * `"banner"` policy (the default is refuse — zero files). Carries the
-       * project's own recorded refusal — the banner at the top of the emitted
-       * `README.md` states the same detail — so a caller (or an agent driver)
+       * `"banner"` policy (the default is refuse â€” zero files). Carries the
+       * project's own recorded refusal â€” the banner at the top of the emitted
+       * `README.md` states the same detail â€” so a caller (or an agent driver)
        * can never read the partial as a clean pass. The emission is still
        * `ok:true` (files landed); the caller's non-zero exit / delivery seal is
        * unchanged.
@@ -189,7 +190,7 @@ export type ScaffoldResult =
       gameTemplate?: true;
       /**
        * fixes/277 / 340-6 (A3-f07): which UI-generation path produced the
-       * emitted webapp shell — the default generator, or a caller-supplied
+       * emitted webapp shell â€” the default generator, or a caller-supplied
        * hook whose lines were applied. Absent when the emission carried no
        * webapp UI node (nothing was generated, so there is nothing to report).
        */
@@ -220,31 +221,31 @@ const KIND_LABEL: Record<ProjectKind, string> = {
 
 /** The E-27 honesty stamp every DEPLOY.md must carry (verbatim). */
 export const DEPLOY_HONESTY_STAMP =
-  "> template derived from P9/P12 artifacts — verify credentials before any deploy";
+  "> template derived from P9/P12 artifacts â€” verify credentials before any deploy";
 
 const MACHINE_STAMP = (id: string): string =>
   `machine-generated from RapidTool packet ${id || "unknown"}; regenerate, don't hand-edit.`;
 
 /**
- * fixes/247 (G5 · 216y §2.3 — "the coded-refusal contract stops at the
+ * fixes/247 (G5 Â· 216y Â§2.3 â€” "the coded-refusal contract stops at the
  * artifact boundary"): every emitted failure path names a REGISTERED code
  * from errors.ts (invariant I13), never an invented one. `RT_E_VALIDATION`
  * is the registry's class for an operation a seam declines with a named
- * reason — the same class phases.ts:119 and headless.ts's policy seam stamp
+ * reason â€” the same class phases.ts:119 and headless.ts's policy seam stamp
  * on their guard refusals ("a validation refusal, not an opaque internal
  * error"). The emitted message shape is the refusal-log shape
- * `<RT_E code> · <reason>` (engine.ts refusalClassOf parses it).
+ * `<RT_E code> Â· <reason>` (engine.ts refusalClassOf parses it).
  *
  * The `ErrorCode` annotation is the registry tie (invariant I13): an invented
  * or since-removed id fails `npx tsc --noEmit` instead of riding a string.
  */
 const EMITTED_REFUSAL_CODE: ErrorCode = "RT_E_VALIDATION";
 
-/** `<RT_E code> · <reason>` — the prefix every emitted failure path carries. */
-const emittedRefusal = (reason: string): string => `${EMITTED_REFUSAL_CODE} · ${reason}`;
+/** `<RT_E code> Â· <reason>` â€” the prefix every emitted failure path carries. */
+const emittedRefusal = (reason: string): string => `${EMITTED_REFUSAL_CODE} Â· ${reason}`;
 
 /**
- * fixes/354 A2-F13 — the ONE value-position CJS-residue reading. A `module` or
+ * fixes/354 A2-F13 â€” the ONE value-position CJS-residue reading. A `module` or
  * `exports` reference that cannot load inside the `"type":"module"` package
  * this emitter declares: a `module.exports` use, or a bare `exports.`/
  * `exports =` assignment head (never `xexports.`/`reexports.` look-alikes).
@@ -253,7 +254,7 @@ const emittedRefusal = (reason: string): string => `${EMITTED_REFUSAL_CODE} · $
  * needs. Returns the hit labels (empty = clean ESM) so callers branch on a
  * list, never a boolean. Single-sourced here because scaffold is the one module
  * both the emit boundary (headless's materializer guard) and the synthesis
- * validator (codegen) already import — mirroring the predicate in three places
+ * validator (codegen) already import â€” mirroring the predicate in three places
  * let the emit-time and synthesis-time readings drift (A2-F13).
  */
 export function cjsResidueHits(source: string, opts: { tsExportEquals?: boolean } = {}): string[] {
@@ -268,6 +269,10 @@ export function cjsResidueHits(source: string, opts: { tsExportEquals?: boolean 
 
 /** Emitted code extensions whose bodies must be ESM (the declared package). */
 const EMITTED_CODE_EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i;
+
+/** Emitted source extensions that carry JSX syntax (fixes/359 kind-gate): the
+ *  one reading the emitted `tsconfig.json`'s `jsx` is derived from. */
+const JSX_SOURCE_EXT_RE = /\.(tsx|jsx)$/i;
 
 // ---------------------------------------------------------------------------
 // Small deterministic text helpers (escaping lives here, once)
@@ -293,21 +298,21 @@ function prose(raw: string): string {
 }
 
 /**
- * A4 (SYNTHSPEC P5c): the human display name — the brief's H1 markdown is not
+ * A4 (SYNTHSPEC P5c): the human display name â€” the brief's H1 markdown is not
  * markup. Strips leading `#`s and whitespace and a trailing separator/em-dash
- * (`"# Wildstem Florist —"` → `"Wildstem Florist"`). Pure; falls back to the
+ * (`"# Wildstem Florist â€”"` â†’ `"Wildstem Florist"`). Pure; falls back to the
  * collapsed raw value when stripping would empty it.
  */
 function displayName(raw: string): string {
   const collapsed = collapse(raw);
   const stripped = collapsed
     .replace(/^#{1,6}\s*/, "")
-    .replace(/\s*[—–-]\s*$/, "")
+    .replace(/\s*[â€”â€“-]\s*$/, "")
     .trim();
   return stripped || collapsed || "RapidTool scaffold";
 }
 
-/** JSON-escaped string literal body (safe inside '…', "…", `…` and fences). */
+/** JSON-escaped string literal body (safe inside 'â€¦', "â€¦", `â€¦` and fences). */
 function jstr(raw: string): string {
   return JSON.stringify(String(raw ?? ""));
 }
@@ -341,7 +346,7 @@ function safeNodePath(raw: string, nodeId: string, index: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// fixes/144 (M2): generatedTree → scaffold assembly helpers.
+// fixes/144 (M2): generatedTree â†’ scaffold assembly helpers.
 //
 // A keyed P6 journey may land Project.generatedTree: {path, source, hash,
 // attempt} rows (types.ts). When non-empty, scaffoldProject assembles those
@@ -349,7 +354,7 @@ function safeNodePath(raw: string, nodeId: string, index: number): string {
 // is validated BEFORE anything is emitted: only the scaffold's own src/
 // subdirs (the spec-graph families api/domain/jobs/state/ui plus the
 // src/generated fallback family) and tests/ are legal; traversal (".."),
-// absolute paths (POSIX "/x" or Windows "C:\x" — any backslash), reserved
+// absolute paths (POSIX "/x" or Windows "C:\x" â€” any backslash), reserved
 // scaffold files and junk shapes are REFUSED loudly (result.warnings) and
 // the row is skipped. Assembly stays pure + deterministic: tree files are
 // emitted verbatim (never wrapped in scaffold headers), sorted by path.
@@ -371,7 +376,7 @@ const TREE_ALLOWED_ROOTS = [
  * though they sit outside every TREE_ALLOWED_ROOTS prefix.
  *
  * fixes/216d (106 T-04 / F-03): the engine's own tree ENTRY barrel is written
- * at `src/generated.ts` (codegen.server.ts `TREE_ENTRY_PATH`) — a path that
+ * at `src/generated.ts` (codegen.server.ts `TREE_ENTRY_PATH`) â€” a path that
  * starts with NO allowed root ("src/generated/" needs the trailing slash), so
  * the allow-list refused the declared entry BY CONSTRUCTION: the barrel was
  * dropped and the entry silently degraded to the alphabetically-first tree
@@ -381,11 +386,11 @@ const TREE_ALLOWED_ROOTS = [
 const TREE_ALLOWED_FILES = new Set(["src/generated.ts"]);
 
 /** Scaffold-owned files a tree may never overwrite (tests/oracle.spec.ts is
- * the machine-verified acceptance contract — fixes/135 — always emitted by
+ * the machine-verified acceptance contract â€” fixes/135 â€” always emitted by
  * the scaffold itself; boot entries live outside the allowed roots). */
 const TREE_RESERVED = new Set(["tests/oracle.spec.ts"]);
 
-/** A single safe path segment — the same charset the emitter's own paths use. */
+/** A single safe path segment â€” the same charset the emitter's own paths use. */
 const TREE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 
 /**
@@ -435,7 +440,7 @@ function treeTwinPath(paths: readonly { path: string }[], path: string): string 
   return hit ? hit.path : null;
 }
 
-/** Valid TS identifier from arbitrary text (never empty → `_`). */
+/** Valid TS identifier from arbitrary text (never empty â†’ `_`). */
 function ident(raw: string, fallback = "value"): string {
   const base = String(raw ?? "").trim();
   let out = (base || fallback)
@@ -537,7 +542,7 @@ function tsImportPath(fromDir: string, toPath: string): string {
   // relSpecifier strips the trailing extension; node --test (strip-types)
   // resolves ESM imports only when the REAL file extension is present, so
   // re-append the stripped .ts/.mts/.cts (the only extensions this emitter
-  // ever imports — .tsx modules are never imported from specs).
+  // ever imports â€” .tsx modules are never imported from specs).
   const hadExt = /\.[A-Za-z0-9]+$/.test(String(toPath ?? ""));
   const ext = hadExt ? String(toPath).match(/\.[A-Za-z0-9]+$/)?.[0] ?? "" : ".ts";
   return `${relSpecifier(fromDir, toPath)}${ext}`;
@@ -552,7 +557,7 @@ function dirOf(path: string): string {
 /**
  * fixes/135: is this generatedSource the deterministic P6 engine template
  * (sandbox.runGenerated's own shape contract)? Only that module is safe to
- * gain a machine-appended export surface — keyed/model modules keep their own
+ * gain a machine-appended export surface â€” keyed/model modules keep their own
  * shape and are never touched. The three names the surface exports must all
  * exist for the append to be legal.
  */
@@ -569,13 +574,13 @@ function isTemplateModule(source: string): boolean {
 const TEMPLATE_EXPORT_TAIL =
   "// Machine export surface (scaffold emitter, fixes/135): the P6 template's\n" +
   "// top-level names, exported so tests/oracle.spec.ts can assert the module's\n" +
-  "// REAL behavior. Not part of generatedSource — regenerating the scaffold\n" +
+  "// REAL behavior. Not part of generatedSource â€” regenerating the scaffold\n" +
   "// restores this line automatically.\n" +
   "export { JOBS, REJECTION, synthesize };\n";
 
 /**
  * fixes/352: does this generated module source export `name`? Used to bind a
- * tree-covered job module to a recorded run export the tree genuinely exposes —
+ * tree-covered job module to a recorded run export the tree genuinely exposes â€”
  * a name the module does not export is never called (no dangling binding).
  */
 function sourceExportsName(source: string, name: string): boolean {
@@ -617,23 +622,23 @@ function iso(ts?: number): string {
 /** One-line, markdown-safe title-ish string (name/brief/notes inserts). */
 function mdLine(raw: string, cap = 200): string {
   const c = collapse(raw);
-  return c.length > cap ? `${c.slice(0, cap).trimEnd()}…` : c;
+  return c.length > cap ? `${c.slice(0, cap).trimEnd()}â€¦` : c;
 }
 
 // ---------------------------------------------------------------------------
-// Kind resolution (342-4: ONE decision, read here — never re-inferred)
+// Kind resolution (342-4: ONE decision, read here â€” never re-inferred)
 // ---------------------------------------------------------------------------
 
 // Project.kind (types.ts) is the widened 5-way DeliveryKind the engine decides
 // once (engine.deliveryKindOf) and stamps at the keyed P6 seam
 // (engine.withDeliveryKind). projectKindOf only MAPS that single value onto
-// this module's 5-way scaffold taxonomy — it does not infer from the brief.
+// this module's 5-way scaffold taxonomy â€” it does not infer from the brief.
 //
 // History: pre-342-4 this module kept its own register-keyword inference
 // (fixes/341-1 aligned it with engine.uiKindOf by hand), which is exactly the
 // drift the single source of truth removes: "A kanban board library" resolved
 // library in the engine but webapp here, so the emitted webapp UI bound a form
-// to a library API — an unrepairable pre-seal typecheck refusal. Now both
+// to a library API â€” an unrepairable pre-seal typecheck refusal. Now both
 // resolvers read deliveryKindOf, so they cannot disagree.
 //
 // 347-2 (measured defect): a stored `app` label must not beat a brief that
@@ -663,7 +668,7 @@ export function projectKindOf(project: Project): ProjectKind {
 }
 
 // ---------------------------------------------------------------------------
-// Per-kind static content (constants — never derived from project text, so
+// Per-kind static content (constants â€” never derived from project text, so
 // .env.example can never leak project content)
 // ---------------------------------------------------------------------------
 
@@ -678,15 +683,15 @@ const ENV_LINES: Record<ProjectKind, string[]> = {
 const ENV_MEANING: Record<string, string> = {
   VITE_API_BASE_URL:
     "base URL of any backend the UI talks to (local-first: point it at your local dev server)",
-  VITE_API_KEY: "client-facing key — PLACEHOLDER, never commit a real one",
+  VITE_API_KEY: "client-facing key â€” PLACEHOLDER, never commit a real one",
   API_BASE_URL: "base URL of any external API the tool talks to (local-first)",
-  API_KEY: "API credential — PLACEHOLDER, never commit a real one",
+  API_KEY: "API credential â€” PLACEHOLDER, never commit a real one",
   PORT: "port the service listens on locally",
 };
 
 function envExample(kind: ProjectKind): string {
   return [
-    "# RapidTool scaffold .env.example — PLACEHOLDER values ONLY (never commit real",
+    "# RapidTool scaffold .env.example â€” PLACEHOLDER values ONLY (never commit real",
     "# secrets). Copy to .env and fill real values locally; the scaffold is local-first",
     "# and nothing here deploys anywhere by itself.",
     ...ENV_LINES[kind].map((name) => `${name}=PLACEHOLDER`),
@@ -695,9 +700,9 @@ function envExample(kind: ProjectKind): string {
 }
 
 /**
- * fixes/217f (T4.2, 216x §2.3 item 1): the emitted tree's `.gitignore`. Once a
+ * fixes/217f (T4.2, 216x Â§2.3 item 1): the emitted tree's `.gitignore`. Once a
  * real install + build runs INSIDE an emitted tree (T4.1), `node_modules/` and
- * `dist/` land in the artifact and the tree stops being a reviewable unit —
+ * `dist/` land in the artifact and the tree stops being a reviewable unit â€”
  * this file is what keeps that diff clean. It ignores ONLY what an install /
  * build / verify run leaves behind and keeps the reviewed artifacts tracked:
  * the generated source, `.rapidtool/project.json`, the notes and the report
@@ -706,7 +711,7 @@ function envExample(kind: ProjectKind): string {
  */
 function gitignoreFile(): string {
   return [
-    "# RapidTool scaffold .gitignore — keeps this emitted tree a reviewable unit.",
+    "# RapidTool scaffold .gitignore â€” keeps this emitted tree a reviewable unit.",
     "# Ignore only what a real install/build/verify run leaves behind (T4.1/T4.2);",
     "# the generated source, .rapidtool/project.json and the notes stay tracked.",
     "# Secrets never enter the tree: .env stays local, only .env.example ships.",
@@ -770,7 +775,7 @@ function licenseFile(project: Project): string {
 
 /**
  * fixes/352 (release hygiene): a CI workflow that runs THIS emitted tree's own
- * declared gates — install, typecheck, test. It names only scripts packageJson
+ * declared gates â€” install, typecheck, test. It names only scripts packageJson
  * actually declares for the kind (PKG_SCRIPTS), never a phantom one. `npm
  * install` is used because no lockfile is emitted (the package.json is
  * lockfile-free-but-correct); `npm ci` would refuse without one.
@@ -788,7 +793,7 @@ function ciWorkflowFile(kind: ProjectKind, hasTests: boolean): string {
     steps.push("      - name: Test", "        run: npm test");
   }
   return [
-    "# Emitted by the RapidTool scaffold (fixes/352) — runs THIS tree's own gates.",
+    "# Emitted by the RapidTool scaffold (fixes/352) â€” runs THIS tree's own gates.",
     "# No lockfile is shipped, so `npm install` (not `npm ci`) is the correct step.",
     "name: ci",
     "",
@@ -826,7 +831,7 @@ const PKG_DEV_DEPS: Partial<Record<ProjectKind, Record<string, string>>> = {
   },
   game: { "@types/node": "^22.0.0", typescript: "^5.7.0", vite: "^7.0.0" },
   // W52 / 338-5: `tsx` was declared on cli-tool/service but no emitted script or
-  // import consumed it (the entries run `node --experimental-strip-types`) —
+  // import consumed it (the entries run `node --experimental-strip-types`) â€”
   // declare-or-strike, so it is not declared. Add it back only with a script
   // that actually uses it.
   "cli-tool": { "@types/node": "^22.0.0", typescript: "^5.7.0" },
@@ -838,7 +843,7 @@ const PKG_DEV_DEPS: Partial<Record<ProjectKind, Record<string, string>>> = {
 // below are DECLARED on every emitted tree of the kind. They are only
 // VERIFIED when the caller runs `emit --verify-kind` (scratch npm install +
 // the declared build/test, bounded); without that opt-in flag they are
-// unverified scaffold claims — declare-or-strike. W48 / 334-3 (T1a): the
+// unverified scaffold claims â€” declare-or-strike. W48 / 334-3 (T1a): the
 // emitted README says so up front (declaredScriptsBanner below).
 const PKG_SCRIPTS: Partial<Record<ProjectKind, Record<string, string>>> = {
   webapp: {
@@ -866,7 +871,7 @@ const PKG_SCRIPTS: Partial<Record<ProjectKind, Record<string, string>>> = {
   service: {
     typecheck: "tsc --noEmit",
     test: "node --experimental-strip-types --test tests/oracle.spec.ts",
-    // fixes/277 (R3-f06): the service kind's runnable entry — `npm start`
+    // fixes/277 (R3-f06): the service kind's runnable entry â€” `npm start`
     // executes src/main.ts (readiness = the entry's structured stub, which
     // reads PORT and refuses honestly until the service body is implemented).
     start: "node --experimental-strip-types src/main.ts",
@@ -875,7 +880,7 @@ const PKG_SCRIPTS: Partial<Record<ProjectKind, Record<string, string>>> = {
 
 /**
  * fixes/352 (release hygiene): the version is DERIVED from the project's own
- * recorded state, never the `0.0.0` placeholder — a run that sealed (reached
+ * recorded state, never the `0.0.0` placeholder â€” a run that sealed (reached
  * the deploy phases) publishes 1.x, an in-progress run 0.x, minor = the
  * recorded current phase. Pure/deterministic (reads project fields only). The
  * library entry re-exports the same value, so `entry.version` can never drift
@@ -893,7 +898,7 @@ function projectVersion(project: Project): string {
 /**
  * fixes/347-2 (no-invention hard rule): the brief's own statement that a figure
  * class is withheld. When it does, the emitter may NOT author such a literal
- * into the tree (the model's own verbatim generated-tree bytes are untouched —
+ * into the tree (the model's own verbatim generated-tree bytes are untouched â€”
  * only the scaffold-authored modules are policed).
  */
 function briefWithholdsFigures(brief: string): boolean {
@@ -906,8 +911,8 @@ function briefWithholdsFigures(brief: string): boolean {
 }
 
 /** A scaffold-authored code line that invents a withheld figure literal. The
- *  address arm matches an object PROPERTY literal (`address: "451 East …"` or a
- *  quoted street address) — never a validation message assigned to a field
+ *  address arm matches an object PROPERTY literal (`address: "451 East â€¦"` or a
+ *  quoted street address) â€” never a validation message assigned to a field
  *  (`found.address = "Enter the delivery address."`). */
 function inventedFigureLine(line: string): boolean {
   return (
@@ -931,17 +936,17 @@ function packageJson(kind: ProjectKind, project: Project, hasTests: boolean): st
     type: "module",
     description: (() => {
       // fixes/353 (declare-or-strike): the description is a synthesized one-liner
-      // derived from the project's own name/kind — NEVER the raw brief dumped
-      // into JSON (the measured `"# <brief> ## What this is …"` truncation).
+      // derived from the project's own name/kind â€” NEVER the raw brief dumped
+      // into JSON (the measured `"# <brief> ## What this is â€¦"` truncation).
       const name = displayName(project.name) || slugName(project.name) || "Untitled project";
       const id = typeof project.id === "string" && project.id !== "" ? ` (packet ${project.id.slice(0, 8)})` : "";
-      return `${name} — ${KIND_LABEL[kind]} generated by RapidTool from a governed build${id}.`;
+      return `${name} â€” ${KIND_LABEL[kind]} generated by RapidTool from a governed build${id}.`;
     })(),
     scripts,
     dependencies: PKG_DEPS[kind] ?? {},
     devDependencies: PKG_DEV_DEPS[kind] ?? {},
     engines: { node: ">=22" },
-    generatedBy: `RapidTool scaffold emitter — ${MACHINE_STAMP(project.id)}`,
+    generatedBy: `RapidTool scaffold emitter â€” ${MACHINE_STAMP(project.id)}`,
     rapidtool: {
       producer: isTemplateModule(String(project.generatedSource ?? ""))
         ? "template"
@@ -951,7 +956,7 @@ function packageJson(kind: ProjectKind, project: Project, hasTests: boolean): st
       packetId: project.id,
     },
   };
-  // fixes/277 (R3-f06 / W-15): per-kind entry wiring — a real consumer
+  // fixes/277 (R3-f06 / W-15): per-kind entry wiring â€” a real consumer
   // (a bundler for the game, `npm exec` for a CLI, an import for a library,
   // `npm start` for a service) needs the entry DECLARED, not just emitted.
   // Every value names only a file this emitter actually writes
@@ -966,7 +971,7 @@ function packageJson(kind: ProjectKind, project: Project, hasTests: boolean): st
     // 335-3: `main` DECLARES that entry module too, so a consumer that
     // resolves the package's program (the tree-run entry smoke) finds the
     // file the launcher actually runs rather than an unrelated job module.
-    // Importing it runs nothing — the entry carries the direct-run guard.
+    // Importing it runs nothing â€” the entry carries the direct-run guard.
     pkg.bin = { [slug]: `bin/${slug}.mjs` };
     pkg.main = "./src/main.ts";
   } else if (kind === "library") {
@@ -981,7 +986,22 @@ function packageJson(kind: ProjectKind, project: Project, hasTests: boolean): st
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
 
-function tsconfigJson(kind: ProjectKind, hasTests: boolean): string {
+/**
+ * The emitted `tsconfig.json`.
+ *
+ * `emittedJsx` is the caller's reading of the file set this emit ACTUALLY
+ * writes (any `.tsx`/`.jsx` source): fixes/359 (W359 kind-gate) derives `jsx`
+ * from it instead of from a hard-coded kind list. A kind list is a second
+ * source of truth for "does this tree carry JSX source", so it drifts the
+ * moment an emitter writes a `.tsx` for a kind the list does not name â€” which
+ * is exactly the W358 defect: `tool`/`service`/`library` were handed
+ * `src/ui/console.tsx` and the 353 briefed-site pages with no `jsx`, so their
+ * own declared `npm run typecheck` red with TS17004/TS6142 on a clean tree.
+ * `preserve` admits a `.tsx` module with no transform and NO React runtime;
+ * only a kind whose emitted package declares its renderer (`PKG_DEPS[kind]`
+ * .react â€” webapp today) gets the real `react-jsx` transform.
+ */
+function tsconfigJson(kind: ProjectKind, hasTests: boolean, emittedJsx: boolean): string {
   const dom = kind === "webapp" || kind === "game";
   const lib = dom ? ["ES2022", "DOM", "DOM.Iterable"] : ["ES2022"];
   const cfg = {
@@ -1003,11 +1023,9 @@ function tsconfigJson(kind: ProjectKind, hasTests: boolean): string {
       // fails on a clean tree. `preserve` admits the extension with no
       // transform and NO React runtime (the game kind declares no react);
       // webapp keeps the real `react-jsx` transform.
-      ...(kind === "webapp"
-        ? { jsx: "react-jsx" }
-        : kind === "game"
-          ? { jsx: "preserve" }
-          : {}),
+      ...(emittedJsx
+        ? { jsx: PKG_DEPS[kind]?.react !== undefined ? "react-jsx" : "preserve" }
+        : {}),
     },
     include: hasTests ? ["src", "tests"] : ["src"],
   };
@@ -1015,7 +1033,7 @@ function tsconfigJson(kind: ProjectKind, hasTests: boolean): string {
 }
 
 // ---------------------------------------------------------------------------
-// Spec-graph node stubs (E-15 #2) — typed skeletons per node, in topo order
+// Spec-graph node stubs (E-15 #2) â€” typed skeletons per node, in topo order
 // ---------------------------------------------------------------------------
 
 const TS_FIELD_TYPES: Record<string, string> = {
@@ -1032,7 +1050,7 @@ const TS_FIELD_TYPES: Record<string, string> = {
   json: "unknown",
 };
 
-/** Map a contract field type ("ulid?", "int", …) to a TS type. */
+/** Map a contract field type ("ulid?", "int", â€¦) to a TS type. */
 function tsFieldType(raw: string): string {
   const t = String(raw ?? "").trim();
   const nullable = t.endsWith("?");
@@ -1049,7 +1067,7 @@ function sourceHeader(
 ): string[] {
   return [
     "// ---------------------------------------------------------------------------",
-    `// ${path} — ${prose(purpose)}`,
+    `// ${path} â€” ${prose(purpose)}`,
     `// ${MACHINE_STAMP(project.id)}`,
     ...extra,
     "// ---------------------------------------------------------------------------",
@@ -1063,13 +1081,13 @@ function emitSchema(node: { file: string; purpose: string }, project: Project): 
   const lines = [
     ...sourceHeader(node.file, node.purpose, project, [
       "// REAL domain module (fixes/352): the typed entities recorded in the A6",
-      "// data contract. This module owns only these types — it never re-exports",
+      "// data contract. This module owns only these types â€” it never re-exports",
       "// the generated tree. Extend the field list as the contract grows.",
     ]),
   ];
   if (!entities.length) {
     lines.push(
-      "// No contract entities recorded yet — complete the P0/P1 phases to",
+      "// No contract entities recorded yet â€” complete the P0/P1 phases to",
       "// synthesize the A6 data contract.",
       "export {};",
       "",
@@ -1089,7 +1107,7 @@ function emitSchema(node: { file: string; purpose: string }, project: Project): 
     }
     // Duplicate/colliding field identifiers (same field twice, or hostile
     // names that sanitize onto the same identifier) would emit duplicate
-    // interface members — a TS2300 error that breaks `npm run typecheck` on
+    // interface members â€” a TS2300 error that breaks `npm run typecheck` on
     // the scaffolded tree. First occurrence wins; later duplicates are
     // skipped (the source contract is corrupt; nothing is invented).
     const taken = new Set<string>();
@@ -1110,12 +1128,12 @@ function emitSchema(node: { file: string; purpose: string }, project: Project): 
  * api node: the recorded A6 contract endpoints + the router over them.
  *
  * fixes/328 P2 (TA-15 / P0-04): the recorded endpoint table is complete
- * (method+path+job), so `route` dispatches for real — a recorded endpoint
+ * (method+path+job), so `route` dispatches for real â€” a recorded endpoint
  * whose job module was emitted (see `emitJobModule`) is served by that module;
  * an endpoint with no emitted implementation still refuses with the coded
- * `RT_E_VALIDATION · TODO(E-15) stub` form (honest: the seam is absent, and
+ * `RT_E_VALIDATION Â· TODO(E-15) stub` form (honest: the seam is absent, and
  * nothing pretends otherwise). `opts.jobModules` names the REAL job modules
- * this emit wrote (label + sanitized path); empty ⇒ the pre-328 bytes'
+ * this emit wrote (label + sanitized path); empty â‡’ the pre-328 bytes'
  * behaviour (every recorded endpoint refuses).
  */
 function emitApi(
@@ -1131,7 +1149,7 @@ function emitApi(
       "// HTTP contracts bound to jobs (A6). The router below dispatches every",
       "// recorded endpoint to its job module; an endpoint whose job has no",
       "// emitted implementation still refuses with the coded RT_E_VALIDATION",
-      "// form — never a silent success. tests/oracle.spec.ts names the oracle",
+      "// form â€” never a silent success. tests/oracle.spec.ts names the oracle",
       "// expectations.",
     ]),
     ...jobModules.map(
@@ -1146,10 +1164,10 @@ function emitApi(
       ? endpoints.map(
           (e) => `  { method: ${jstr(e.method)}, path: ${jstr(e.path)}, job: ${jstr(e.job)} },`,
         )
-      : [`  // No endpoints recorded — complete P0/P1 (A6 synthesizer).`]),
+      : [`  // No endpoints recorded â€” complete P0/P1 (A6 synthesizer).`]),
     `];`,
     "",
-    "/** Recorded endpoints → the REAL job modules this emit materialised. */",
+    "/** Recorded endpoints â†’ the REAL job modules this emit materialised. */",
     "const HANDLERS: Record<string, (input: unknown) => Promise<unknown>> = {",
     ...jobModules.map((m, i) => `  ${jstr(m.label)}: (input: unknown) => jobMod${i}.handle(input),`),
     "};",
@@ -1161,7 +1179,7 @@ function emitApi(
     `): Promise<{ ok: boolean; job?: string; result?: unknown }> {`,
     `  const endpoint = ENDPOINTS.find((e) => e.method === method && e.path === path);`,
     `  if (!endpoint) {`,
-    `    throw new Error(\`${EMITTED_REFUSAL_CODE} · unknown endpoint \${method} \${path} — not in the recorded A6 contract\`);`,
+    `    throw new Error(\`${EMITTED_REFUSAL_CODE} Â· unknown endpoint \${method} \${path} â€” not in the recorded A6 contract\`);`,
     `  }`,
     `  const handler = HANDLERS[endpoint.job];`,
     `  if (!handler) {`,
@@ -1182,13 +1200,13 @@ function emitApi(
  * container that persists through an injectable `StorageSeam`: localStorage
  * when the runtime provides it, an in-memory fallback otherwise. The emitted
  * UI/order flow reads and writes the same container, so state survives a
- * reload. No network, no fabricated behaviour — every read/write is real.
+ * reload. No network, no fabricated behaviour â€” every read/write is real.
  */
 function emitStore(node: { file: string; purpose: string }, project: Project): string {
   const keyBase = jstr(slugName(project.name) || "project");
   return [
     ...sourceHeader(node.file, node.purpose, project, [
-      "// REAL persisted state container (fixes/352) — dependency-free, backed by",
+      "// REAL persisted state container (fixes/352) â€” dependency-free, backed by",
       "// an injectable StorageSeam (localStorage in the browser, an in-memory",
       "// fallback under Node/tests). Nothing here is a mock or a stub.",
     ]),
@@ -1238,7 +1256,7 @@ function emitStore(node: { file: string; purpose: string }, project: Project): s
     `  }`,
     `}`,
     ``,
-    `/** Real persisted checkpoint container — every mutation is durable. */`,
+    `/** Real persisted checkpoint container â€” every mutation is durable. */`,
     `export class CheckpointStore {`,
     `  private readonly checkpoints = new Map<number, Checkpoint>();`,
     `  private readonly listeners = new Set<() => void>();`,
@@ -1268,7 +1286,7 @@ function emitStore(node: { file: string; purpose: string }, project: Project): s
     `    try {`,
     `      this.storage.setItem(this.key, JSON.stringify([...this.checkpoints.values()]));`,
     `    } catch {`,
-    `      // Storage unavailable or full — the in-memory copy stays authoritative.`,
+    `      // Storage unavailable or full â€” the in-memory copy stays authoritative.`,
     `    }`,
     `    for (const listener of this.listeners) listener();`,
     `  }`,
@@ -1302,7 +1320,7 @@ function emitStore(node: { file: string; purpose: string }, project: Project): s
     ``,
     `export type OrderRecord = { id: string; message: string; submittedAt: string; payload: unknown };`,
     ``,
-    `/** Real persisted order log — the ordering flow's records survive a reload. */`,
+    `/** Real persisted order log â€” the ordering flow's records survive a reload. */`,
     `export class OrderLog {`,
     `  private readonly orders = new Map<string, OrderRecord>();`,
     `  private readonly storage: StorageSeam;`,
@@ -1337,7 +1355,7 @@ function emitStore(node: { file: string; purpose: string }, project: Project): s
     `      try {`,
     `        this.storage.setItem(this.key, JSON.stringify([...this.orders.values()]));`,
     `      } catch {`,
-    `        // Storage unavailable — the in-memory log still serves this session.`,
+    `        // Storage unavailable â€” the in-memory log still serves this session.`,
     `      }`,
     `    }`,
     `    return { ...stored };`,
@@ -1352,7 +1370,7 @@ function emitStore(node: { file: string; purpose: string }, project: Project): s
     `    return [...this.orders.values()].map((rec) => ({ ...rec }));`,
     `  }`,
     ``,
-    `  /** Order ids recorded so far — the persisted reference list. */`,
+    `  /** Order ids recorded so far â€” the persisted reference list. */`,
     `  readonlyReferences(): string[] {`,
     `    return this.all().map((rec) => rec.id);`,
     `  }`,
@@ -1376,12 +1394,12 @@ function emitStore(node: { file: string; purpose: string }, project: Project): s
 /**
  * fixes/352: the TREE-mode api module. Pre-fix, an uncovered `api` node in tree
  * mode was a thin `export * from "../generated.ts"` bridge, so `src/api/routes.ts`
- * claimed to be an API while exposing no endpoint of its own — the emitted tree
+ * claimed to be an API while exposing no endpoint of its own â€” the emitted tree
  * lied about having an API. This emits a REAL router over the recorded A6
  * endpoints, dispatching each to the generated tree's own job module through the
  * job's bound run export (verified to exist in the tree source). An endpoint
  * whose job module the tree did not materialise refuses with the coded
- * RT_E_VALIDATION form — never a silent success.
+ * RT_E_VALIDATION form â€” never a silent success.
  */
 function emitTreeApi(
   node: { file: string; purpose: string },
@@ -1402,7 +1420,7 @@ function emitTreeApi(
       "// REAL HTTP module (fixes/352): the recorded A6 endpoints, dispatched to",
       "// the generated tree's own job modules through each job's bound run export.",
       "// An endpoint whose job module the tree did not materialise refuses with the",
-      "// coded RT_E_VALIDATION form — never a silent success.",
+      "// coded RT_E_VALIDATION form â€” never a silent success.",
     ]),
     ...jobModules.map(
       (m, i) => `import * as treeJob${i} from ${jstr(tsImportPath(dirOf(apiPath), m.path))};`,
@@ -1416,10 +1434,10 @@ function emitTreeApi(
       ? endpoints.map(
           (e) => `  { method: ${jstr(e.method)}, path: ${jstr(e.path)}, job: ${jstr(e.job)} },`,
         )
-      : [`  // No endpoints recorded — complete P0/P1 (A6 synthesizer).`]),
+      : [`  // No endpoints recorded â€” complete P0/P1 (A6 synthesizer).`]),
     `];`,
     "",
-    "/** Recorded endpoints → the generated tree's REAL job modules. */",
+    "/** Recorded endpoints â†’ the generated tree's REAL job modules. */",
     "const HANDLERS: Record<string, (input: unknown) => Promise<unknown>> = {",
     ...jobModules.map((m, i) => `  ${jstr(m.label)}: ${call(m, i)},`),
     "};",
@@ -1436,7 +1454,7 @@ function emitTreeApi(
     "): Promise<{ ok: boolean; job?: string; result?: unknown }> {",
     "  const endpoint = ENDPOINTS.find((e) => e.method === method && e.path === path);",
     "  if (!endpoint) {",
-    `    throw new Error(\`${EMITTED_REFUSAL_CODE} · unknown endpoint \${method} \${path} — not in the recorded A6 contract\`);`,
+    `    throw new Error(\`${EMITTED_REFUSAL_CODE} Â· unknown endpoint \${method} \${path} â€” not in the recorded A6 contract\`);`,
     "  }",
     "  const handler = HANDLERS[endpoint.job];",
     "  if (!handler) {",
@@ -1454,7 +1472,7 @@ function oracleExpectations(project: Project, jobLabel: string | null): string[]
   const rows = project.oracle.filter((row) => row.job === jobLabel);
   if (!rows.length) return [`  // no oracle rows recorded for this job yet`];
   return rows.map(
-    (row) => `  // # ${row.id} ${row.name} — ${prose(row.given)} => ${prose(row.expect)}`,
+    (row) => `  // # ${row.id} ${row.name} â€” ${prose(row.given)} => ${prose(row.expect)}`,
   );
 }
 
@@ -1488,7 +1506,7 @@ function emitGeneratedHost(
   const hostLines = [
     ...sourceHeader(node.file, node.purpose, project, [
       "// This file hosts the machine-verified P6 synthesis module (project.generatedSource),",
-      "// verbatim below. Its self-tests ran inside the engine isolate at P6 — keep them",
+      "// verbatim below. Its self-tests ran inside the engine isolate at P6 â€” keep them",
       "// green when you implement the surrounding jobs.",
     ]),
     source.trim(),
@@ -1497,7 +1515,7 @@ function emitGeneratedHost(
   // fixes/135 (real oracle tests): when the hosted module is the deterministic
   // P6 engine template, expose its top-level names so tests/oracle.spec.ts can
   // assert the module's real behavior (JOBS/synthesize/REJECTION). The tail is
-  // added AFTER the verbatim source — generatedSource itself is untouched and
+  // added AFTER the verbatim source â€” generatedSource itself is untouched and
   // keyed/model modules (which carry their own export shape) never get it.
   if (isTemplateModule(source)) hostLines.push(TEMPLATE_EXPORT_TAIL);
   return hostLines.join("\n");
@@ -1507,7 +1525,7 @@ function emitGeneratedHost(
  * fixes/144 (M2): a spec-graph node file the generated tree does NOT cover.
  * In tree mode the node materializes as a THIN RE-EXPORT of the tree's ENTRY
  * module, so every graph path the scaffold promised still exists + resolves,
- * while all real code stays in the tree files — never a TODO(E-15) stub
+ * while all real code stays in the tree files â€” never a TODO(E-15) stub
  * sitting next to a real implementation. `path` is the SANITIZED emitted path
  * (safeNodePath output), never raw node.file text. The relative specifier
  * keeps the real extension (node --test strip-types and the emitted tsconfig's
@@ -1523,7 +1541,7 @@ function emitTreeBridge(
   return [
     ...sourceHeader(node.file, node.purpose, project, [
       "// fixes/144 (M2) tree bridge: the generated tree ships no file at this spec-graph",
-      `// path, so this module re-exports the tree ENTRY module (${entryPath}) verbatim —`,
+      `// path, so this module re-exports the tree ENTRY module (${entryPath}) verbatim â€”`,
       "// real generated code, not a TODO stub. Align this node's file with a tree path",
       "// (or regenerate the tree) to replace the bridge.",
     ]),
@@ -1533,7 +1551,7 @@ function emitTreeBridge(
 }
 
 // ---------------------------------------------------------------------------
-// fixes/328 P2 (TA-15 / P0-04) — REAL per-job modules from the recorded API
+// fixes/328 P2 (TA-15 / P0-04) â€” REAL per-job modules from the recorded API
 // surface.
 //
 // The keyless floor keeps the honest coded refusal (`emitJobStub`): with no
@@ -1544,14 +1562,14 @@ function emitTreeBridge(
 // placeholder or a re-export bridge: the recorded signature is emitted with
 // its own name, parameters and return type over a deterministic in-module
 // record store, so the file is executable code carrying the job's declared
-// export surface — never one module wearing N filenames.
+// export surface â€” never one module wearing N filenames.
 //
 // Honesty boundary: the recorded spec carries the API SURFACE (names, params,
-// return types) plus the job's A6 endpoints and A7 row ids — it does NOT carry
+// return types) plus the job's A6 endpoints and A7 row ids â€” it does NOT carry
 // domain rules or field shapes for the referenced contract types. The body
 // implements exactly the recorded call (a keyed store transition) and every
 // referenced-but-unshaped contract type is declared OPAQUELY. Nothing is
-// invented. The signature→job binding mirrors codegen's
+// invented. The signatureâ†’job binding mirrors codegen's
 // `bindSignaturesToJobTargets` (same rule: first job node, graph order, whose
 // label the function name contains, labels shorter than 3 chars never match);
 // it is mirrored rather than imported because codegen.server.ts is a
@@ -1570,9 +1588,9 @@ type ParsedSignature = {
   returns: string;
   /** Inner type of the recorded `Promise<X>` return, else "". */
   returnInner: string;
-  /** The (inner) return is an array type ⇒ the emitted body wraps in `[...]`. */
+  /** The (inner) return is an array type â‡’ the emitted body wraps in `[...]`. */
   array: boolean;
-  /** The recorded return was `Promise<…>` ⇒ the emitted function is async. */
+  /** The recorded return was `Promise<â€¦>` â‡’ the emitted function is async. */
   isAsync: boolean;
 };
 
@@ -1655,7 +1673,7 @@ function parseTypeSignature(raw: string): ParsedSignature | null {
 }
 
 /** Contract type NAMES referenced by the parsed signatures (declared opaquely,
- *  never invented as field shapes — the spec records the name only). */
+ *  never invented as field shapes â€” the spec records the name only). */
 function opaqueTypeNames(signatures: readonly ParsedSignature[]): string[] {
   const out: string[] = [];
   const add = (text: string): void => {
@@ -1689,8 +1707,8 @@ function emitJobModule(
     ...sourceHeader(node.file, node.purpose, project, [
       "// REAL module (fixes/328 P2 / TA-15): implements this job's recorded",
       "// typeSignatures (the brief-faithful specRecord) over a deterministic",
-      "// in-module record store. The recorded spec carries the API surface —",
-      "// function names, parameters, return types — plus the A6 endpoints and",
+      "// in-module record store. The recorded spec carries the API surface â€”",
+      "// function names, parameters, return types â€” plus the A6 endpoints and",
       "// A7 row ids below; it carries no domain rules, so nothing beyond the",
       "// recorded surface is claimed here. Never a re-export, never a stub.",
     ]),
@@ -1701,7 +1719,7 @@ function emitJobModule(
     ...endpoints.map((e) => `  { method: ${jstr(e.method)}, path: ${jstr(e.path)} },`),
     `];`,
     "",
-    `/** A7 oracle row ids recorded for this job — the acceptance prose is emitted`,
+    `/** A7 oracle row ids recorded for this job â€” the acceptance prose is emitted`,
     ` *  into tests/oracle.spec.ts. */`,
     `export const ORACLE_ROWS: readonly string[] = [${oracleIds.map((id) => jstr(id)).join(", ")}];`,
     "",
@@ -1711,7 +1729,7 @@ function emitJobModule(
   if (aliases.length > 0) {
     lines.push(
       "/** Contract types named by the recorded typeSignatures. The spec records",
-      " *  the NAME only, never a field shape — declared opaquely rather than",
+      " *  the NAME only, never a field shape â€” declared opaquely rather than",
       " *  invented. Replace each with the real interface when the contract",
       " *  carries one. */",
       ...aliases.map((name) => `export type ${name} = string | number | Record<string, unknown>;`),
@@ -1778,13 +1796,13 @@ function emitJobModule(
 // ---------------------------------------------------------------------------
 // 340-6 (A3-f07 / W-14): the DEFAULT emitted-UI generator.
 //
-// A real, deterministic renderer over the project's OWN bytes — no model call,
-// no new dependency. INPUTS: project.implementationSpec (typeSignatures, …),
+// A real, deterministic renderer over the project's OWN bytes â€” no model call,
+// no new dependency. INPUTS: project.implementationSpec (typeSignatures, â€¦),
 // project.contracts (A6 entities/fields), project.lattice (brief nouns), and
 // the generated ENTRY module's REAL exported surface, parsed from the exact
 // source the emitter writes (the tree entry file, or generatedSource plus its
-// template export tail — never a guessed name). BAR (W-14): the emitted
-// Console() references ≥2 real domain fields and wires a form interaction to a
+// template export tail â€” never a guessed name). BAR (W-14): the emitted
+// Console() references â‰¥2 real domain fields and wires a form interaction to a
 // GENUINELY exported function of that module; a module exporting no callable,
 // or a project with <2 real fields, yields the honest "nothing to bind" panel
 // instead of fabricated fields. DETERMINISM: every list is project-ordered, so
@@ -1796,8 +1814,8 @@ function emitJobModule(
 /** One rendered form input, mapped to a real recorded/spec value. */
 type UiField = { id: string; label: string; type: string };
 
-/** Hard cap on rendered form fields — the generator's documented bound; the
- *  W-14 bar only needs ≥2, and every call site returns at most this many. */
+/** Hard cap on rendered form fields â€” the generator's documented bound; the
+ *  W-14 bar only needs â‰¥2, and every call site returns at most this many. */
 const UI_FIELD_CAP = 4;
 
 /** A callable the generated entry module really exports. */
@@ -1806,7 +1824,7 @@ type UiCallable = {
   params: { name: string; type: string; rest: boolean }[];
   /** Keys of a single object-literal parameter default (`spec = { a, b }`). */
   objectKeys: { name: string; type: string }[] | null;
-  /** A4: true for an `async` export — never called synchronously by the shell. */
+  /** A4: true for an `async` export â€” never called synchronously by the shell. */
   async?: boolean;
 };
 
@@ -1817,7 +1835,7 @@ export type UiPage = { id: string; title: string };
 const UI_PRIMITIVE_TYPE = /^(string|number|boolean|bigint|symbol)$/i;
 
 /**
- * fixes/341-1: parameter types a FormData string can be soundly coerced to —
+ * fixes/341-1: parameter types a FormData string can be soundly coerced to â€”
  * exactly the targets `defaultUiGeneration.coerce` produces (String/Number/
  * boolean). A domain-typed param (e.g. `board: Board`) is NOT here: the
  * emitted `String(data.get(...))` argument is not assignable to it, so a form
@@ -1831,7 +1849,7 @@ const UI_FORM_BINDABLE_TYPE =
 
 /**
  * fixes/346-S5: resolve a parameter/field type text through the single-line
- * `type A = RHS` aliases the scanned entry source declares (`uiTypeAliases`) —
+ * `type A = RHS` aliases the scanned entry source declares (`uiTypeAliases`) â€”
  * bounded and cycle-safe. The measured defect: the keyed tree's only callable
  * `computeLineTotal(quantity: number, unitPrice: Money)` (with `type Money =
  * number;` in the same tree) was left unwired because the bindable test saw the
@@ -1856,7 +1874,7 @@ function uiFormBindableParam(type: string, aliases?: ReadonlyMap<string, string>
   const t = uiResolveTypeText(type, aliases);
   if (t === "" || UI_FORM_BINDABLE_TYPE.test(t)) return true;
   // 353: a nullable/optional primitive (`number | null`, `string | undefined`)
-  // is bindable too — the form's Number(...)/String(...) value is assignable to
+  // is bindable too â€” the form's Number(...)/String(...) value is assignable to
   // it. A literal-union (or any non-primitive member) stays unbindable.
   const parts = t.split("|").map((p) => p.trim()).filter(Boolean);
   return (
@@ -1888,7 +1906,7 @@ function uiParseParam(
 /**
  * Top-level `{ a, b: c }` keys of an object-literal default, with a type
  * inferred from each value literal (null when the default is not an object
- * literal). Reads the generated function's own field names — never invented.
+ * literal). Reads the generated function's own field names â€” never invented.
  */
 function uiObjectLiteralKeys(defaultText: string): { name: string; type: string }[] | null {
   const text = defaultText.trim();
@@ -1928,7 +1946,7 @@ function uiReadParen(text: string, open: number): string {
 
 /**
  * The functions a generated module body really exports, in source order:
- * `export function f`, `export const f = (…) =>`/`= function`, and declared
+ * `export function f`, `export const f = (â€¦) =>`/`= function`, and declared
  * functions re-exported through `export { f }`. A binding that cannot be tied
  * to a function declaration is never returned, so a caller can never emit a
  * call to a name the module does not export.
@@ -1958,7 +1976,7 @@ function uiExportedCallables(source: string): UiCallable[] {
       if (declared.has(local)) calls.set(exported, declared.get(local)!);
     }
   }
-  // A4: names exported as `async` — the shell must never call one synchronously.
+  // A4: names exported as `async` â€” the shell must never call one synchronously.
   const asyncNames = new Set<string>();
   for (const m of text.matchAll(/^export\s+async\s+function\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm)) asyncNames.add(m[1]!);
   for (const m of text.matchAll(/^export\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*async\b/gm)) asyncNames.add(m[1]!);
@@ -1980,7 +1998,7 @@ function uiExportedCallables(source: string): UiCallable[] {
 
 /**
  * A4: the briefed surfaces a website/marketing shell should present, in
- * deterministic order — contract entity names, spec-graph job labels, then the
+ * deterministic order â€” contract entity names, spec-graph job labels, then the
  * lattice's own jobs/entities. Deduped by normalized title, capped at 6. Titles
  * are derived strictly from the brief's own declarations; nothing invented.
  */
@@ -1997,7 +2015,7 @@ export function uiBriefPages(project: Project): UiPage[] {
   };
   for (const ent of project.contracts?.entities ?? []) if (ent && typeof ent.name === "string") push(ent.name);
   for (const node of project.specGraph?.nodes ?? []) {
-    const m = /[“"]([^”"]+)[”"]/.exec(typeof node.purpose === "string" ? node.purpose : "");
+    const m = /[â€œ"]([^â€"]+)[â€"]/.exec(typeof node.purpose === "string" ? node.purpose : "");
     if (m && m[1]!.trim()) push(m[1]!);
   }
   for (const job of project.lattice?.jobs ?? []) if (typeof job === "string") push(job);
@@ -2014,7 +2032,7 @@ function uiRenderLike(c: UiCallable): boolean {
  * 341-1: the keyed chunked synthesis materialises its entry as an ESM BARREL
  * of `export * from "./x.ts"` lines (codegen `materializeImportableTree`), so
  * the callables the shell may call are real exports of the imported namespace
- * yet appear nowhere in the entry's own bytes — a scan of the entry source
+ * yet appear nowhere in the entry's own bytes â€” a scan of the entry source
  * alone finds none, and the generator fell back to the honest (but
  * under-delivering) "no callable" panel for the exact shape a real keyed tree
  * produces. Follow the entry's `export *` specifiers over the accepted tree
@@ -2066,7 +2084,7 @@ function uiResolveTreeSpecifier(
 }
 
 /**
- * The generated ENTRY source the emitted shell imports — mirroring
+ * The generated ENTRY source the emitted shell imports â€” mirroring
  * scaffoldProject's own entry resolution (the tree ENTRY file, else the
  * generatedSource host with its template export tail). Null when this emit
  * writes no generated module at all. Kept in lock-step with the emit path so a
@@ -2110,7 +2128,7 @@ function uiGeneratedEntrySource(project: Project): string | null {
   accepted.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   if (accepted.length > 0) {
     const byPath = new Map(accepted.map((f) => [f.path, f]));
-    // C1-02: resolve the SAME entry the emitted shell imports — the tree barrel
+    // C1-02: resolve the SAME entry the emitted shell imports â€” the tree barrel
     // when present (see treeEntryPath), so the callables discovered here are
     // genuinely re-exported by the module `emitUi` imports.
     const entry = byPath.get("src/generated.ts") ?? byPath.get(rolePath) ?? accepted[0];
@@ -2143,7 +2161,7 @@ function uiDomainFields(
   };
 
   if (shape === "positional") {
-    // fixes/346-S5: resolve a local alias (`Money` → `number`) so the emitted
+    // fixes/346-S5: resolve a local alias (`Money` â†’ `number`) so the emitted
     // form's coercion and the recorded field type agree with the callable.
     for (const p of callable.params) if (!p.rest) push(p.name, p.name, uiResolveTypeText(p.type, aliases));
     return fields.slice(0, UI_FIELD_CAP);
@@ -2169,7 +2187,7 @@ function uiDomainFields(
   for (const ent of entities) {
     for (const f of Array.isArray(ent?.fields) ? ent.fields : []) {
       const name = String(f?.name ?? "");
-      if (name) push(`${ent.name}_${name}`, `${ent.name} · ${name}`, String(f?.type ?? ""));
+      if (name) push(`${ent.name}_${name}`, `${ent.name} Â· ${name}`, String(f?.type ?? ""));
     }
   }
   const latEntities =
@@ -2182,7 +2200,7 @@ function uiDomainFields(
 type UiRenderCall = { name: string; args: string[] };
 
 /**
- * A4 (SYNTHSPEC P5b): the multi-section shell for a website/marketing brief — a
+ * A4 (SYNTHSPEC P5b): the multi-section shell for a website/marketing brief â€” a
  * <nav> from the briefed page titles and one <section> per page. A page whose
  * discovered render export is callable with sound arguments calls it and
  * renders the result (a string via a <div>; a node via the ReactNode cast); a
@@ -2246,7 +2264,7 @@ function uiTypeAliases(source: string): Map<string, string> {
 
 /**
  * C1-02: a sound scalar literal for a render export parameter, from its own
- * declared type text — a primitive (`string`/`number`/`boolean`), the first
+ * declared type text â€” a primitive (`string`/`number`/`boolean`), the first
  * member of a literal union, `[]` for an array type, or `null` for
  * `any`/`unknown`/`null`/`undefined`. A bare type-alias identifier is resolved
  * to its declared RHS ONCE (fixes/346-S4) so a real export can still be called;
@@ -2309,10 +2327,10 @@ function uiRenderCallArgs(c: UiCallable, aliases?: ReadonlyMap<string, string>):
 
 /**
  * fixes/277 / 340-6 (A3-f07 / W-14): the DEFAULT emitted-UI generation. Null
- * generatedNamespace ⇒ the honest no-module panel (byte-identical to the
+ * generatedNamespace â‡’ the honest no-module panel (byte-identical to the
  * pre-277 shell). Otherwise a real generator over project.implementationSpec,
  * project.contracts, project.lattice and the generated module's genuinely
- * exported surface — a form bound to ≥2 real domain fields, submitting into a
+ * exported surface â€” a form bound to â‰¥2 real domain fields, submitting into a
  * real exported function, or the honest "nothing to bind" panel when either is
  * absent. A caller-supplied hook still overrides this behind the same contract.
  */
@@ -2323,7 +2341,7 @@ const defaultUiGeneration = ({
   if (generatedNamespace === null) {
     return [
       `  const [notice] = useState<string>(`,
-      `    "shell — no generated module yet; run P6 then re-emit",`,
+      `    "shell â€” no generated module yet; run P6 then re-emit",`,
       `  );`,
       `  return (`,
       `    <main>`,
@@ -2335,11 +2353,11 @@ const defaultUiGeneration = ({
   }
   const entrySource = uiGeneratedEntrySource(project);
   const callables = entrySource === null ? [] : uiExportedCallables(entrySource);
-  // fixes/346-S4: the aliases the exported callables' parameter types may name —
+  // fixes/346-S4: the aliases the exported callables' parameter types may name â€”
   // resolved so a real render export is CALLED with a sound arg, never skipped.
   const typeAliases = entrySource === null ? new Map<string, string>() : uiTypeAliases(entrySource);
-  // A4 (SYNTHSPEC P5b): a website/marketing brief — its generated entry exports
-  // a `render*`/`*Page`/`get*Screen` callable — becomes a multi-section shell,
+  // A4 (SYNTHSPEC P5b): a website/marketing brief â€” its generated entry exports
+  // a `render*`/`*Page`/`get*Screen` callable â€” becomes a multi-section shell,
   // not a single debug form. Requiring the render export keeps the honest form
   // generator for a data/app brief that has none (and prevents a shell that is
   // entirely "not implemented"). Only a zero-arg, non-async render export is
@@ -2347,7 +2365,7 @@ const defaultUiGeneration = ({
   const renderLike = callables.filter(uiRenderLike);
   // fixes/346-S5: the form-binding shape + soundness of ONE callable, and the
   // preference order for picking it. A callable the form can genuinely bind
-  // (≥2 real fields + a sound arg) is preferred over the first multi-field
+  // (â‰¥2 real fields + a sound arg) is preferred over the first multi-field
   // callable: the measured keyed trees carried a bindable two-arg numeric
   // `computeLineTotal(price: number, quantity: number)` that was skipped for an
   // unbindable object-param export declared earlier.
@@ -2371,7 +2389,7 @@ const defaultUiGeneration = ({
   };
   const multiField = (c: UiCallable): boolean =>
     (c.objectKeys?.length ?? 0) >= 2 || c.params.filter((p) => !p.rest).length >= 2;
-  // fixes/346-S2: the GENUINE form callable — ≥2 real fields + sound args AND
+  // fixes/346-S2: the GENUINE form callable â€” â‰¥2 real fields + sound args AND
   // a shape that actually consumes them (a zero-arg renderer whose fields would
   // come only from the spec fallback is not a form). `pickFormCallable` keeps
   // the legacy fallback chain for the non-render path; only the genuine one may
@@ -2380,15 +2398,15 @@ const defaultUiGeneration = ({
   const pickFormCallable = (): UiCallable | null =>
     wiredFormCallable ?? callables.find(multiField) ?? callables[0] ?? null;
   // fixes/346-S2: ONE deterministic decision. The S5 form-bindable preference
-  // was unsigned — a soundly callable render export forced the shell and left a
+  // was unsigned â€” a soundly callable render export forced the shell and left a
   // genuinely bindable form callable unwired. A genuinely bindable callable now
   // OUTRANKS the render shell: the console CALLS the bindable export. The
-  // render/`nothing to wire` shape stands only when no callable can be bound —
+  // render/`nothing to wire` shape stands only when no callable can be bound â€”
   // a call is never fabricated.
   //
   // 347 (real-website emission): a tree exporting TWO OR MORE page renderers IS
   // a multi-page site. Mounting one helper form instead of the pages threw the
-  // whole site away — the measured keyed bakery tree exported renderHome /
+  // whole site away â€” the measured keyed bakery tree exported renderHome /
   // renderMenu / renderContact / renderOrderForm and the emitted shell rendered
   // a lone `computeLineTotal` form. The multi-page shell therefore outranks the
   // bindable form; the single-render + bindable case (346-S2's signed pin) keeps
@@ -2397,7 +2415,7 @@ const defaultUiGeneration = ({
     // C1-02: call a render export with SOUND arguments where its own declared
     // parameter types permit (a zero-arg renderer, or one whose params are
     // primitives / literal unions) so the shell mounts a real generated export.
-    // A render export whose args cannot be proven assignable is left uncalled —
+    // A render export whose args cannot be proven assignable is left uncalled â€”
     // its page keeps the honest null node, never a fabricated argument.
     const renderCalls: UiRenderCall[] = [];
     for (const c of renderLike) {
@@ -2411,7 +2429,7 @@ const defaultUiGeneration = ({
         : renderLike.map((c) => ({ id: ident(c.name.replace(/^render/, "") || c.name, "page"), title: c.name }));
     return defaultUiShellBody(project, shellPages, renderCalls);
   }
-  // The genuine form callable chosen above, else the legacy first ≥2-field /
+  // The genuine form callable chosen above, else the legacy first â‰¥2-field /
   // fallback callable (which the honest panel rejects below when unbindable).
   const callable = pickFormCallable();
   const shape: "object" | "positional" | "none" = callable ? formShapeOf(callable) : "none";
@@ -2420,7 +2438,7 @@ const defaultUiGeneration = ({
   // callable's REAL parameter types. A positional form supplies one coerced
   // primitive per param, so every non-rest param must be primitive-coercible;
   // an object binding is sound only for a single param carrying its own
-  // object-literal default (the emitted literal mirrors the inferred type) —
+  // object-literal default (the emitted literal mirrors the inferred type) â€”
   // fields invented from the spec against an explicitly-typed object param are
   // a guess, and a guessed arg is a compile error the pre-seal gate refuses
   // with no repairable chunk. When the binding cannot be proven sound, emit the
@@ -2433,7 +2451,7 @@ const defaultUiGeneration = ({
         ? `generated export ${callable.name} takes a parameter a form cannot supply`
         : `generated module exposes fewer than two bindable domain fields (found ${fields.length})`;
     return [
-      `  const notice = ${jstr(`shell — ${reason}; nothing to wire yet`)};`,
+      `  const notice = ${jstr(`shell â€” ${reason}; nothing to wire yet`)};`,
       `  return (`,
       `    <main>`,
       `      <h1>{${jstr(displayName(project.name))}}</h1>`,
@@ -2496,7 +2514,7 @@ const defaultUiGeneration = ({
 };
 
 /**
- * The handler line `defaultUiGeneration`'s bound form carries — the marker the
+ * The handler line `defaultUiGeneration`'s bound form carries â€” the marker the
  * 358 merge reads back from the generator's OWN output, so a site console keeps
  * the operator surface only when there is a real binding to keep (a render/panel
  * shape has no field to merge). The A3-f07/W-14 pin asserts the same literal on
@@ -2505,9 +2523,9 @@ const defaultUiGeneration = ({
 const UI_BOUND_FORM_MARKER = "onSubmit={onSubmit}";
 
 /**
- * 358 (R-UI-1): the ui node's own operator body — the one `defaultUiGeneration`
- * binds (≥2 real domain fields + an interaction into a genuinely exported
- * function) — or null when this emit would not have produced it at all: a
+ * 358 (R-UI-1): the ui node's own operator body â€” the one `defaultUiGeneration`
+ * binds (â‰¥2 real domain fields + an interaction into a genuinely exported
+ * function) â€” or null when this emit would not have produced it at all: a
  * non-webapp kind (whose `emitUi` branch is the canvas/CLI shell, never this
  * generator) or a render/"nothing to bind" shape (nothing real to merge).
  * `defaultUiGeneration` stays the single producer of the body.
@@ -2552,7 +2570,7 @@ function siteOperatorConsole(args: {
     "}",
     "",
     "/**",
-    " * A3-f07 / W-14: the ui node's own operator surface — ≥2 real domain fields and",
+    " * A3-f07 / W-14: the ui node's own operator surface â€” â‰¥2 real domain fields and",
     " * an interaction bound to a genuinely exported function of the generated module",
     " * above. The derived site mounts alongside it, never instead of it.",
     " */",
@@ -2566,7 +2584,7 @@ function siteOperatorConsole(args: {
 }
 
 // ---------------------------------------------------------------------------
-// 351 — the web-marketing multi-page site emitter.
+// 351 â€” the web-marketing multi-page site emitter.
 //
 // The measured ceiling of the emitted webapp was ONE `src/ui/console.tsx`: a
 // `<span>` nav over one unlinked `<section>` per briefed name, or an honest
@@ -2576,7 +2594,7 @@ function siteOperatorConsole(args: {
 //
 // This emitter writes that tree. It is gated on the brief's own domain
 // (`web-marketing`) AND on the generated module genuinely exporting content the
-// pages can render — every page reads its data from the generated module (via
+// pages can render â€” every page reads its data from the generated module (via
 // the emitted `site-data.ts` adapters); a page whose content is absent is not
 // emitted, and nothing is invented. A caller-supplied `uiGeneration` hook still
 // wins (scaffoldProject checks it before this runs), so the documented override
@@ -2596,7 +2614,7 @@ type MarketingSources = {
   validateTiming: UiCallable | null;
 };
 
-/** Deterministic name→role matcher over the generated module's real exports. */
+/** Deterministic nameâ†’role matcher over the generated module's real exports. */
 const MARKETING_ROLE_RE: Record<keyof MarketingSources, RegExp> = {
   facts: /facts|business|identity|profile|company|siteinfo|aboutus|contactinfo/i,
   menu: /menu|catalog|products?|offerings?/i,
@@ -2612,7 +2630,7 @@ const MARKETING_ROLE_RE: Record<keyof MarketingSources, RegExp> = {
  * The generated module's callables as the marketing site sees them. Broader
  * than `uiExportedCallables` on purpose: a generated `createOrder` is an
  * `async function` re-exported through `export { createOrder }`, which the
- * shell scanner (built for sync render/form exports) does not recognise — so
+ * shell scanner (built for sync render/form exports) does not recognise â€” so
  * the ordering flow would silently read as "no order endpoint". This scanner
  * includes `async function` declarations AND their `export { }` re-exports,
  * and marks them async. It is self-contained: the single-file shell path keeps
@@ -2696,7 +2714,7 @@ function isMarketingSiteBrief(project: Project): boolean {
   );
 }
 
-/** `https://…` literals in the generated tree that name an image asset. */
+/** `https://â€¦` literals in the generated tree that name an image asset. */
 const MARKETING_IMAGE_URL_RE = /https?:\/\/[^\s"'`()<>\]}]+/g;
 
 function collectImageUrls(project: Project): string[] {
@@ -2749,7 +2767,7 @@ function marketingAssetManifest(urls: readonly string[]): string {
               asset: "public/assets/",
               kind: "images",
               status: "placeholder",
-              note: "NOT engine-generated — the generated tree declares no image URL; supply real assets or keep the monogram fallback.",
+              note: "NOT engine-generated â€” the generated tree declares no image URL; supply real assets or keep the monogram fallback.",
             },
           ],
     },
@@ -2768,7 +2786,7 @@ type MarketingSiteCtx = {
   siteName: string;
   /** Relative import specifier (extension included) to the generated entry. */
   generated: string;
-  /** fixes/352: renderer-shape extras — absent for the data-getter shape. */
+  /** fixes/352: renderer-shape extras â€” absent for the data-getter shape. */
   renderers?: Partial<Record<MarketingRenderRole, { name: string; args: string[] }>>;
   submit?: UiCallable | null;
   /** Sound argument expressions for the submit callable (arg 0 = the form payload). */
@@ -2840,7 +2858,7 @@ function siteDataModule(ctx: MarketingSiteCtx): string {
         "  if (Number.isNaN(requested.getTime())) return { ok: false, message: \"The order date is not a valid date.\" };",
         "  const today = new Date();",
         "  const todayKey = today.getFullYear() + \"-\" + String(today.getMonth() + 1).padStart(2, \"0\") + \"-\" + String(today.getDate()).padStart(2, \"0\");",
-        "  if (dateIso === todayKey) return { ok: false, message: \"Same-day orders are not accepted — choose a later date.\" };",
+        "  if (dateIso === todayKey) return { ok: false, message: \"Same-day orders are not accepted â€” choose a later date.\" };",
         "  if (dateIso < todayKey) return { ok: false, message: \"The requested date is in the past.\" };",
         "  return { ok: true, message: \"\" };",
         "}",
@@ -3032,7 +3050,7 @@ function persist(): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(lines));
   } catch {
-    // Storage unavailable (private mode / quota) — the cart stays in memory.
+    // Storage unavailable (private mode / quota) â€” the cart stays in memory.
   }
 }
 
@@ -3220,7 +3238,7 @@ function homePageModule(ctx: MarketingSiteCtx): string {
   const orderHref = ctx.ordering ? '<a className="btn btn--primary" href="#/order">Start an order</a>' : "";
   const body = `// The home page: a hero with the business identity and a live open/closed
 // badge, featured items, the story teaser, awards, and the ordering policy.
-// Every section is omitted when its data is absent — no filler.
+// Every section is omitted when its data is absent â€” no filler.
 import { useState } from "react";
 import { business, menuGroups, openingHours, ordering, story, SITE_NAME, type SiteMenuItem } from "../site-data.ts";
 
@@ -3325,16 +3343,16 @@ export function HomePage() {
           <h2>Ordering</h2>
           <ul className="facts">
             {ordering.pickupOptions.length > 0 ? (
-              <li className="facts__row"><span className="facts__label">Pickup</span>{ordering.pickupOptions.join(" · ")}</li>
+              <li className="facts__row"><span className="facts__label">Pickup</span>{ordering.pickupOptions.join(" Â· ")}</li>
             ) : null}
             {ordering.deliveryArea !== "" ? (
               <li className="facts__row">
                 <span className="facts__label">Delivery</span>
-                {ordering.deliveryArea + (ordering.deliveryDays.length > 0 ? " · " + ordering.deliveryDays.join(", ") : "")}
+                {ordering.deliveryArea + (ordering.deliveryDays.length > 0 ? " Â· " + ordering.deliveryDays.join(", ") : "")}
               </li>
             ) : null}
             {(ordering.deliveryWindowOpen !== "" && ordering.deliveryWindowClose !== "") ? (
-              <li className="facts__row"><span className="facts__label">Delivery window</span>{ordering.deliveryWindowOpen + " – " + ordering.deliveryWindowClose}</li>
+              <li className="facts__row"><span className="facts__label">Delivery window</span>{ordering.deliveryWindowOpen + " â€“ " + ordering.deliveryWindowClose}</li>
             ) : null}
             {ordering.preorderCutoff !== "" ? (
               <li className="facts__row"><span className="facts__label">Preorder cutoff</span>{ordering.preorderCutoff}</li>
@@ -3512,7 +3530,7 @@ export function ContactPage() {
             {openingHours.map((entry) => (
               <li className={entry.closed ? "hours__row hours__row--closed" : "hours__row"} key={entry.day}>
                 <span className="hours__day">{entry.day}</span>
-                <span>{entry.closed ? "Closed" : entry.open + " – " + entry.close}</span>
+                <span>{entry.closed ? "Closed" : entry.open + " â€“ " + entry.close}</span>
               </li>
             ))}
           </ul>
@@ -3530,7 +3548,7 @@ export function ContactPage() {
               <li className="facts__row"><span className="facts__label">Delivery days</span>{ordering.deliveryDays.join(", ")}</li>
             ) : null}
             {(ordering.deliveryWindowOpen !== "" && ordering.deliveryWindowClose !== "") ? (
-              <li className="facts__row"><span className="facts__label">Delivery window</span>{ordering.deliveryWindowOpen + " – " + ordering.deliveryWindowClose}</li>
+              <li className="facts__row"><span className="facts__label">Delivery window</span>{ordering.deliveryWindowOpen + " â€“ " + ordering.deliveryWindowClose}</li>
             ) : null}
             {ordering.preorderCutoff !== "" ? (
               <li className="facts__row"><span className="facts__label">Preorder cutoff</span>{ordering.preorderCutoff}</li>
@@ -3603,7 +3621,7 @@ export function OrderPage() {
       contactName: name.trim(),
       contactPhone: phone.trim(),
       // No price is sent (and none is rendered): the brief publishes no prices,
-      // so the order carries identity/quantity only — never a fabricated amount.
+      // so the order carries identity/quantity only â€” never a fabricated amount.
       lines: cart.map((line) => ({ itemId: line.id, name: line.name, quantity: line.quantity })),
     });
     setSubmitting(false);
@@ -3633,7 +3651,7 @@ export function OrderPage() {
         <section className="section">
           <h2>Your order</h2>
           {cart.length === 0 ? (
-            <p className="cart__empty">Your order is empty — add items below.</p>
+            <p className="cart__empty">Your order is empty â€” add items below.</p>
           ) : (
             <ul className="cart">
               {cart.map((line) => (
@@ -3700,7 +3718,7 @@ export function OrderPage() {
                 {errors.address !== undefined ? <span className="field__error">{errors.address}</span> : null}
               </div>
             ) : null}
-            <button type="submit" className="btn btn--primary" disabled={submitting}>{submitting ? "Placing order…" : "Place order"}</button>
+            <button type="submit" className="btn btn--primary" disabled={submitting}>{submitting ? "Placing orderâ€¦" : "Place order"}</button>
           </form>
           {notice !== "" ? (
             <p className={noticeOk ? "notice notice--ok" : "notice notice--error"} role="status">{notice}</p>
@@ -3720,7 +3738,7 @@ function siteConsoleModule(ctx: MarketingSiteCtx): string {
     "// The generated content module is imported by ./site-data.ts.",
   ]);
   // 358 (R-UI-1): the marketing site no longer REPLACES the ui node's operator
-  // surface — the router mounts beside it when the generated module binds.
+  // surface â€” the router mounts beside it when the generated module binds.
   const merged = siteOperatorConsole({
     header,
     project: ctx.project,
@@ -3744,11 +3762,11 @@ export default Console;
 }
 
 /**
- * fixes/352 — the PARAMETERISED-RENDERER marketing shape.
+ * fixes/352 â€” the PARAMETERISED-RENDERER marketing shape.
  *
  * The measured keyed bakery tree did not expose zero-arg data getters; it
  * exported `renderHome()/renderMenu(...)/renderHoursAndLocation(...)/
- * renderOrderForm(...)/renderContact(...)` — page renderers that TAKE data.
+ * renderOrderForm(...)/renderContact(...)` â€” page renderers that TAKE data.
  * `pickMarketingSources` (the getter shape) finds none of these, so the site
  * guard bailed and a "marketing website" shipped a single debug shell. This
  * branch accepts the renderer shape too: each renderer becomes a page, called
@@ -3767,8 +3785,8 @@ const MARKETING_RENDER_ROLE_RE: Record<MarketingRenderRole, RegExp> = {
 };
 
 /**
- * The object shapes the generated entry declares (`interface X {…}` /
- * `type X = {…}`), so a required object parameter can be filled with an empty
+ * The object shapes the generated entry declares (`interface X {â€¦}` /
+ * `type X = {â€¦}`), so a required object parameter can be filled with an empty
  * but well-typed literal. Nothing is invented beyond `""`/`0`/`false`/`[]`/`{}`.
  */
 function uiDeclaredObjects(
@@ -3828,15 +3846,15 @@ function emptyForType(
   if (/^(null|undefined)$/.test(single)) return "null";
   if (/^'[^']*'$/.test(single) || /^"[^"]*"$/.test(single)) return single;
   if (/^-?\d+(?:\.\d+)?$/.test(single)) return single;
-  // A declared object shape wins over a single-line `type X = {…}` alias (which
-  // uiTypeAliases captures as just "{" — an alias that can fill nothing).
+  // A declared object shape wins over a single-line `type X = {â€¦}` alias (which
+  // uiTypeAliases captures as just "{" â€” an alias that can fill nothing).
   const fields = objects.get(single);
   if (fields !== undefined) {
     const required = fields.filter((f) => !f.optional);
     const built: string[] = [];
     for (const field of required.slice(0, 16)) {
       const value = emptyForType(field.type, aliases, objects, depth + 1);
-      if (value === null) return null; // cannot fill soundly ⇒ never call
+      if (value === null) return null; // cannot fill soundly â‡’ never call
       built.push(`${field.name}: ${value}`);
     }
     return `{ ${built.join(", ")} }`;
@@ -3893,7 +3911,7 @@ function pickMarketingRenderers(
 /** The dependency-free adapter that mounts a generated view value in React. */
 function rendererAdapterModule(project: Project): string {
   const body = `// Renders a generated view value as React elements. The generated tree's
-// render* exports return plain view objects — either a tag tree
+// render* exports return plain view objects â€” either a tag tree
 // ({ tag, attrs, children, text } or { tagName, attributes, children,
 // textContent }) or a page view model ({ h1, sections }). This adapter turns
 // those REAL shapes into React nodes so the site mounts the generated product.
@@ -4078,7 +4096,7 @@ export function ${component}() {
 /**
  * Renderer-shape OrderPage: mounts the generated order form and, on submit,
  * calls the generated order endpoint and persists the confirmation through the
- * emitted store's OrderLog — so the ordering flow survives a reload.
+ * emitted store's OrderLog â€” so the ordering flow survives a reload.
  */
 function rendererOrderPageModule(ctx: MarketingSiteCtx): string {
   const submit = ctx.submit;
@@ -4137,7 +4155,7 @@ ${ctx.store !== null && ctx.store !== undefined
           <button type="button" className="btn btn--primary" disabled={submitting} onClick={() => {
             const form = document.querySelector("form");
             if (form instanceof HTMLFormElement) form.requestSubmit();
-          }}>{submitting ? "Placing order…" : "Place order"}</button>
+          }}>{submitting ? "Placing orderâ€¦" : "Place order"}</button>
           {notice !== "" ? <p className="notice notice--ok" role="status">{notice}</p> : null}
         </section>
         <section className="section">
@@ -4219,7 +4237,7 @@ function webMarketingRendererSiteFiles(
   }
   const showOrder = renderers.order !== undefined && (asksOrdering || submit !== null);
   if (showOrder) pages.push({ id: "order", title: "Order", component: "OrderPage" });
-  if (pages.length < 2) return null; // one renderer is not a site — the shell mounts it
+  if (pages.length < 2) return null; // one renderer is not a site â€” the shell mounts it
 
   const ctx: MarketingSiteCtx = {
     project,
@@ -4334,21 +4352,21 @@ function webMarketingSiteFiles(args: {
 }
 
 // ---------------------------------------------------------------------------
-// 353 — the shape-tolerant briefed site.
+// 353 â€” the shape-tolerant briefed site.
 //
 // 351/352 emit the multi-page site only for a `web-marketing` brief whose
 // generated module exposes a matching content role. The measured keyed trees
 // (a bakery exporting ASYNC `getMenuItems`/`getOpenStatus`, no `render*` and no
-// zero-arg SYNC getter) fell through to the single-file debug form — 10 of 10
+// zero-arg SYNC getter) fell through to the single-file debug form â€” 10 of 10
 // fresh trees had 0 page files and no router. This emitter builds the page set
-// from the brief's OWN `Pages:`/`Views:` list, or — when the brief is prose and
-// names no labelled list (fixes/354 A2-F5) — from the project's own spec lines
+// from the brief's OWN `Pages:`/`Views:` list, or â€” when the brief is prose and
+// names no labelled list (fixes/354 A2-F5) â€” from the project's own spec lines
 // (`implementationSpec` requirements/dataFlow, then spec-graph node purposes);
 // it mounts each page over whatever REAL export the entry exposes:
 // a `render*`/`*Page` helper, a zero-arg getter (sync or async), a getter whose
 // declared args are soundly constructible, or a form bound to a matching
 // mutator. A page with no mountable export renders an explicit "not published"
-// state — nothing is invented and every mount calls a real tree export.
+// state â€” nothing is invented and every mount calls a real tree export.
 // ---------------------------------------------------------------------------
 
 type BriefedPage = { id: string; title: string; component: string };
@@ -4368,7 +4386,7 @@ type PageMount =
 
 type BriefedSiteCtx = {
   project: Project;
-  /** The kind this emit resolved — the operator merge is webapp-only (358). */
+  /** The kind this emit resolved â€” the operator merge is webapp-only (358). */
   kind: ProjectKind;
   uiPath: string;
   generatedEntryPath: string;
@@ -4398,7 +4416,7 @@ const PAGE_ROLE_SYNONYMS: Record<string, string[]> = {
   about: ["about", "story", "history", "heritage", "mission", "facts", "company", "profile"],
   contact: ["contact", "location", "address", "hours", "phone", "facts", "business", "profile"],
   hours: ["hours", "opening", "schedule", "open", "status", "availability"],
-  // fixes/357: `opening` is a synonym VALUE of `hours` above, never a key — so a
+  // fixes/357: `opening` is a synonym VALUE of `hours` above, never a key â€” so a
   // page whose derived id kept the WORD ("Bakery s opening", from a "check the
   // opening hours" requirement) matched no export and bound nothing, even when
   // the tree exported a real `getOpenStatus()`. Keyed as its own role so the
@@ -4452,16 +4470,16 @@ function briefPageTitles(brief: string): string[] {
   return out.slice(0, 8);
 }
 
-/** Leading verb/actor/article a spec sentence opens with — stripped before a
- *  page title is taken from it. Repeated (up to 4×) so "let customers browse
+/** Leading verb/actor/article a spec sentence opens with â€” stripped before a
+ *  page title is taken from it. Repeated (up to 4Ã—) so "let customers browse
  *  the menu" reduces to "menu". */
 const PAGE_SPEC_LEAD_RE =
   /^(?:(?:the|a|an|its|their|our|this|that|each|every|all|users?|customers?|visitors?|members?|staff|admins?|operators?|people|let|allows?|enables?|provides?|providing|show|shows|display|displays|list|lists|views?|see|browse|browses|search|searches|filter|filters|manage|manages|track|tracks|create|creates|submit|submits|place|places|schedule|schedules|book|books|update|updates|edit|edits|add|adds|remove|removes|delete|deletes|record|records|persist|persists|store|stores|save|saves|handle|handles|process|processes|serve|serves|render|renders|generate|generates|compute|computes|calculate|calculates|fetch|fetches|load|loads|get|gets|read|reads|select|selects|register|registers|login|logout|authenticate|authorize|expose|exposes|include|includes|support|supports|allow|enable|provide)\b[\s:,-]*)/i;
-/** Trailing qualifier ("… with prices", "… for staff") — dropped after the head. */
+/** Trailing qualifier ("â€¦ with prices", "â€¦ for staff") â€” dropped after the head. */
 const PAGE_SPEC_TRAIL_RE =
   /\s+(?:with|for|to|that|which|including|showing|containing|by|from|using|into|across|and|or|so|when|where|while|before|after)\b[\s\S]*$/i;
 
-/** fixes/354 A2-F5: the page title a spec sentence names, or "" — never invented. */
+/** fixes/354 A2-F5: the page title a spec sentence names, or "" â€” never invented. */
 function pageTitleFromSpecLine(line: string): string {
   let text = collapse(line).replace(/[`"'*_#>]/g, " ");
   for (let i = 0; i < 4; i++) {
@@ -4479,7 +4497,7 @@ function pageTitleFromSpecLine(line: string): string {
 
 /** fixes/354 A2-F5: page titles derived from the project's OWN `implementationSpec`
  *  when the brief names no labelled `Pages:`/`Views:` list. Each title comes
- *  from a real spec line (requirements, then dataFlow, then typeSignatures) —
+ *  from a real spec line (requirements, then dataFlow, then typeSignatures) â€”
  *  never a hardcoded page name. Deterministic order, deduped, capped; an absent
  *  spec (keyless floor) yields NO pages, so the single-file shell is kept. */
 function specPageTitles(project: Project): string[] {
@@ -4505,9 +4523,9 @@ function specPageTitles(project: Project): string[] {
   return out;
 }
 
-/** The briefed page set: the brief's own `Pages:`/`Views:` list, else ≥2 pages
+/** The briefed page set: the brief's own `Pages:`/`Views:` list, else â‰¥2 pages
  *  derived from the project's own spec (fixes/354 A2-F5). Fewer than two either
- *  way is not a multi-page brief — the single-file shell is kept unchanged. */
+ *  way is not a multi-page brief â€” the single-file shell is kept unchanged. */
 function briefedPageDefs(project: Project): BriefedPage[] {
   let titles = briefPageTitles(project.brief ?? "");
   if (titles.length < 2) titles = specPageTitles(project);
@@ -4526,7 +4544,7 @@ function briefedPageDefs(project: Project): BriefedPage[] {
   // 353 (no-invention): a brief that asks for an admin surface, or that
   // withholds facts (prices/awards/addresses), gets an Admin page. Its mount is
   // a REAL editor bound to the tree's update mutator when one exists, else an
-  // explicit not-published state — never a made-up literal.
+  // explicit not-published state â€” never a made-up literal.
   const brief = String(project.brief ?? "").toLowerCase();
   const withholds =
     /\bno\s+(?:prices?|awards?|addresses?|figures?|facts?|numbers?)\b/.test(brief) ||
@@ -4634,7 +4652,7 @@ function pageMountFor(
     (c) => /^(?:get|list|load|fetch|read|compute|calculate|summari[sz]e|report|is|has)/.test(c.name) && match(c),
   );
   const getterFor = (): PageMount | null => {
-    // A zero-arg getter (sync or async) — the honest data source.
+    // A zero-arg getter (sync or async) â€” the honest data source.
     for (const c of getters) {
       if (c.params.filter((p) => !p.rest).length === 0) {
         used.add(c.name);
@@ -4658,8 +4676,8 @@ function pageMountFor(
   if (transactional) {
     const form = formFor();
     if (form !== null) return form;
-    // 353 (no-invention): an Admin page prefers a REAL editor — a mutator whose
-    // name is an edit verb — over a read-only queue view, so withheld fields
+    // 353 (no-invention): an Admin page prefers a REAL editor â€” a mutator whose
+    // name is an edit verb â€” over a read-only queue view, so withheld fields
     // (e.g. prices) can be set through the tree's own update export.
     if (pageTokens(page.id).includes("admin")) {
       // Prefer the RICHEST editor (most form fields) so a withheld price field
@@ -4685,9 +4703,9 @@ function pageMountFor(
   return { kind: "empty", reason: "no generated export serves this section" };
 }
 
-/** `src/ui/view.tsx` — generic real-data views over the generated module's exports. */
+/** `src/ui/view.tsx` â€” generic real-data views over the generated module's exports. */
 function genericViewModule(project: Project): string {
-  const body = `// Renders real values returned by the generated module — never fabricated.
+  const body = `// Renders real values returned by the generated module â€” never fabricated.
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -4774,7 +4792,7 @@ export function AsyncValue({ load, empty }: { load: () => Promise<unknown>; empt
     );
     return () => { active = false; };
   }, []);
-  if (loading) return <p className="muted" role="status">Loading…</p>;
+  if (loading) return <p className="muted" role="status">Loadingâ€¦</p>;
   if (error !== null) return <p className="notice notice--error" role="alert">{error}</p>;
   if (value === null || value === undefined) return <p className="muted">{empty ?? "No records returned."}</p>;
   return <GeneratedView value={value} />;
@@ -5008,7 +5026,7 @@ function genericPageModule(ctx: BriefedSiteCtx, page: BriefedPage): string {
       "",
     ].join("\n");
   }
-  // form mount — the page submits through the site-data adapter.
+  // form mount â€” the page submits through the site-data adapter.
   return [
     ...header,
     `import { useState } from "react";`,
@@ -5044,7 +5062,7 @@ function genericPageModule(ctx: BriefedSiteCtx, page: BriefedPage): string {
       `          <input className="field__control" name=${jstr(f.name)} defaultValue="" />`,
       `        </label>`,
     ]),
-    `        <button className="btn btn--primary" type="submit" disabled={busy}>{busy ? "Submitting…" : "Submit"}</button>`,
+    `        <button className="btn btn--primary" type="submit" disabled={busy}>{busy ? "Submittingâ€¦" : "Submit"}</button>`,
     `      </form>`,
     `      {notice !== "" ? <p className="notice" role="status">{notice}</p> : null}`,
     `      <GeneratedView value={result} />`,
@@ -5056,7 +5074,7 @@ function genericPageModule(ctx: BriefedSiteCtx, page: BriefedPage): string {
 }
 
 function genericConsoleModule(ctx: BriefedSiteCtx): string {
-  const header = sourceHeader(ctx.uiPath, "Console — mounts the site router", ctx.project, [
+  const header = sourceHeader(ctx.uiPath, "Console â€” mounts the site router", ctx.project, [
     "// The mounted surface is the multi-page site; the router owns the routes.",
   ]);
   // 358 (R-UI-1): the spec-derived page set kept the router but dropped the ui
@@ -5087,7 +5105,7 @@ function genericConsoleModule(ctx: BriefedSiteCtx): string {
 /**
  * Build the shape-tolerant briefed site's file set, or null when this emit has
  * no briefed page set, no generated entry, or no page can mount a real export
- * (the caller then keeps the single-file shell — never a fake page wall).
+ * (the caller then keeps the single-file shell â€” never a fake page wall).
  */
 function briefedSiteFiles(args: {
   project: Project;
@@ -5136,19 +5154,19 @@ function briefedSiteFiles(args: {
 }
 
 /**
- * ui node: kind-appropriate shell (webapp → React; game → canvas; else CLI-ish TS).
+ * ui node: kind-appropriate shell (webapp â†’ React; game â†’ canvas; else CLI-ish TS).
  *
  * fixes/216d (106 T-05 / F-03): a shell that surfaces generated exports imports
- * the module the emitter ACTUALLY writes as the generated entry — `genEntry.path`
+ * the module the emitter ACTUALLY writes as the generated entry â€” `genEntry.path`
  * (the tree ENTRY in tree mode, else the hosted P6 module), resolved relative to
- * the emitted UI file (`genEntry.from`) — never the literal "../generated.ts",
+ * the emitted UI file (`genEntry.from`) â€” never the literal "../generated.ts",
  * which the path allow-list refuses and nothing ever wrote (a guaranteed
- * dangling specifier in every tree-mode webapp). `genEntry === null` ⇒ no
- * generated substance at all ⇒ no generated import in the shell.
+ * dangling specifier in every tree-mode webapp). `genEntry === null` â‡’ no
+ * generated substance at all â‡’ no generated import in the shell.
  *
  * fixes/277 / 340-6 (A3-f07): the webapp branch's generated-substance body is
  * produced by the `uiGeneration` hook (the single call point); the default is
- * the real generator in `defaultUiGeneration` above (≥2 spec/export-derived
+ * the real generator in `defaultUiGeneration` above (â‰¥2 spec/export-derived
  * fields + an interaction bound to a genuinely exported function, or the
  * honest "nothing to bind" panel).
  */
@@ -5165,10 +5183,10 @@ function emitUi(
       : [];
     // fixes/277 (A3-f07): THE single uiGeneration call point. The hook
     // (caller-supplied via ScaffoldOptions, or the default generator above)
-    // returns the shell's generated-substance body lines ONLY — the
+    // returns the shell's generated-substance body lines ONLY â€” the
     // surrounding imports/export wrapper stay scaffold-owned so a hook can
     // never break the emitted module's shape.
-    // fixes/277 (A3-f07): the hook contract — a `null` return keeps the
+    // fixes/277 (A3-f07): the hook contract â€” a `null` return keeps the
     // default generator (which is total: it never returns null), so the
     // spread below always receives string[] (R3-f03 break fix: the hook's
     // declared `string[] | null` return must be coalesced, never spread raw).
@@ -5189,7 +5207,7 @@ function emitUi(
       ...sourceHeader(node.file, node.purpose, project, [
         "// Operator surfaces bound to generated modules (P8). Not a stub wall:",
         "// the generated entry module (the file this emitter wrote) is imported",
-        "// when P6 produced one — never a path nothing writes.",
+        "// when P6 produced one â€” never a path nothing writes.",
       ]),
       ...(genEntry ? [] : [`import { useState } from "react";`]),
       ...reactTypeImport,
@@ -5204,10 +5222,10 @@ function emitUi(
   }
   if (kind === "game") {
     const bestKey = `${slugName(project.name) || "rapidtool-game"}.best-score`;
-    const label = `${displayName(project.name) || "Game"} — arrow keys or WASD to move, space to jump, M to mute`;
+    const label = `${displayName(project.name) || "Game"} â€” arrow keys or WASD to move, space to jump, M to mute`;
     const body = `// A real, playable canvas game: fixed-timestep loop, keyboard + pointer input,
 // start/HUD/game-over states, a persistent best score and a mute toggle. No
-// framework is imported — the game kind declares no react dependency.
+// framework is imported â€” the game kind declares no react dependency.
 export type GameHandle = { stop: () => void };
 export type GameStatus = "start" | "playing" | "over";
 
@@ -5360,7 +5378,7 @@ export function bootGame(root: HTMLElement): GameHandle {
       try {
         window.localStorage.setItem(BEST_KEY, String(best));
       } catch {
-        // Storage disabled — the best score still stands for this session.
+        // Storage disabled â€” the best score still stands for this session.
       }
     }
   }
@@ -5487,9 +5505,9 @@ export function bootGame(root: HTMLElement): GameHandle {
     ctx.fillText("Score " + Math.floor(score) + "   Coins " + coinsTaken + "   Best " + best, 20, 36);
     if (muted) ctx.fillText("Muted (M)", VIEW_W - 150, 36);
     if (status === "start") {
-      overlay(${jstr(displayName(project.name) || "Arcade")}, "Space / up jumps · right accelerates · left brakes", "Press space to start");
+      overlay(${jstr(displayName(project.name) || "Arcade")}, "Space / up jumps Â· right accelerates Â· left brakes", "Press space to start");
     } else if (status === "over") {
-      overlay("Run over", "Score " + Math.floor(score) + " · coins " + coinsTaken, "Press space to play again");
+      overlay("Run over", "Score " + Math.floor(score) + " Â· coins " + coinsTaken, "Press space to play again");
     } else if (paused) {
       overlay("Paused", "The window lost focus", "Click the game to resume");
     }
@@ -5536,7 +5554,7 @@ export function bootGame(root: HTMLElement): GameHandle {
     return [
       ...sourceHeader(node.file, node.purpose, project, [
         "// Real canvas game surface: fixed-timestep loop + input + HUD + states.",
-        "// Assets are NOT engine-generated — see assets/manifest.json.",
+        "// Assets are NOT engine-generated â€” see assets/manifest.json.",
       ]),
       body,
     ].join("\n");
@@ -5563,7 +5581,7 @@ export function bootGame(root: HTMLElement): GameHandle {
         ];
   return [
     ...sourceHeader(node.file, node.purpose, project, [
-      "// Console/entry shell — contract-level (P8). Wire it to the job modules",
+      "// Console/entry shell â€” contract-level (P8). Wire it to the job modules",
       "// under src/jobs/ as you implement them.",
     ]),
     ...flavor,
@@ -5583,15 +5601,15 @@ type OracleSurfaceCtx = {
   /** path hosting generatedSource (template-shaped modules get an export tail). */
   hostPath?: string | null;
   /** fixes/216k D2: tree-covered job modules (label + .ts path) whose real
-   *  export surface the job-keyed oracle rows assert. Absent/empty ⇒ the spec
+   *  export surface the job-keyed oracle rows assert. Absent/empty â‡’ the spec
    *  is byte-identical to pre-216k output. */
   treeJobModules?: { label: string; path: string }[];
   /**
-   * fixes/144 (M2): tree assembly mode — path of the generatedTree ENTRY
+   * fixes/144 (M2): tree assembly mode â€” path of the generatedTree ENTRY
    * module (the file at the path the legacy P6 host would have used). When
    * set, the spec imports ONLY the tree (store/api/template surfaces are
    * generated content with unknown export names) and asserts the entry loads
-   * with a non-empty namespace — real cross-file imports resolved by node.
+   * with a non-empty namespace â€” real cross-file imports resolved by node.
    */
   treeEntryPath?: string | null;
   /** Sorted accepted tree paths (for the emitted file-list comment). */
@@ -5599,11 +5617,11 @@ type OracleSurfaceCtx = {
   /**
    * leftover job-* labels whose nodes re-export the hosted generatedSource
    * module (fixes/196). Oracle rows for these jobs must NOT assert the
-   * TODO(E-15) throw — they are bridges, not stubs. Stub leftover jobs
+   * TODO(E-15) throw â€” they are bridges, not stubs. Stub leftover jobs
    * (no generatedSource) are omitted here and MAY still assert throw.
    */
   bridgedJobLabels?: Iterable<string>;
-  /** fixes/328 P2: job labels whose REAL module this emit materialised — the
+  /** fixes/328 P2: job labels whose REAL module this emit materialised â€” the
    *  router dispatches their endpoints to it (rows assert the dispatch). */
   wiredJobLabels?: Iterable<string>;
   /** fixes/328 P2: the real job modules themselves (label + .ts path), for the
@@ -5615,50 +5633,50 @@ type OracleSurfaceCtx = {
    * per scaffold so the emitted rows and the README census cannot disagree
    * about which rows carry a real assertion. scaffoldProject passes the same
    * object it counts; when absent, emitOracleSpec derives it from the paths
-   * above (byte-identical — the same rules, one place).
+   * above (byte-identical â€” the same rules, one place).
    */
   rowSurface?: OracleRowSurface;
   /**
    * fixes/277 (R3-f03 / W-06): the emission carries a PARTIAL synthesis tree
-   * (prior chunks' real files kept after a refused chunk — `partialTreeRefuse`,
+   * (prior chunks' real files kept after a refused chunk â€” `partialTreeRefuse`,
    * detected by `trailVerdictOf`). When true, each `capability.N` row is
    * emitted with a skip-with-reason path: a capability whose demanded
    * identifier forms appear in NO scanned file names a module that was never
-   * materialised and SKIPS with that reason instead of asserting a red — the
+   * materialised and SKIPS with that reason instead of asserting a red â€” the
    * pre-fix 28-red cascade on a 1-file partial tree read as product failure.
-   * Absent/false ⇒ the capability rows are byte-identical to the pre-277
-   * output. TODO(R3-f03): the full capability→node mapping (name WHICH declared
+   * Absent/false â‡’ the capability rows are byte-identical to the pre-277
+   * output. TODO(R3-f03): the full capabilityâ†’node mapping (name WHICH declared
    * module is missing) once the spec graph carries it.
    */
   partial?: boolean;
   /**
    * fixes/352: emitted `.ts` module sources keyed by path, so a capability row
    * can bind to the REAL export the tree wires (`module["fn"]`), call it with
-   * sound args and assert the outcome — instead of a presence proxy.
+   * sound args and assert the outcome â€” instead of a presence proxy.
    */
   sourceByPath?: ReadonlyMap<string, string>;
 };
 
 // ---------------------------------------------------------------------------
-// fixes/216b (106 T-08 / F-05) — no emitted assertion may be unable to fail.
+// fixes/216b (106 T-08 / F-05) â€” no emitted assertion may be unable to fail.
 //
 // The scaffold emits one test per A7 oracle row. Rows the emitted modules give
 // a surface to assert against carry a REAL assertion (the seam rejection / the
 // template's phase bookkeeping / the endpoint contract). Rows they do not were
-// previously emitted as an always-true pair —
+// previously emitted as an always-true pair â€”
 //   assert.ok("<id>".length > 0, "row id is pinned");
 //   assert.ok("<prose>".length >= 0, "row prose recorded");
 // which cannot fail under any change to any file, so `npm test` printed the six
 // rows that matter as green while the product's contract had zero coverage.
 // The verdict for those rows is "not-implemented": a MARKED skip under the row's
-// pinned id — never a green test and never a silent one — that the emitted spec
-// header and the README census both COUNT. The classification lives here ONCE —
+// pinned id â€” never a green test and never a silent one â€” that the emitted spec
+// header and the README census both COUNT. The classification lives here ONCE â€”
 // the emitted spec and the README census both call oracleRowKind(), so a counted
 // row and an emitted row can never drift.
 //
 // fixes/356 (W356 A3 / 355-A3 L5): the 354 wave emitted that row as a reachable
 // `assert.fail`, which made any emission carrying one fail its own `npm test`
-// and withhold `emit --git` — an unwired row condemned the whole tree. The
+// and withhold `emit --git` â€” an unwired row condemned the whole tree. The
 // shortfall is now an honest SKIP: visible in the TAP line (`# SKIP <marker>`),
 // named per row in the spec source, and totalled on both headers. Rows that DO
 // have a surface keep their real assertion, byte-for-byte.
@@ -5667,11 +5685,11 @@ type OracleSurfaceCtx = {
 /** Which honest assertion one A7 oracle row can carry today. */
 type OracleRowKind =
   | "endpoint-stub"
-  /** fixes/328 P2: the endpoint's job module was emitted REAL — assert the
-   *  router→job dispatch end to end instead of the stub refusal. */
+  /** fixes/328 P2: the endpoint's job module was emitted REAL â€” assert the
+   *  routerâ†’job dispatch end to end instead of the stub refusal. */
   | "endpoint-live"
   /** fixes/328 P2: the job was materialised as a REAL module but no api
-   *  surface is importable (tree mode) — assert the module's export surface. */
+   *  surface is importable (tree mode) â€” assert the module's export surface. */
   | "live-job"
   | "bridged-host"
   | "phase-bookkeeping"
@@ -5689,19 +5707,19 @@ type OracleRowSurface = {
   apiOk: boolean;
   /** the hosted generatedSource module is importable AND is the template. */
   hostOk: boolean;
-  /** leftover job labels bridged to the hosted module — never assert the stub. */
+  /** leftover job labels bridged to the hosted module â€” never assert the stub. */
   bridged: ReadonlySet<string>;
   /** fixes/216k D2: tree-covered job labels whose REAL module is importable. */
   jobModules: ReadonlySet<string>;
-  /** fixes/328 P2: job labels whose REAL module this emit materialised — the
+  /** fixes/328 P2: job labels whose REAL module this emit materialised â€” the
    *  router dispatches their endpoints to it (assert the dispatch, not a
-   *  stub refusal). Empty ⇒ the pre-328 endpoint-stub behavior. */
+   *  stub refusal). Empty â‡’ the pre-328 endpoint-stub behavior. */
   wired: ReadonlySet<string>;
-  /** A6 contract endpoints (the row's job → a routable seam). */
+  /** A6 contract endpoints (the row's job â†’ a routable seam). */
   endpoints: { method: string; path: string; job: string }[];
   /**
    * fixes/357 (R-7): job labels whose module the emitted spec can actually
-   * IMPORT — the `.ts`-only filter the spec's import maps apply, and (tree
+   * IMPORT â€” the `.ts`-only filter the spec's import maps apply, and (tree
    * mode) only when the tree entry itself is importable. A `tree-job` row
    * missing from here has no importable module, so it is an UNWIRED row: a
    * marked, COUNTED skip, never a reachable `assert.fail` that condemns the
@@ -5714,7 +5732,7 @@ type OracleRowSurface = {
 
 /**
  * fixes/357 (R-7): the labels whose modules the emitted spec really IMPORTS,
- * derived from the SAME module lists the import maps are built from — one
+ * derived from the SAME module lists the import maps are built from â€” one
  * derivation, so the row body and the README census cannot disagree about
  * whether a `tree-job`/`live-job` row is wired.
  */
@@ -5736,7 +5754,7 @@ function importableOracleJobLabels(
 
 /** Build the row surface from the emitter's paths (one derivation, no drift). */
 function oracleRowSurface(input: {
-  /** fixes/144 M2: tree assembly mode ⇒ only the tree entry is importable. */
+  /** fixes/144 M2: tree assembly mode â‡’ only the tree entry is importable. */
   treeEntryOk: boolean;
   /** sanitized api node path (null/absent when the graph has no api node). */
   apiPath?: string | null;
@@ -5746,7 +5764,7 @@ function oracleRowSurface(input: {
   template: boolean;
   /** leftover job labels bridged to the hosted module (fixes/196). */
   bridged?: Iterable<string>;
-  /** fixes/216k D2: tree-covered job modules (label + path) — .ts only. */
+  /** fixes/216k D2: tree-covered job modules (label + path) â€” .ts only. */
   jobModules?: { label: string; path: string }[];
   /** fixes/328 P2: job labels whose REAL module this emit materialised. */
   wired?: Iterable<string>;
@@ -5754,7 +5772,7 @@ function oracleRowSurface(input: {
   endpoints?: { method: string; path: string; job: string }[];
   /** fixes/357 (R-7): labels the spec can import (see importableOracleJobLabels).
    *  Required, never defaulted: an absent value would silently turn every wired
-   *  row into a skip — the opposite of the honesty this surface guards. */
+   *  row into a skip â€” the opposite of the honesty this surface guards. */
   importableJobModules: Iterable<string>;
   importableWiredModules: Iterable<string>;
 }): OracleRowSurface {
@@ -5785,14 +5803,14 @@ function oracleRowSurface(input: {
  */
 function oracleRowKind(row: { job?: unknown }, surface: OracleRowSurface): OracleRowKind {
   // fixes/216k D2 (parent boundary repair): a tree-covered job module is a REAL
-  // importable surface — it wins over the legacy classifications (tree mode
+  // importable surface â€” it wins over the legacy classifications (tree mode
   // disables api/host/bridged anyway, so no pre-216k behavior changes).
   if (surface.jobModules.has(String(row.job))) return "tree-job";
   const bridged = surface.bridged.has(String(row.job));
   const hasEndpoint = surface.endpoints.some((e) => e.job === row.job);
   if (bridged) return surface.hostOk ? "bridged-host" : "not-implemented";
   if (surface.apiOk && hasEndpoint) {
-    // fixes/328 P2: a wired job ⇒ the router serves the endpoint for real.
+    // fixes/328 P2: a wired job â‡’ the router serves the endpoint for real.
     return surface.wired.has(String(row.job)) ? "endpoint-live" : "endpoint-stub";
   }
   // fixes/328 P2: a real job module with no importable api surface (tree mode).
@@ -5802,13 +5820,13 @@ function oracleRowKind(row: { job?: unknown }, surface: OracleRowSurface): Oracl
 
 /**
  * fixes/357 (R-7): true when the row's target surface is NOT importable by the
- * emitted spec — the ONE predicate the emitted row body and the README census
+ * emitted spec â€” the ONE predicate the emitted row body and the README census
  * share. It covers `not-implemented` (no emitted module surface at all) and the
  * drifts the 354/356 bytes answered with a REACHABLE `assert.fail`: a
  * `tree-job`/`live-job` row whose label has no importable `.ts` module in this
  * emission (or, in tree mode, no importable tree entry), and an `endpoint-stub`
  * row with no recorded endpoint. Such a row has no assertion it could execute,
- * so it is emitted as a MARKED, COUNTED skip under its pinned id — a surfaced
+ * so it is emitted as a MARKED, COUNTED skip under its pinned id â€” a surfaced
  * shortfall, never an unavoidable red that condemns the whole tree.
  */
 function oracleRowUnwired(row: { job?: unknown }, surface: OracleRowSurface): boolean {
@@ -5824,7 +5842,7 @@ function oracleRowUnwired(row: { job?: unknown }, surface: OracleRowSurface): bo
  * fixes/356 (W356 A3): the row-level marker + TAP skip reason every UNWIRED A7
  * row carries. It is the honest statement of the shortfall (`skip` is not a
  * pass), it is greppable in the emitted spec, and the TAP reporter prints it on
- * the row's own `# SKIP` line — so the shortfall is surfaced per row, never
+ * the row's own `# SKIP` line â€” so the shortfall is surfaced per row, never
  * silent. The COUNTED total lives on the emitted spec header + the README
  * census (`oracleShortfallLine`). ASCII only: the marker rides a JSON-escaped
  * string into the emitted file and its TAP line.
@@ -5838,14 +5856,14 @@ type OracleRowCensus = {
   total: number;
   /** rows whose emitted test carries a real, failable assertion. */
   assertable: number;
-  /** ids emitted as MARKED, COUNTED skips (`<id>` with `{ skip: <marker> }`) —
+  /** ids emitted as MARKED, COUNTED skips (`<id>` with `{ skip: <marker> }`) â€”
    *  fixes/356 (W356 A3): visible in the TAP line and counted on both headers,
    *  so an unwired row is a surfaced shortfall, never a green row and never an
    *  unavoidable red that condemns the tree. */
   notImplemented: string[];
 };
 
-/** Classify every oracle row once — the emitted spec + the README share this. */
+/** Classify every oracle row once â€” the emitted spec + the README share this. */
 function censusOracleRows(
   rows: ReadonlyArray<Project["oracle"][number]>,
   surface: OracleRowSurface,
@@ -5854,7 +5872,7 @@ function censusOracleRows(
   let assertable = 0;
   for (const row of rows) {
     if (row === null || typeof row !== "object") continue;
-    // fixes/357 (R-7): one predicate with the row body — a row the spec cannot
+    // fixes/357 (R-7): one predicate with the row body â€” a row the spec cannot
     // assert (no module surface, or a classification whose module is not
     // importable) is COUNTED here as the marked skip it is emitted as.
     if (oracleRowUnwired(row, surface)) {
@@ -5867,11 +5885,11 @@ function censusOracleRows(
 }
 
 // ---------------------------------------------------------------------------
-// fixes/150 (G2) — capability-presence demands (SEMANTIC-FAILURE REPAIR).
+// fixes/150 (G2) â€” capability-presence demands (SEMANTIC-FAILURE REPAIR).
 //
 // The single, deterministic capability set shared by TWO consumers so they can
 // never drift apart:
-//   1. the emitted tests/oracle.spec.ts capability-presence rows (below —
+//   1. the emitted tests/oracle.spec.ts capability-presence rows (below â€”
 //      one REAL test per demanded capability, red when the capability's
 //      identifier is absent from the emitted tree); and
 //   2. headless driveP6Journey's coverage gate (capabilityCoverage over the
@@ -5880,16 +5898,16 @@ function censusOracleRows(
 // spec's typeSignatures first (each demands its declared primary export
 // name), then implementationSpec.requirements (each sentence's content
 // tokens). A project WITHOUT an implementationSpec carries NO capability
-// demands — those emissions stay byte-identical (the fixes/150 byte-parity
+// demands â€” those emissions stay byte-identical (the fixes/150 byte-parity
 // pin). Capability labels are NOT oracle rows: they assert identifier
-// PRESENCE ONLY — a proxy, never behavioral proof (the emitted row's assert
+// PRESENCE ONLY â€” a proxy, never behavioral proof (the emitted row's assert
 // message says exactly what it checks).
 // ---------------------------------------------------------------------------
 
 /** One demanded capability: `label` is the human prose (requirement sentence
  *  or signature line), `demand` is the coverage label capabilityCoverage
- *  receives (the declared export name for a typeSignature — whose own token
- *  forms equal `forms` — or the requirement text, whose formsForCapability
+ *  receives (the declared export name for a typeSignature â€” whose own token
+ *  forms equal `forms` â€” or the requirement text, whose formsForCapability
  *  form set is a superset of the stopword-filtered `forms`, so a row can
  *  only ever be STRICTER than the gate, never a false red), and `forms` are
  *  the demanded identifier/stem forms the emitted row embeds as literals. */
@@ -5901,7 +5919,7 @@ export type CapabilityDemand = {
 
 /** Demanded identifier forms for one capability text: lowercased content
  *  tokens (stopword-filtered, identifier-valid, len>1) + their canonical
- *  stems — the maker-score capabilityCoverage / dod p6-arch matching
+ *  stems â€” the maker-score capabilityCoverage / dod p6-arch matching
  *  semantics (sub-identifier, case-insensitive). Deliberately stopword-free:
  *  a row must never pass on a junk word ("the"/"with") living in a name. */
 export function capabilityPresenceForms(text: string): string[] {
@@ -5918,11 +5936,11 @@ export function capabilityPresenceForms(text: string): string[] {
   return out;
 }
 
-/** Primary declared name a typeSignature line demands — the dod.ts
+/** Primary declared name a typeSignature line demands â€” the dod.ts
  *  p6-arch parser, mirrored verbatim so the emitted rows and the DoD probe
- *  agree on what a signature demands: `export function createBoard(…)` →
- *  createBoard; `export type Order = …` → Order; bare `createOrder(items)`
- *  → createOrder. Null when nothing parses (the line then demands its
+ *  agree on what a signature demands: `export function createBoard(â€¦)` â†’
+ *  createBoard; `export type Order = â€¦` â†’ Order; bare `createOrder(items)`
+ *  â†’ createOrder. Null when nothing parses (the line then demands its
  *  content forms instead). */
 function primarySignatureName(sig: string): string | null {
   const s = typeof sig === "string" ? sig.trim() : "";
@@ -5936,7 +5954,7 @@ function primarySignatureName(sig: string): string | null {
   return null;
 }
 
-/** The project's demanded capabilities — [] when the project carries no
+/** The project's demanded capabilities â€” [] when the project carries no
  *  implementationSpec (keyless/deterministic floors: nothing demanded, no
  *  rows, byte parity) or when every line tokenizes to zero content forms. */
 export function capabilityDemands(project: Project): CapabilityDemand[] {
@@ -5956,7 +5974,7 @@ export function capabilityDemands(project: Project): CapabilityDemand[] {
     const demand = primary ?? line;
     // Signature demand = the declared export name; its own token forms are
     // exactly the forms the row embeds. Requirement demand = the sentence,
-    // with stopword-filtered content forms (the gate's form set ⊇ these).
+    // with stopword-filtered content forms (the gate's form set âŠ‡ these).
     const forms =
       primary !== null
         ? capabilityPresenceForms(primary)
@@ -5968,22 +5986,22 @@ export function capabilityDemands(project: Project): CapabilityDemand[] {
 }
 
 /**
- * tests node: tests/oracle.spec.ts — REAL assertions over the emitted modules
+ * tests node: tests/oracle.spec.ts â€” REAL assertions over the emitted modules
  * (fixes/135). No todo stubs: every A7 oracle row keeps its PINNED orc-* id as
- * a test name (E-08 — never rename or drop one) and every test asserts what
+ * a test name (E-08 â€” never rename or drop one) and every test asserts what
  * the modules the scaffold actually ships DO today:
  *   - the generated P6 module's own functions are asserted when the
  *     deterministic template hosts them (synthesize/JOBS/REJECTION);
  *   - store/api modules are asserted over their real exports
- *     (CheckpointStore round-trips, ENDPOINTS ↔ A6 contract equality);
+ *     (CheckpointStore round-trips, ENDPOINTS â†” A6 contract equality);
  *   - an oracle row whose target seam is a TODO(E-15) stub asserts that the
- *     seam REJECTS — an honest statement of the current surface that FAILS
+ *     seam REJECTS â€” an honest statement of the current surface that FAILS
  *     the moment the seam is implemented (that is the signal to replace it
  *     with the row's real acceptance assertion);
  *   - a row with NO emitted module surface to assert against is emitted as a
- *     MARKED, COUNTED skip under its pinned id (fixes/216b — 106 T-08 / F-05;
- *     re-decided by fixes/356 — W356 A3 / 355-A3 L5): never an always-true
- *     assertion, never a silent omission and never a green row — the row's own
+ *     MARKED, COUNTED skip under its pinned id (fixes/216b â€” 106 T-08 / F-05;
+ *     re-decided by fixes/356 â€” W356 A3 / 355-A3 L5): never an always-true
+ *     assertion, never a silent omission and never a green row â€” the row's own
  *     TAP line carries the NOT IMPLEMENTED marker, and the shortfall total is
  *     counted on the spec header and in the README's oracle-row census, so the
  *     tree's own `npm test` can go green without the shortfall disappearing;
@@ -5999,7 +6017,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   const latticeJobs = Array.isArray(project.lattice?.jobs) ? project.lattice.jobs : [];
   const generated = String(project.generatedSource ?? "").trim();
   const template = isTemplateModule(generated);
-  // fixes/144 (M2): tree assembly mode — the caller names the tree ENTRY module
+  // fixes/144 (M2): tree assembly mode â€” the caller names the tree ENTRY module
   // path (only .ts entries are importable under node strip-types, mirroring the
   // legacy host import rule; .tsx tree files stay emitted but never imported).
   const treeEntryOk =
@@ -6025,8 +6043,8 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     });
   // R2-05 (re-decided by fixes/356 / W356 A3): an UNWIRED oracle row is a
   // MARKED, COUNTED skip. The pre-354 ratio gate (`notImplemented > assertable`)
-  // emitted `test.skip("<id> — NOT IMPLEMENTED")` with NO count anywhere, so an
-  // unwired row could vanish into a green run — the very thing R2-05 forbade.
+  // emitted `test.skip("<id> â€” NOT IMPLEMENTED")` with NO count anywhere, so an
+  // unwired row could vanish into a green run â€” the very thing R2-05 forbade.
   // The 354 answer (`assert.fail`) made the row unavoidable red and condemned
   // the whole tree (`npm test` exit 1, `emit --git` withheld). The count is the
   // honesty: the shortfall is stated per row (the skip marker, printed on the
@@ -6042,7 +6060,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     typeof ctx.storePath === "string" && /\.ts$/.test(ctx.storePath);
   const apiOk = surface.apiOk;
   const hostOk = surface.hostOk;
-  // Mirror the engine's P6 module build: lattice jobs (≤5) or ["core"].
+  // Mirror the engine's P6 module build: lattice jobs (â‰¤5) or ["core"].
   const expectedJobs = latticeJobs.length ? latticeJobs.slice(0, 5) : ["core"];
   const expectedJson = (v: unknown): string => JSON.stringify(v);
   // fixes/150 (G2): capability-presence row state. Rows exist ONLY when the
@@ -6052,7 +6070,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   // emits byte-identical output (the fixes/150 byte-parity pin).
   const capDemands = capabilityDemands(project);
   // fixes/328 P2: the REAL per-job modules this emit materialised are part of
-  // the emitted product — a capability whose identifier lives there must be
+  // the emitted product â€” a capability whose identifier lives there must be
   // scannable, or a real module's capability would read as absent.
   const capJobPaths = (Array.isArray(ctx.wiredJobModules) ? ctx.wiredJobModules : [])
     .filter((m) => m && typeof m.path === "string" && /\.[cm]?ts$/.test(m.path))
@@ -6078,14 +6096,14 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   // fixes/216k D2 (parent boundary repair): tree-covered job modules the spec
   // imports so the job-keyed A7 rows assert the REAL module (never a skip).
   // Deterministic names (sanitized label, collision-suffixed); .ts only
-  // (strip-types cannot load .tsx). Empty ⇒ byte-identical pre-216k output.
+  // (strip-types cannot load .tsx). Empty â‡’ byte-identical pre-216k output.
   const treeJobImport = new Map<string, { importName: string; slug: string; path: string }>();
   if (treeEntryOk) {
     const usedNames = new Set<string>(["treeModule"]);
     for (const m of Array.isArray(ctx.treeJobModules) ? ctx.treeJobModules : []) {
       if (!m || typeof m.label !== "string" || typeof m.path !== "string") continue;
       if (!/\.ts$/.test(m.path)) continue;
-      if (treeJobImport.has(m.label)) continue; // first wins — graph order, deterministic
+      if (treeJobImport.has(m.label)) continue; // first wins â€” graph order, deterministic
       const stem = m.label.replace(/[^A-Za-z0-9_$]/g, "_") || "mod";
       let importName = `jobMod_${stem}`;
       let k = 2;
@@ -6103,7 +6121,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   }
   // fixes/328 P2: the job modules THIS emit materialised from the recorded API
   // surface. Rows for these assert the module directly (legacy mode uses the
-  // stronger route→job dispatch assertion where the api surface is importable).
+  // stronger routeâ†’job dispatch assertion where the api surface is importable).
   const wiredJobImport = new Map<string, { importName: string; slug: string; path: string }>();
   {
     const usedNames = new Set<string>(["treeModule"]);
@@ -6133,7 +6151,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   // imports (treeModule / jobMod_* / wiredJob_*) AND whose parameters accept a
   // soundly-built empty literal is BOUND: the row calls the real export and
   // asserts its outcome. A capability with no binding falls back to the file
-  // presence scan (failable), and to an explicit skip when absent — never a
+  // presence scan (failable), and to an explicit skip when absent â€” never a
   // bodyless pass.
   type CapBinding = { ns: string; name: string; args: string[]; isAsync: boolean; returnsVoid: boolean };
   const capBindings: (CapBinding | null)[] = capSection
@@ -6187,19 +6205,19 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
 
   const lines = [
     "// ---------------------------------------------------------------------------",
-    "// tests/oracle.spec.ts — acceptance tests from the A7 oracle (project.oracle)",
+    "// tests/oracle.spec.ts â€” acceptance tests from the A7 oracle (project.oracle)",
     `// ${MACHINE_STAMP(project.id)}`,
     "// REAL assertions, no todo stubs (fixes/135). Row ids are PINNED: the verify",
-    "// harness seeds + pins orc-* ids across runs (E-08) — never rename or drop",
+    "// harness seeds + pins orc-* ids across runs (E-08) â€” never rename or drop",
     "// one. Each test asserts what the emitted modules ACTUALLY do today:",
     "//   * where the generated P6 module defines functions (the deterministic",
     "//     template's synthesize/JOBS/REJECTION), those are asserted directly;",
     "//   * store/api modules are asserted over their real exports;",
     "//   * an oracle row whose target seam is a TODO(E-15) stub asserts the seam",
-    "//     rejects — that test FAILS the moment the seam is implemented, which is",
+    "//     rejects â€” that test FAILS the moment the seam is implemented, which is",
     "//     the signal to replace it with the row's real acceptance assertion;",
     "//   * an oracle row with NO emitted module surface to assert against (106",
-    "//     T-08 / F-05) is a MARKED, COUNTED skip under its pinned id — never an",
+    "//     T-08 / F-05) is a MARKED, COUNTED skip under its pinned id â€” never an",
     "//     always-true assertion, never a green test, and never a silent omission:",
     "//     the row's own TAP line carries the NOT IMPLEMENTED marker and the total",
     "//     is counted below and in README.md's oracle-row census;",
@@ -6207,7 +6225,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     ...(hasOracleShortfall
       ? [
           `// ORACLE SHORTFALL: ${oracleShortfall} of ${oracleCensus.total} pinned A7 row(s) are`,
-          "// NOT IMPLEMENTED — emitted below as MARKED skips under their pinned ids",
+          "// NOT IMPLEMENTED â€” emitted below as MARKED skips under their pinned ids",
           "// (each prints `# SKIP NOT IMPLEMENTED ...` on its own TAP line) and",
           `// counted here and in README.md. The other ${oracleCensus.assertable} row(s) assert the`,
           "// emitted modules' real current behavior. A skip is not a pass: these rows",
@@ -6228,7 +6246,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       ? [
           "// Capability-presence rows (fixes/150 G2) ride section 5 below: one REAL",
           "// test per capability the implementationSpec demands (typeSignatures",
-          "// first, requirements fallback — the p6-arch source order).",
+          "// first, requirements fallback â€” the p6-arch source order).",
         ]
       : []),
     "// ---------------------------------------------------------------------------",
@@ -6253,9 +6271,9 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     "",
   ];
 
-  // --- 1. Tree truth (fixes/144 M2) — the generated tree ENTRY module ------
+  // --- 1. Tree truth (fixes/144 M2) â€” the generated tree ENTRY module ------
   // In tree mode the spec imports the tree's entry (the file at the path the
-  // legacy P6 host would have used — same selection rule). Loading the spec
+  // legacy P6 host would have used â€” same selection rule). Loading the spec
   // therefore loads the entry AND every module it imports: real cross-file
   // imports genuinely resolve under node:test. Export NAMES are generated
   // content (unknown at emit time), so the entry is asserted as a namespace.
@@ -6263,11 +6281,11 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     const treePaths = Array.isArray(ctx.treePaths) ? ctx.treePaths : [];
     lines.push(
       "// ---------------------------------------------------------------------------",
-      "// 1. Tree truth — the generated tree ENTRY module (project.generatedTree,",
+      "// 1. Tree truth â€” the generated tree ENTRY module (project.generatedTree,",
       "// fixes/144 M2). The scaffold assembled every tree file verbatim at its own",
       "// repo-relative path; this spec imports the ENTRY module (the file at the",
       "// path the legacy P6 host would have used) so the emitted npm test executes",
-      "// the REAL generated tree — its cross-file imports must resolve or this spec",
+      "// the REAL generated tree â€” its cross-file imports must resolve or this spec",
       "// fails to load. Export names are generated content, so the entry is asserted",
       "// as a namespace that must carry at least one real export.",
       "// ---------------------------------------------------------------------------",
@@ -6275,10 +6293,10 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       "// Emitted generated-tree files:",
       ...treePaths.map((p) => `//   ${p}${p === ctx.treeEntryPath ? "  (entry)" : ""}`),
       "",
-      "test(\"tree.entry — the generated tree entry module loads and cross-file imports resolve\", () => {",
+      "test(\"tree.entry â€” the generated tree entry module loads and cross-file imports resolve\", () => {",
       "  // The import at the top of this spec IS the load assertion: a missing entry",
       "  // or an unresolvable cross-file import fails the spec before any test runs.",
-      "  // Export names are generated content — the one stable assertion is that the",
+      "  // Export names are generated content â€” the one stable assertion is that the",
       "  // namespace carries at least one real export. (106 T-08 / F-05: the pre-fix",
       "  // `assert.ok(treeModule)` / `typeof === \"object\"` pair could never fail, so",
       "  // it was removed rather than left to read as evidence.)",
@@ -6289,40 +6307,40 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     );
   }
 
-  // --- 1. Module truth — the deterministic P6 template's real behavior ------
+  // --- 1. Module truth â€” the deterministic P6 template's real behavior ------
   if (hostOk) {
     lines.push(
       "// ---------------------------------------------------------------------------",
-      "// 1. Module truth — the hosted P6 module (project.generatedSource), verbatim.",
+      "// 1. Module truth â€” the hosted P6 module (project.generatedSource), verbatim.",
       "// ---------------------------------------------------------------------------",
       "",
     );
     if (latticeJobs.length) {
       lines.push(
-        `test("module.jobs — the P6 module lists the lattice jobs in order", () => {`,
+        `test("module.jobs â€” the P6 module lists the lattice jobs in order", () => {`,
         `  assert.deepEqual(JOBS, ${expectedJson(expectedJobs)});`,
         `});`,
         "",
       );
     }
     lines.push(
-      `test("module.synthesize — a valid phase + known job returns ok", () => {`,
+      `test("module.synthesize â€” a valid phase + known job returns ok", () => {`,
       `  const out = synthesize({ name: "probe", phase: 6, job: JOBS[0] });`,
       `  assert.equal(out.ok, true);`,
       `  assert.equal(out.job, JOBS[0]);`,
       `  assert.equal(typeof out.addressed, "boolean");`,
       `});`,
       "",
-      `test("module.synthesize — an out-of-range phase is rejected", () => {`,
+      `test("module.synthesize â€” an out-of-range phase is rejected", () => {`,
       `  assert.throws(() => synthesize({ name: "x", phase: -1, job: JOBS[0] }), /invalid phase/);`,
       `  assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);`,
       `});`,
       "",
-      `test("module.synthesize — an unknown job is rejected", () => {`,
+      `test("module.synthesize â€” an unknown job is rejected", () => {`,
       `  assert.throws(() => synthesize({ name: "x", phase: 6, job: "__no_such_job__" }), /unknown job/);`,
       `});`,
       "",
-      `test("module.synthesize — the rejection note blocks phase 9 when present", () => {`,
+      `test("module.synthesize â€” the rejection note blocks phase 9 when present", () => {`,
       `  if (REJECTION) {`,
       `    assert.throws(() => synthesize({ name: "x", phase: 9, job: JOBS[0] }), /deploy blocked/);`,
       `    const out = synthesize({ name: "x", phase: 6, job: JOBS[0] });`,
@@ -6337,14 +6355,14 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     );
   }
 
-  // --- 2. Store truth — the real CheckpointStore semantics -----------------
+  // --- 2. Store truth â€” the real CheckpointStore semantics -----------------
   if (storeOk) {
     lines.push(
       "// ---------------------------------------------------------------------------",
-      "// 2. Store truth — CheckpointStore (src/state), the real checkpoint surface.",
+      "// 2. Store truth â€” CheckpointStore (src/state), the real checkpoint surface.",
       "// ---------------------------------------------------------------------------",
       "",
-      `test("store.checkpoint — write then read returns the stored checkpoint", () => {`,
+      `test("store.checkpoint â€” write then read returns the stored checkpoint", () => {`,
       `  const s = new CheckpointStore();`,
       `  s.write({ phase: 2, status: "sealed", updatedAt: "2026-01-01T00:00:00.000Z" });`,
       `  const got = s.read(2);`,
@@ -6353,12 +6371,12 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       `  assert.equal(got.status, "sealed");`,
       `});`,
       "",
-      `test("store.checkpoint — reading an unwritten phase returns undefined", () => {`,
+      `test("store.checkpoint â€” reading an unwritten phase returns undefined", () => {`,
       `  const s = new CheckpointStore();`,
       `  assert.equal(s.read(4), undefined);`,
       `});`,
       "",
-      `test("store.checkpoint — a later write for a phase replaces the earlier one", () => {`,
+      `test("store.checkpoint â€” a later write for a phase replaces the earlier one", () => {`,
       `  const s = new CheckpointStore();`,
       `  s.write({ phase: 3, status: "draft", updatedAt: "2026-01-01T00:00:00.000Z" });`,
       `  s.write({ phase: 3, status: "sealed", updatedAt: "2026-01-02T00:00:00.000Z" });`,
@@ -6369,43 +6387,43 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     );
   }
 
-  // --- 3. Endpoint truth — ENDPOINTS against the A6 contract ---------------
+  // --- 3. Endpoint truth â€” ENDPOINTS against the A6 contract ---------------
   if (apiOk) {
     lines.push(
       "// ---------------------------------------------------------------------------",
-      "// 3. Endpoint truth — ENDPOINTS must match the A6 contract verbatim.",
+      "// 3. Endpoint truth â€” ENDPOINTS must match the A6 contract verbatim.",
       "// ---------------------------------------------------------------------------",
       "",
       endpoints.length
-        ? `test("api.endpoints — ENDPOINTS matches the A6 contract endpoints", () => {`
-        : `test("api.endpoints — no A6 endpoints recorded, ENDPOINTS stays empty", () => {`,
+        ? `test("api.endpoints â€” ENDPOINTS matches the A6 contract endpoints", () => {`
+        : `test("api.endpoints â€” no A6 endpoints recorded, ENDPOINTS stays empty", () => {`,
       `  assert.deepEqual(ENDPOINTS, ${expectedJson(endpoints)});`,
       `});`,
       "",
     );
   }
 
-  // --- 4. A7 oracle rows — pinned ids, honest current-surface assertions ----
+  // --- 4. A7 oracle rows â€” pinned ids, honest current-surface assertions ----
   // fixes/216b (106 T-08 / F-05) + fixes/356 (W356 A3): every row either
-  // asserts a real current behavior that can fail, or — when it has no emitted
-  // module surface to assert against — is a MARKED, COUNTED skip under its
+  // asserts a real current behavior that can fail, or â€” when it has no emitted
+  // module surface to assert against â€” is a MARKED, COUNTED skip under its
   // pinned id. No unwired row can read as green evidence, and no unwired row
   // fails the tree on its own.
   lines.push(
     "// ---------------------------------------------------------------------------",
-    "// 4. Oracle rows (A7) — one test per row under its PINNED id; a row with no",
+    "// 4. Oracle rows (A7) â€” one test per row under its PINNED id; a row with no",
     "// emitted module surface is a MARKED, COUNTED skip (`{ skip: ... }`, printed",
-    "// on its own TAP line) — never a green test and never a silent omission.",
+    "// on its own TAP line) â€” never a green test and never a silent omission.",
     "// ---------------------------------------------------------------------------",
     "",
   );
   if (!rows.length) {
     // fixes/216b (106 T-08 / F-05): this row used to be assert.equal(true, true)
-    // — a test that cannot fail is not evidence. With no A7 rows there is
+    // â€” a test that cannot fail is not evidence. With no A7 rows there is
     // nothing to assert, so the spec says exactly that with a visible skip.
     lines.push(
-      `test.skip("no-oracle: project has no A7 rows yet — run the pipeline to P0/P1", () => {`,
-      `  assert.fail("no A7 oracle rows recorded — nothing to assert yet (re-emit after P0/P1)");`,
+      `test.skip("no-oracle: project has no A7 rows yet â€” run the pipeline to P0/P1", () => {`,
+      `  assert.fail("no A7 oracle rows recorded â€” nothing to assert yet (re-emit after P0/P1)");`,
       `});`,
       "",
     );
@@ -6421,30 +6439,30 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     const ep = endpoints.find((e) => e.job === row.job);
     const wantsCheckpoint = /checkpoint/i.test(expect);
     const kind = oracleRowKind(row, surface);
-    // The head keeps the bare pinned id as its test name (E-08 — verified rows
+    // The head keeps the bare pinned id as its test name (E-08 â€” verified rows
     // match on it), for both live and unwired rows.
-    // fixes/357 (R-7): the SAME predicate the census counts with — a row with no
+    // fixes/357 (R-7): the SAME predicate the census counts with â€” a row with no
     // emitted module surface, or with a classification whose module this emit
     // cannot import, is a marked, counted skip.
     const skipRow = oracleRowUnwired(row, surface);
     // fixes/356 (W356 A3): a row with no emitted module surface is a MARKED
-    // skip, not a reachable `assert.fail` — the 354 form failed the whole tree
+    // skip, not a reachable `assert.fail` â€” the 354 form failed the whole tree
     // (and withheld `emit --git`) for one unwired row. Its body carries NO
     // assert call: an assertion inside a skipped test never executes, and
     // compile-check's `maskSkippedTests` only masks the `test.skip(...)` method
-    // form — a non-executed assert in the options form would be read as
+    // form â€” a non-executed assert in the options form would be read as
     // behavioural evidence. Assertable rows are already real, async tests.
     const liveAssertable = !skipRow;
     lines.push(
       liveAssertable
         ? `test(${jstr(id)}, async () => {`
         : `test(${jstr(id)}, { skip: ${jstr(ORACLE_SHORTFALL_MARKER)} }, () => {`,
-      `  // A7 row ${jstr(id)} ${name ? `"${name}"` : ""} — ${given} => ${expect}`,
+      `  // A7 row ${jstr(id)} ${name ? `"${name}"` : ""} â€” ${given} => ${expect}`,
     );
     if (kind === "bridged-host") {
-      // leftover job-* re-exports the hosted P6 module (fixes/196) — not a
+      // leftover job-* re-exports the hosted P6 module (fixes/196) â€” not a
       // TODO(E-15) stub and not an invented job body. Do not assert the
-      // TODO throw. Template host ⇒ same phase bookkeeping as the host.
+      // TODO throw. Template host â‡’ same phase bookkeeping as the host.
       lines.push(
         `  // Leftover job ${job} re-exports the hosted P6 module (fixes/196).`,
         `  // Not a TODO(E-15) stub and not an invented job body. Executable`,
@@ -6454,11 +6472,11 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       );
     } else if (kind === "endpoint-live" && ep) {
       // fixes/328 P2: the emitted router dispatches this recorded endpoint to
-      // the job's REAL module. Assert the wiring end to end — a real, failable
+      // the job's REAL module. Assert the wiring end to end â€” a real, failable
       // acceptance probe over the emitted contract, replacing the pre-328
       // stub-refusal assertion for exactly the jobs that became real.
       lines.push(
-        `  // Target seam: ${job} (${ep.method} ${ep.path}) — served by the emitted`,
+        `  // Target seam: ${job} (${ep.method} ${ep.path}) â€” served by the emitted`,
         `  // router, which dispatches to the REAL job module (fixes/328 P2 / TA-15).`,
         `  const ep = ENDPOINTS.find((e) => e.job === ${jstr(row.job)});`,
         `  assert.ok(ep, "endpoint for the row's job must exist (contract drift)");`,
@@ -6468,7 +6486,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       );
       if (wantsCheckpoint && storeOk) {
         lines.push(
-          `  // The "${expect}" row expects a checkpoint write — the ONE part the real`,
+          `  // The "${expect}" row expects a checkpoint write â€” the ONE part the real`,
           `  // CheckpointStore can satisfy today:`,
           `  const s = new CheckpointStore();`,
           `  s.write({ phase: 6, status: "sealed", updatedAt: ${jstr(SEAL_DATE)} });`,
@@ -6480,8 +6498,8 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       if (wj) {
         lines.push(
           `  // fixes/328 P2 (TA-15): this job was materialised as a REAL module from`,
-          `  // the recorded API surface — assert its real export surface. (No api`,
-          `  // surface is importable in this emission, so the route→job dispatch`,
+          `  // the recorded API surface â€” assert its real export surface. (No api`,
+          `  // surface is importable in this emission, so the routeâ†’job dispatch`,
           `  // assertion is not available; the module is asserted directly.)`,
           `  const ${wj.slug} = ${wj.importName} as unknown as Record<string, unknown>;`,
           `  assert.ok(typeof ${wj.slug}.JOB === "string", "job module records its label");`,
@@ -6491,14 +6509,14 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
           `  assert.ok(${wj.slug}Fns.length > 0, "job module exports real functions: " + ${wj.slug}Fns.join(", "));`,
         );
       } else {
-        // fixes/357 (R-7): classified `live-job` with no importable module — the
+        // fixes/357 (R-7): classified `live-job` with no importable module â€” the
         // row is UNWIRED (see oracleRowUnwired), so it is already emitted as the
         // marked, counted skip above. The 354/356 bytes put a reachable
         // `assert.fail` here, which condemned the whole tree (`npm test` exit 1,
         // `emit --git` withheld) on one drift; a skipped body must carry no
         // assert (compile-check reads a non-executing assert as evidence).
         lines.push(
-          `  // UNWIRED (oracle shortfall — counted on the spec header and in`,
+          `  // UNWIRED (oracle shortfall â€” counted on the spec header and in`,
           `  // README.md): this row was classified against a materialised job module`,
           `  // (fixes/328 P2) that this emission does not import, so the row has no`,
           `  // assertion it could execute. The pre-357 emission failed the whole tree`,
@@ -6508,17 +6526,17 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       }
     } else if (kind === "endpoint-stub" && ep) {
       lines.push(
-        `  // Target seam: ${job} (${ep.method} ${ep.path}). Today it is a TODO(E-15) stub —`,
+        `  // Target seam: ${job} (${ep.method} ${ep.path}). Today it is a TODO(E-15) stub â€”`,
         `  // the route rejects instead of returning "${expect}". Asserting that real`,
         `  // current behavior: this test FAILS the moment ${job} is implemented,`,
         `  // which is the signal to replace it with the row's real acceptance assert.`,
         `  const ep = ENDPOINTS.find((e) => e.job === ${jstr(row.job)});`,
         `  assert.ok(ep, "endpoint for the row's job must exist (contract drift)");`,
-        `  await assert.rejects(route(ep.method, ep.path, {}), /${EMITTED_REFUSAL_CODE} · TODO\\(E-15\\) stub/);`,
+        `  await assert.rejects(route(ep.method, ep.path, {}), /${EMITTED_REFUSAL_CODE} Â· TODO\\(E-15\\) stub/);`,
       );
       if (wantsCheckpoint && storeOk) {
         lines.push(
-          `  // The "${expect}" row expects a checkpoint write — the one part the real`,
+          `  // The "${expect}" row expects a checkpoint write â€” the one part the real`,
           `  // CheckpointStore can satisfy today:`,
           `  const s = new CheckpointStore();`,
           `  s.write({ phase: 6, status: "sealed", updatedAt: ${jstr(SEAL_DATE)} });`,
@@ -6530,7 +6548,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       if (jm) {
         lines.push(
           `  // fixes/216k D2 (TA-15): the tree materialised this job as a REAL`,
-          `  // module (never a bridge) — assert its export surface and CALL one`,
+          `  // module (never a bridge) â€” assert its export surface and CALL one`,
           `  // real function in a guarded probe. A ReferenceError here is a missing`,
           `  // cross-file binding (a forward call into a later chunk) and fails this`,
           `  // row; any other throw is the real function behaving. Pre-D2: a skip.`,
@@ -6545,7 +6563,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
           `  // fixes/353: call the real function over a set of documented candidate`,
           `  // inputs and require at least ONE usable (non-undefined/NaN/function)`,
           `  // result. An export that throws for EVERY input is a stub, not a working`,
-          `  // job, and FAILS this row — the pre-353 probe accepted any well-formed`,
+          `  // job, and FAILS this row â€” the pre-353 probe accepted any well-formed`,
           `  // Error, so an always-throwing module passed. A missing cross-file binding`,
           `  // (ReferenceError) still fails immediately.`,
           `  const ${jm.slug}Fn = ${jm.slug}[first] as (...a: unknown[]) => unknown;`,
@@ -6575,11 +6593,11 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       } else {
         // fixes/357 (R-7): classified `tree-job` with no importable module (the
         // jobModules label has no `.ts` file this emission imports, or there is
-        // no importable tree entry) — an UNWIRED row, already emitted as the
+        // no importable tree entry) â€” an UNWIRED row, already emitted as the
         // marked, counted skip above. See the `live-job` twin for why no assert
         // may sit in a skipped body.
         lines.push(
-          `  // UNWIRED (oracle shortfall — counted on the spec header and in`,
+          `  // UNWIRED (oracle shortfall â€” counted on the spec header and in`,
           `  // README.md): this row was classified against a tree job module`,
           `  // (fixes/216k D2) that this emission does not import, so the row has no`,
           `  // assertion it could execute. The pre-357 emission failed the whole tree`,
@@ -6589,7 +6607,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       }
     } else if (kind === "phase-bookkeeping") {
       lines.push(
-        `  // Row targets ${job || "the phase graph"} — no HTTP endpoint exists for it. The`,
+        `  // Row targets ${job || "the phase graph"} â€” no HTTP endpoint exists for it. The`,
         `  // only executable rule today is the P6 module's phase bookkeeping: an`,
         `  // out-of-range phase is an illegal transition and is rejected.`,
         `  assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);`,
@@ -6599,7 +6617,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       // fixes/216b (106 T-08 / F-05) + fixes/356 (W356 A3): the tautological
       // floor is gone. No emitted module surface targets this row (no HTTP
       // endpoint seam, no P6 template host), so it can carry NO real assertion
-      // — a test that cannot fail is not evidence. The row keeps its pinned id
+      // â€” a test that cannot fail is not evidence. The row keeps its pinned id
       // and its place in the spec, marked as this tree's acceptance shortfall:
       // the `{ skip: ... }` marker prints on the row's own TAP line and the
       // header/README census COUNT it, so it can never read as green evidence.
@@ -6607,40 +6625,40 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       // carried one such row (and withheld `emit --git`); the shortfall is now
       // surfaced without condemning the tree.
       lines.push(
-        `  // NOT IMPLEMENTED (oracle shortfall — counted on the spec header and in`,
+        `  // NOT IMPLEMENTED (oracle shortfall â€” counted on the spec header and in`,
         `  // README.md): no emitted module surface targets this row yet (106`,
-        `  // T-08 / F-05). The pre-fix emission asserted ${jstr(`${id}`)}.length > 0 —`,
+        `  // T-08 / F-05). The pre-fix emission asserted ${jstr(`${id}`)}.length > 0 â€”`,
         `  // which cannot fail, so it was not evidence.`,
         `  // Replace the \`{ skip: ... }\` option with the row's real acceptance`,
-        `  // assertion when the seam (HTTP endpoint or P6 host) lands — the skip`,
+        `  // assertion when the seam (HTTP endpoint or P6 host) lands â€” the skip`,
         `  // marker is the cue, and it is never counted as a pass.`,
       );
     }
     lines.push(`});`, "");
   }
 
-  // --- 5. Capability presence (fixes/150 G2) — semantic-failure repair -----
+  // --- 5. Capability presence (fixes/150 G2) â€” semantic-failure repair -----
   // One REAL test per capability the project's implementationSpec demands
-  // (typeSignatures first, requirements fallback — the same source order
+  // (typeSignatures first, requirements fallback â€” the same source order
   // dod.p6-arch uses), so capability ABSENCE is a red test, never a post-hoc
   // report. Each row re-reads the emitted files from disk at test time and
   // asserts the capability's demanded identifier forms (content tokens +
   // canonical stems) appear in a file path or source text. Identifier
-  // presence is a PROXY — the assert message says exactly what it checks
+  // presence is a PROXY â€” the assert message says exactly what it checks
   // (name/source-text presence) and never claims behavior. The scan runs
-  // over RAW source text (comments/literals not masked) — deliberately
+  // over RAW source text (comments/literals not masked) â€” deliberately
   // lenient, so it can never red a tree the engine's masked probe
-  // (capabilityCoverage / p6-arch) passes — and re-reads the files on every
+  // (capabilityCoverage / p6-arch) passes â€” and re-reads the files on every
   // run, so an edit that removes a capability's identifiers turns its row
   // red the next time the suite runs.
-  // fixes/277 (R3-f03 / W-06): partial-emission capability semantics — see
+  // fixes/277 (R3-f03 / W-06): partial-emission capability semantics â€” see
   // OracleSurfaceCtx.partial. One real skip path (below); a non-partial
   // emission's capability section stays byte-identical to the pre-277 output.
   const capPartial = ctx.partial === true;
   if (capSection) {
     lines.push(
       "// ---------------------------------------------------------------------------",
-      "// 5. Capability wiring (fixes/150 G2, tightened by 353) — each demanded",
+      "// 5. Capability wiring (fixes/150 G2, tightened by 353) â€” each demanded",
       "// capability is CALLED and its real outcome asserted, or the row is an",
       "// explicit skip. There is no presence-only pass: a name is NOT behaviour.",
       "// ---------------------------------------------------------------------------",
@@ -6648,7 +6666,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       ...(capPartial
         ? [
             "// fixes/277 (R3-f03 / W-06): this emission carries a PARTIAL synthesis",
-            "// tree — a capability the emitted modules do not wire is skipped with",
+            "// tree â€” a capability the emitted modules do not wire is skipped with",
             "// that reason instead of reddening (the pre-fix 28-red cascade read as",
             "// product failure; the reds were assembly, not the product).",
             "",
@@ -6659,7 +6677,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       const idName = `capability.${i + 1}`;
       const binding = capBindings[i] ?? null;
       if (binding !== null) {
-        // fixes/352: the tree WIRES this capability — call the real export and
+        // fixes/352: the tree WIRES this capability â€” call the real export and
         // assert the outcome (a NaN/undefined stub and a binding ReferenceError
         // both fail; a well-formed Error is the function's real behaviour).
         const fn = `${binding.ns}[${jstr(binding.name)}]`;
@@ -6668,7 +6686,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
           // completion without throwing (a stub that throws fails; a caller
           // that would reject for an async void is awaited).
           lines.push(
-            `// ${idName} — ${prose(d.label)}`,
+            `// ${idName} â€” ${prose(d.label)}`,
             `test(${jstr(idName)}, async () => {`,
             `  const fn = ${fn} as unknown as (...a: unknown[]) => ${binding.isAsync ? "Promise<void>" : "void"};`,
             `  assert.equal(typeof fn, "function", ${jstr(`${binding.name} must be a real export of ${binding.ns}`)});`,
@@ -6681,7 +6699,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
           return;
         }
         lines.push(
-          `// ${idName} — ${prose(d.label)}`,
+          `// ${idName} â€” ${prose(d.label)}`,
           `test(${jstr(idName)}, async () => {`,
           `  const fn = ${fn} as unknown as (...a: unknown[]) => unknown;`,
           `  assert.equal(typeof fn, "function", ${jstr(`${binding.name} must be a real export of ${binding.ns}`)});`,
@@ -6704,15 +6722,15 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
         );
         return;
       }
-      // fixes/353: no callable binding — the capability is present in the plan
+      // fixes/353: no callable binding â€” the capability is present in the plan
       // but no emitted module exports it with sound arguments, so there is no
       // REAL behaviour to assert. The row is an explicit skip naming exactly why
       // (never a presence-only pass: a name is not behaviour).
       lines.push(
-        `// ${idName} — ${prose(d.label)}`,
+        `// ${idName} â€” ${prose(d.label)}`,
         `test(${jstr(idName)}, (t) => {`,
         "  t.skip(",
-        `    ${jstr(`${idName} — NOT WIRED: no emitted module exports "${d.demand}" with sound arguments, so the capability cannot be called${capPartial ? " (partial synthesis: the module that would carry it was never materialised)" : ""}. No behavioural assertion is possible — wire the module to turn this row green.`)}`,
+        `    ${jstr(`${idName} â€” NOT WIRED: no emitted module exports "${d.demand}" with sound arguments, so the capability cannot be called${capPartial ? " (partial synthesis: the module that would carry it was never materialised)" : ""}. No behavioural assertion is possible â€” wire the module to turn this row green.`)}`,
         "  );",
         "});",
         "",
@@ -6720,19 +6738,19 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     });
   }
 
-  // A2 (fixes/162): human-approved brief fixtures — folded into THIS spec
+  // A2 (fixes/162): human-approved brief fixtures â€” folded into THIS spec
   // (PKG test script pins tests/oracle.spec.ts; a second brief.spec.ts
-  // would never run). Partial approval → this section is omitted (byte-identical
+  // would never run). Partial approval â†’ this section is omitted (byte-identical
   // to the no-fixture emission). A1-01 (fixes/344): a set still carrying a
   // draft sentinel ("<draft>"/"<any>") asserts nothing real and is refused by
-  // approvedAcceptanceFixtures exactly like a partial set — never a vacuous
+  // approvedAcceptanceFixtures exactly like a partial set â€” never a vacuous
   // always-true assertion. Requires a tree entry namespace to call.
   const fxApproved = treeEntryOk ? approvedAcceptanceFixtures(project.acceptanceFixtures) : null;
   if (fxApproved) {
     lines.push(
       "// ---------------------------------------------------------------------------",
-      "// 6. Brief-derived acceptance fixtures (fixes/162 A2) — human-approved",
-      "// input→output cases. given is JSON-literal. shape = partial match on",
+      "// 6. Brief-derived acceptance fixtures (fixes/162 A2) â€” human-approved",
+      "// inputâ†’output cases. given is JSON-literal. shape = partial match on",
       "// REAL typed literals (A1-01: sentinel rows are red-carded, never folded);",
       "// throws = substring includes; property cases are red-carded (no registry).",
       "// Never auto-approved.",
@@ -6744,7 +6762,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     );
     for (const fx of fxApproved) {
       const compiled = compileFixtureAssertion(fx);
-      const title = `fx.${fx.id} — ${fx.name}`;
+      const title = `fx.${fx.id} â€” ${fx.name}`;
       if (!compiled.ok) {
         lines.push(
           `test(${jstr(title)}, () => {`,
@@ -6761,7 +6779,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   return lines.join("\n");
 }
 
-/** Game variant: assets/manifest.json — expected-but-absent art roster (honest). */
+/** Game variant: assets/manifest.json â€” expected-but-absent art roster (honest). */
 function emitGameManifest(project: Project): string {
   const entities = project.contracts?.entities?.length
     ? project.contracts.entities.map((e) => e.name)
@@ -6778,20 +6796,20 @@ function emitGameManifest(project: Project): string {
       asset: assetPath,
       role: `entity/job placeholder for ${prose(name)}`,
       status: "placeholder",
-      note: "NOT engine-generated — supply art or procedural rendering",
+      note: "NOT engine-generated â€” supply art or procedural rendering",
     });
   }
   assets.push({
     asset: "ui/icon.png",
     role: "app icon placeholder",
     status: "placeholder",
-    note: "NOT engine-generated — supply art or procedural rendering",
+    note: "NOT engine-generated â€” supply art or procedural rendering",
   });
   return `${JSON.stringify(
     {
       schema: 1,
       kind: "game",
-      generatedBy: `RapidTool scaffold emitter — ${MACHINE_STAMP(project.id)}`,
+      generatedBy: `RapidTool scaffold emitter â€” ${MACHINE_STAMP(project.id)}`,
       note: "Placeholder manifest: assets/ and public/ are expected at the emitted scaffold and are NOT engine-generated.",
       assets,
     },
@@ -6801,7 +6819,7 @@ function emitGameManifest(project: Project): string {
 }
 
 // ---------------------------------------------------------------------------
-// Browser boot files (fixes/135 — webapp/game emits must actually boot)
+// Browser boot files (fixes/135 â€” webapp/game emits must actually boot)
 //
 // The webapp/game package.json has always declared `vite` dev/build scripts,
 // but the emitted tree carried NO index.html / vite.config / src entry, so
@@ -6809,7 +6827,7 @@ function emitGameManifest(project: Project): string {
 // These three files close that gap: index.html (the vite HTML entry),
 // vite.config.ts (webapp: the react plugin the devDeps/tsconfig already
 // declare), and a src/main browser entry that mounts the emitted UI shell
-// (src/ui — the P8 contract-level shell). All deterministic + escaped.
+// (src/ui â€” the P8 contract-level shell). All deterministic + escaped.
 // ---------------------------------------------------------------------------
 
 /** vite HTML entry. `entryScript` is the /-rooted src path vite must load. */
@@ -6832,8 +6850,8 @@ function emitIndexHtml(project: Project, entryScript: string): string {
 }
 
 /**
- * vite.config.ts — webapp (react plugin; tsconfig already declares jsx
- * react-jsx) and, per fixes/277 (R3-f06), game (plain config — the game shell
+ * vite.config.ts â€” webapp (react plugin; tsconfig already declares jsx
+ * react-jsx) and, per fixes/277 (R3-f06), game (plain config â€” the game shell
  * is canvas-based and the game devDeps carry NO react/@vitejs/plugin-react, so
  * the webapp config body would break `npm run build` there). Webapp bytes are
  * unchanged from fixes/135.
@@ -6842,10 +6860,10 @@ function emitViteConfig(kind: ProjectKind): string {
   if (kind === "game") {
     return [
       "// ---------------------------------------------------------------------------",
-      "// vite.config.ts — emitted by the RapidTool scaffold (fixes/277 R3-f06).",
+      "// vite.config.ts â€” emitted by the RapidTool scaffold (fixes/277 R3-f06).",
       "// The game package.json declares vite dev/build/preview scripts; this config",
       "// makes them real: index.html + src/main boot the canvas shell. Plain config",
-      "// — the canvas UI has no framework plugin (game devDeps carry none).",
+      "// â€” the canvas UI has no framework plugin (game devDeps carry none).",
       "// ---------------------------------------------------------------------------",
       'import { defineConfig } from "vite";',
       "",
@@ -6855,7 +6873,7 @@ function emitViteConfig(kind: ProjectKind): string {
   }
   return [
     "// ---------------------------------------------------------------------------",
-    "// vite.config.ts — emitted by the RapidTool scaffold (fixes/135 bootability).",
+    "// vite.config.ts â€” emitted by the RapidTool scaffold (fixes/135 bootability).",
     "// The webapp package.json declares the vite dev/build scripts + the react and",
     "// tailwindcss plugins (W52 / 338-5: tailwindcss wired so no declared devDep is",
     "// inert); this config makes them real: index.html + src/main mount the UI shell",
@@ -6873,12 +6891,12 @@ function emitViteConfig(kind: ProjectKind): string {
 }
 
 /**
- * src/styles.css — the webapp tree's Tailwind v4 entry (W52 / 338-5).
+ * src/styles.css â€” the webapp tree's Tailwind v4 entry (W52 / 338-5).
  *
  * The emitted `package.json` declares `tailwindcss` + `@tailwindcss/vite`;
  * `vite.config.ts` registers the plugin. Tailwind v4 is CSS-first, so the
- * plugin only does work when a CSS file imports it — this is that file. Without
- * it both devDeps were dead weight (the fixes/169 §C-2 drift).
+ * plugin only does work when a CSS file imports it â€” this is that file. Without
+ * it both devDeps were dead weight (the fixes/169 Â§C-2 drift).
  *
  * Deterministic and injection-safe: the bytes are a FIXED token sheet with no
  * project text, so a hostile name/brief can never reach the CSS. The `@layer
@@ -6888,12 +6906,12 @@ function emitViteConfig(kind: ProjectKind): string {
 function emitStylesCss(): string {
   return [
     "/* ---------------------------------------------------------------------------",
-    " * styles.css — emitted by the RapidTool scaffold.",
+    " * styles.css â€” emitted by the RapidTool scaffold.",
     " *",
     " * A designed token sheet + semantic component classes for the emitted site.",
     " * Tailwind v4 compiles the `@import` below (package.json declares `tailwindcss`",
     " * + `@tailwindcss/vite` and vite.config.ts registers the plugin); the classes",
-    " * are plain CSS, so the whole sheet also renders standalone — the browser",
+    " * are plain CSS, so the whole sheet also renders standalone â€” the browser",
     " * preview strips the Tailwind import and every rule here still applies.",
     " *",
     " * Tokens: warm neutral surface, one primary + one accent, light/dark parity,",
@@ -7090,7 +7108,7 @@ function emitStylesCss(): string {
     ".record__pair dd { margin: 0; }",
     ".value { margin: 0; }",
     "",
-    "/* ---- responsive: mobile-first width breakpoints (320 → 1440) ----------- */",
+    "/* ---- responsive: mobile-first width breakpoints (320 â†’ 1440) ----------- */",
     "@media (min-width: 40rem) {",
     "  .site-main { padding-left: 1.5rem; padding-right: 1.5rem; }",
     "  .record__pair { grid-template-columns: minmax(8rem, 14rem) 1fr; }",
@@ -7118,14 +7136,14 @@ function emitStylesCss(): string {
 /**
  * Browser entry that mounts the emitted UI shell. `uiSpecifier` is the
  * extensionless relative import to the sanitized ui node path (null when the
- * spec graph has no ui node — then a self-contained honest shell is emitted).
+ * spec graph has no ui node â€” then a self-contained honest shell is emitted).
  * webapp mounts the React Console; game boots the canvas shell.
  */
 function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string | null): string {
   if (kind === "webapp") {
     const title = jstr(displayName(project.name) || "RapidTool scaffold");
     const lines = [
-      ...sourceHeader("src/main.tsx", "Browser entry — mounts the UI shell (P8 interface contract)", project, [
+      ...sourceHeader("src/main.tsx", "Browser entry â€” mounts the UI shell (P8 interface contract)", project, [
         "// The mounted surface is the contract-level Console shell from src/ui; wiring",
         "// it to the store/job modules is the build work ahead (see README honest",
         "// boundaries).",
@@ -7139,7 +7157,7 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
         `import Console from ${jstr(uiSpecifier)};`,
         "",
         "const rootEl = document.getElementById(\"root\");",
-        `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element — index.html did not load"))});`,
+        `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element â€” index.html did not load"))});`,
         "createRoot(rootEl).render(<Console />);",
         "",
       );
@@ -7149,14 +7167,14 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
         `  return (`,
         `    <main>`,
         `      <h1>{${title}}</h1>`,
-        `      <p>shell — no spec-graph ui node was emitted for this project; run the`,
+        `      <p>shell â€” no spec-graph ui node was emitted for this project; run the`,
         `      pipeline to P0/P1 and re-emit to mount the P8 interface contract.</p>`,
         `    </main>`,
         `  );`,
         `}`,
         "",
         "const rootEl = document.getElementById(\"root\");",
-        `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element — index.html did not load"))});`,
+        `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element â€” index.html did not load"))});`,
         "createRoot(rootEl).render(<Shell />);",
         "",
       );
@@ -7165,8 +7183,8 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
   }
   // game kind: plain-TS entry, no react dependency (matches the game devDeps).
   const lines = [
-    ...sourceHeader("src/main.ts", "Browser entry — boots the game shell", project, [
-      "// Assets are NOT engine-generated — see assets/manifest.json.",
+    ...sourceHeader("src/main.ts", "Browser entry â€” boots the game shell", project, [
+      "// Assets are NOT engine-generated â€” see assets/manifest.json.",
     ]),
   ];
   if (uiSpecifier) {
@@ -7174,7 +7192,7 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
       `import { bootGame } from ${jstr(uiSpecifier)};`,
       "",
       "const rootEl = document.getElementById(\"root\");",
-      `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element — index.html did not load"))});`,
+      `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element â€” index.html did not load"))});`,
       "const handle = bootGame(rootEl);",
       "void handle; // keep the GameHandle reachable for future HMR/dev wiring",
       "",
@@ -7182,8 +7200,8 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
   } else {
     lines.push(
       "const rootEl = document.getElementById(\"root\");",
-      `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element — index.html did not load"))});`,
-      "rootEl.textContent = \"game shell — no spec-graph ui node was emitted; run the pipeline to P0/P1 and re-emit.\";",
+      `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element â€” index.html did not load"))});`,
+      "rootEl.textContent = \"game shell â€” no spec-graph ui node was emitted; run the pipeline to P0/P1 and re-emit.\";",
       "",
     );
   }
@@ -7192,9 +7210,9 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
 
 /**
  * fixes/277 (R3-f06): the direct-execution guard shared by every emitKindEntry
- * flavor — the standard ESM main-module check (process.argv[1] vs this
+ * flavor â€” the standard ESM main-module check (process.argv[1] vs this
  * module's own URL). The structured stub stays IMPORTABLE (an import runs
- * nothing — tests/tooling/the oracle spec never trigger it) while the coded
+ * nothing â€” tests/tooling/the oracle spec never trigger it) while the coded
  * refusal fires the moment the entry is actually EXECUTED
  * (`node --experimental-strip-types src/main.ts`, the package bin launcher, or
  * `npm start`).
@@ -7202,7 +7220,7 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
 function directRunGuardLines(): string[] {
   return [
     "// Direct-execution guard (the standard ESM main-module check): main runs ONLY",
-    "// when this file is the program being executed — any import (tests, tooling,",
+    "// when this file is the program being executed â€” any import (tests, tooling,",
     "// the oracle spec) never triggers it, which is what makes the stub importable.",
     "if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {",
     "  main()",
@@ -7221,7 +7239,7 @@ function directRunGuardLines(): string[] {
 /**
  * The declared surface names a brief names: backtick identifiers immediately
  * followed by `(`/`<`. The SAME grammar `dod.declaredSurfaceNames` uses to
- * build the `p6-runnable-entry` gate — a scaffold test pins the two, so the
+ * build the `p6-runnable-entry` gate â€” a scaffold test pins the two, so the
  * emitted entry can expose exactly the names the gate demands and the emitter
  * and the gate can never read two grammars.
  */
@@ -7268,7 +7286,7 @@ function cliCommands(project: Project): string[] {
   return names.length > 0 ? names : ["analyze"];
 }
 
-/** Names the emitted CLI entry already defines — a declared command with one of
+/** Names the emitted CLI entry already defines â€” a declared command with one of
  *  these names would be a duplicate declaration, so it is dispatched but not
  *  re-exported. */
 const CLI_CORE_NAMES = new Set([
@@ -7326,7 +7344,7 @@ function cliAnalyzerLines(): string[] {
     "        };",
     "      }",
     "    } catch {",
-    "      // Not JSON — fall through to the plain-text parse below.",
+    "      // Not JSON â€” fall through to the plain-text parse below.",
     "    }",
     "  }",
     "  const levelMatch = LEVEL_RE.exec(trimmed);",
@@ -7479,10 +7497,10 @@ function cliAnalyzerLines(): string[] {
 }
 
 /**
- * fixes/347-2: the cli-tool entry — a REAL program, not a throw stub. It hosts a
+ * fixes/347-2: the cli-tool entry â€” a REAL program, not a throw stub. It hosts a
  * streaming NDJSON/plain-text analyzer, a real argument parser with helpful
  * errors, one exported function per declared command, and the exit-code
- * contract the brief names (0 ok · 1 usage error · 2 no data). The declared
+ * contract the brief names (0 ok Â· 1 usage error Â· 2 no data). The declared
  * names come from the brief (declaredSurfaceNamesOf) so the emitted entry
  * exposes exactly the surface dod's `p6-runnable-entry` gate demands.
  */
@@ -7511,7 +7529,7 @@ function emitCliEntry(project: Project): string {
     .filter((entry) => !CLI_CORE_NAMES.has(entry.name))
     .map((entry) =>
       [
-        `/** \`${entry.name}\` — the brief's declared command: ${CLI_VIEWS[entry.view]}. */`,
+        `/** \`${entry.name}\` â€” the brief's declared command: ${CLI_VIEWS[entry.view]}. */`,
         `export async function ${entry.name}(input: string, options: CliOptions): Promise<CliResult> {`,
         `  return viewFor(${jstr(entry.name)})(await readInput(input, {}), options);`,
         `}`,
@@ -7520,10 +7538,10 @@ function emitCliEntry(project: Project): string {
     )
     .join("\n");
   return [
-    ...sourceHeader("src/main.ts", "CLI entry — the runnable program (package bin delegates here)", project, [
+    ...sourceHeader("src/main.ts", "CLI entry â€” the runnable program (package bin delegates here)", project, [
       "// A real argument parser + subcommand dispatch. Each command streams its",
       "// input line by line (no whole-file load) and returns a structured result.",
-      "// Exit codes: 0 ok · 1 usage error · 2 no data / unreadable input.",
+      "// Exit codes: 0 ok Â· 1 usage error Â· 2 no data / unreadable input.",
     ]),
     'import { createReadStream } from "node:fs";',
     'import { createInterface } from "node:readline";',
@@ -7650,7 +7668,7 @@ function emitCliEntry(project: Project): string {
 }
 
 /**
- * fixes/347-2: the service entry — a REAL node:http server over the recorded A6
+ * fixes/347-2: the service entry â€” a REAL node:http server over the recorded A6
  * endpoints, with payload validation (coded 400s), PORT wiring and an exit
  * code. No route handler throws a TODO: a recorded endpoint returns a real
  * accepted/validated result, an unrecorded wire is a coded 404.
@@ -7681,7 +7699,7 @@ function emitServiceEntry(project: Project): string {
     .filter((name) => !SERVICE_CORE_NAMES.has(name))
     .map((name) =>
       [
-        `/** \`${name}\` — the brief's declared surface, validated through the shared payload check. */`,
+        `/** \`${name}\` â€” the brief's declared surface, validated through the shared payload check. */`,
         `export async function ${name}(input: unknown): Promise<RouteResult> {`,
         "  const checked = validatePayload(input);",
         `  return checked.ok ? { status: 200, body: { ok: true, job: ${jstr(name)}, accepted: checked.value } } : { status: 400, body: { ok: false, errors: checked.errors } };`,
@@ -7691,7 +7709,7 @@ function emitServiceEntry(project: Project): string {
     )
     .join("\n");
   return [
-    ...sourceHeader("src/main.ts", "Service entry — a real node:http server over the recorded endpoints", project, [
+    ...sourceHeader("src/main.ts", "Service entry â€” a real node:http server over the recorded endpoints", project, [
       "// Real PORT wiring, payload validation with coded 400s, and a listener.",
       "// `npm start` runs main(); importing this module starts nothing.",
     ]),
@@ -7712,7 +7730,7 @@ function emitServiceEntry(project: Project): string {
     "",
     "export type ValidationResult = { ok: true; value: Record<string, unknown> } | { ok: false; errors: string[] };",
     "",
-    "/** Every request body must be a JSON object — the coded 400 the brief asks for. */",
+    "/** Every request body must be a JSON object â€” the coded 400 the brief asks for. */",
     "export function validatePayload(input: unknown): ValidationResult {",
     "  if (input === null || typeof input !== \"object\" || Array.isArray(input)) {",
     "    return { ok: false, errors: [\"body must be a JSON object\"] };",
@@ -7795,7 +7813,7 @@ function libraryRoleFor(name: string): LibraryRole {
 }
 
 /**
- * fixes/347-2: the library entry — a REAL importable module. Importing runs
+ * fixes/347-2: the library entry â€” a REAL importable module. Importing runs
  * nothing; every declared surface name is a real export, backed by an in-memory
  * subscription registry with HMAC-SHA256 signature verification, at-least-once
  * delivery records and an exponential backoff schedule. `entry.version` is the
@@ -7841,7 +7859,7 @@ function emitLibraryEntry(project: Project): string {
     })
     .join("");
   return [
-    ...sourceHeader("src/main.ts", "Library entry — the module package main/exports point at", project, [
+    ...sourceHeader("src/main.ts", "Library entry â€” the module package main/exports point at", project, [
       "// Importing runs nothing. Every export is a real implementation over an",
       "// in-memory registry: subscriptions, signed deliveries, backoff and retry.",
     ]),
@@ -7854,7 +7872,7 @@ function emitLibraryEntry(project: Project): string {
     "export type DeliveryFilter = { subscriptionId?: string; event?: string; status?: DeliveryStatus };",
     "export type SignatureCheck = { ok: boolean; reason: string };",
     "",
-    "/** Package identity — REAL values off the emitted package.json contract. */",
+    "/** Package identity â€” REAL values off the emitted package.json contract. */",
     `export const entry: LibraryInfo = { name: ${jstr(slug)}, version: ${jstr(projectVersion(project))} };`,
     "",
     "const MAX_ATTEMPTS = 6;",
@@ -7945,11 +7963,11 @@ function emitLibraryEntry(project: Project): string {
 
 /**
  * fixes/277 (R3-f06 / W-15): the per-kind RUNNABLE entry the package fields
- * point at — cli-tool (package `bin` launcher spawns this), library (package
+ * point at â€” cli-tool (package `bin` launcher spawns this), library (package
  * `main`/`exports` module), service (`npm start`).
  *
  * fixes/347-2 (measured defect): the pre-347 entries were STRUCTURED stubs whose
- * `main` threw `TODO(E-15)` on every invocation — a shipped CLI/library/service
+ * `main` threw `TODO(E-15)` on every invocation â€” a shipped CLI/library/service
  * refused every command while its package fields pointed at that throw. The
  * entries are now REAL for every kind: a streaming analyzer + subcommand
  * dispatch + exit codes (cli-tool), a node:http server with validation + coded
@@ -7967,10 +7985,10 @@ function emitKindEntry(kind: ProjectKind, project: Project): string {
 export type SurfaceTreeRow = { path: string; source: string; hash: string; attempt: number };
 
 /**
- * fixes/353 — THE GATE-WIRING CALL SITE.
+ * fixes/353 â€” THE GATE-WIRING CALL SITE.
  *
  * `dod`'s kind-aware criteria (`p6-web-surface` / `p6-game-surface` /
- * `p6-runnable-entry`) read `generatedTree ∪ emittedSurface`, because the
+ * `p6-runnable-entry`) read `generatedTree âˆª emittedSurface`, because the
  * page/router/game/entry modules are written by THIS emitter and never appear
  * as synthesis rows. A driver calls this on the project immediately BEFORE the
  * P6 gate is recorded, so the criteria judge what the build actually ships.
@@ -7992,7 +8010,7 @@ export function stampEmittedSurface(project: Project): Project {
 }
 
 /**
- * fixes/347-2 — THE GATE-WIRING SEAM (documented + tested; dod.ts is NOT
+ * fixes/347-2 â€” THE GATE-WIRING SEAM (documented + tested; dod.ts is NOT
  * edited here).
  *
  * dod's kind-aware criteria (`p6-web-surface`, `p6-game-surface`,
@@ -8001,7 +8019,7 @@ export function stampEmittedSurface(project: Project): Project {
  * the page/router/game/runnable surface modules are written by THIS emitter,
  * which is pure and cannot mutate the project. The gate therefore never saw the
  * surface a web/game/runnable brief demands (measured: ten fresh trees, zero
- * page files, a webapp with no router — the gate's fail-closed red).
+ * page files, a webapp with no router â€” the gate's fail-closed red).
  *
  * This function returns the emitted surface modules in the `generatedTree` row
  * shape, so a caller folds them into the project the gate reads:
@@ -8009,18 +8027,18 @@ export function stampEmittedSurface(project: Project): Project {
  *     const emitted = scaffoldProject(project);
  *     if (emitted.ok) {
  *       const gateProject = { ...project, generatedTree: surfaceTreeRows(project, emitted.files) };
- *       // …then run the P6 DoD gate over `gateProject`.
+ *       // â€¦then run the P6 DoD gate over `gateProject`.
  *     }
  *
  * The runnable entry is placed FIRST because `productSurfaceTrace` takes the
- * FIRST row whose path matches its entry pattern — the emitted entry (never a
+ * FIRST row whose path matches its entry pattern â€” the emitted entry (never a
  * synthesized module) is the one judged. A scaffold test drives
  * `productSurfaceTrace` over the folded project and proves each kind's
  * criterion goes green.
  *
  * Residual (report, not silent): a web brief whose emit writes NO page module
  * (e.g. one that names screens inline rather than in a `Pages:` list) still has
- * no page surface for the gate to read — the emitter's page-coverage gap, not
+ * no page surface for the gate to read â€” the emitter's page-coverage gap, not
  * the wiring. Widen `briefPageTitles`/`briefedPageDefs` before expecting those
  * briefs to clear `p6-web-surface`.
  */
@@ -8051,9 +8069,9 @@ export function surfaceTreeRows(project: Project, files: readonly ScaffoldFile[]
 }
 
 /**
- * fixes/277 (R3-f06): the cli-tool package `bin` launcher — a REAL launcher,
+ * fixes/277 (R3-f06): the cli-tool package `bin` launcher â€” a REAL launcher,
  * not a stub. It spawns the TypeScript entry with the same node flags the
- * emitted package.json scripts use (Node >= 22 type stripping — see
+ * emitted package.json scripts use (Node >= 22 type stripping â€” see
  * engines.node), passing argv straight through; the exit code is the entry's.
  * The entry's honest refusal surfaces on stderr the moment the CLI is RUN.
  */
@@ -8061,9 +8079,9 @@ function emitBinLauncher(project: Project): string {
   const slug = slugName(project.name);
   return [
     "#!/usr/bin/env node",
-    `// bin/${slug}.mjs — package bin launcher, emitted by the RapidTool scaffold`,
+    `// bin/${slug}.mjs â€” package bin launcher, emitted by the RapidTool scaffold`,
     "// (fixes/277 R3-f06). Delegates to the TypeScript entry (../src/main.ts) with",
-    "// the same flags the package scripts use (Node >= 22 type stripping — see",
+    "// the same flags the package scripts use (Node >= 22 type stripping â€” see",
     "// engines.node). argv passes straight through; the entry's structured stub",
     "// refuses with RT_E_VALIDATION only when the CLI is actually run.",
     'import { spawnSync } from "node:child_process";',
@@ -8101,7 +8119,7 @@ function phaseRailRows(project: Project): string[] {
             ? `gate passed (advisory unmet: ${unmet.join(", ")})`
             : "gate passed"
           : `gate unmet (${unmet.join(", ") || "see project.json"})`;
-    rows.push(`- ${def?.code ?? `P${String(id)}`} ${def?.title ?? "Phase"} — ${status} · ${gate}`);
+    rows.push(`- ${def?.code ?? `P${String(id)}`} ${def?.title ?? "Phase"} â€” ${status} Â· ${gate}`);
   }
   return rows;
 }
@@ -8120,23 +8138,23 @@ function commandBlock(
       ? [
           "# oracle spec = REAL assertions over the emitted modules (no todo stubs);",
           "# green means the scaffold modules are intact + every oracle seam is still",
-          "# honestly stubbed — a seam test fails the moment that seam is implemented,",
+          "# honestly stubbed â€” a seam test fails the moment that seam is implemented,",
           "# which is the cue to replace it with the row's real acceptance assertion.",
           ...(notImplemented
             ? [
                 `# ORACLE SHORTFALL: ${notImplemented} row(s) are NOT IMPLEMENTED and are emitted`,
-                "# as MARKED skips (a skip is not a pass — each prints its marker on its",
-                "# own TAP line) — see the oracle-row census under Honest boundaries",
+                "# as MARKED skips (a skip is not a pass â€” each prints its marker on its",
+                "# own TAP line) â€” see the oracle-row census under Honest boundaries",
               ]
             : []),
           "npm test",
         ]
-      : ["# no oracle rows yet — run the pipeline to P0/P1, then re-emit"]),
+      : ["# no oracle rows yet â€” run the pipeline to P0/P1, then re-emit"]),
   ];
   if (kind === "webapp" || kind === "game") {
     base.push(
       "",
-      "# dev server — index.html + src/main entry + vite config are emitted; the UI",
+      "# dev server â€” index.html + src/main entry + vite config are emitted; the UI",
       "# itself is a contract-level shell per the P8 interface contract",
       "npm run dev",
     );
@@ -8146,10 +8164,10 @@ function commandBlock(
 
 /**
  * fixes/216k (TA-15 done-when 2): the tree-mode job-scope / bridge census the
- * shipped README renders under "Honest boundaries" — the unmaterialised
+ * shipped README renders under "Honest boundaries" â€” the unmaterialised
  * spec-graph job nodes (NEVER bridged: the tree ships no file at their path)
  * and the surviving non-job bridges (thin re-exports of the tree entry, bytes
- * unchanged — now COUNTED). Both lines render only when their list is
+ * unchanged â€” now COUNTED). Both lines render only when their list is
  * non-empty, so zero-count emissions stay byte-identical to pre-216k output.
  */
 type ReadmeJobScope = {
@@ -8158,7 +8176,7 @@ type ReadmeJobScope = {
   /**
    * OV-16 (W23-262): true when this emission really assembled a generatedTree
    * (tree mode). Needed because the unmaterialisedJobs list is EMPTY on a tree
-   * whose files cover every job node — without the flag the README could not
+   * whose files cover every job node â€” without the flag the README could not
    * state that zero-job-node truth on the artifact itself. Absent = legacy mode.
    */
   treeMode?: boolean;
@@ -8167,7 +8185,7 @@ type ReadmeJobScope = {
 /**
  * W48 / 334-3 (T1a): the emitted `package.json` DECLARES `typecheck` (and, for
  * webapp/game, `build`), but the emitter never installs dependencies or runs
- * them over the tree it writes — a fresh emitted tree's declared toolchain is
+ * them over the tree it writes â€” a fresh emitted tree's declared toolchain is
  * UNVERIFIED, and the tree-run's own envelope reports exactly that as
  * `declaredScriptsVerified: false` + `unverifiedDeclaredScripts: [...]`
  * (compile-check.server.ts). Rendered unconditionally at the top of the
@@ -8188,9 +8206,9 @@ function declaredScriptsBanner(kind: ProjectKind): string {
   const run = names.map((s) => `npm run ${s}`).join(" && ");
   return [
     "> [!WARNING]",
-    `> ## DECLARED SCRIPTS NOT RUN — ${label} ${isOne ? "IS" : "ARE"} UNVERIFIED (RapidTool W48 / 334-3)`,
+    `> ## DECLARED SCRIPTS NOT RUN â€” ${label} ${isOne ? "IS" : "ARE"} UNVERIFIED (RapidTool W48 / 334-3)`,
     ">",
-    `> The emitted \`package.json\` declares ${label}, but this emitter NEVER runs ${isOne ? "it" : "them"} over the tree it writes — no \`npm install\`, no declared-script execution. ${isOne ? "It is a scaffold claim" : "They are scaffold claims"} — NOT verified behavior. Run \`npm install && ${run}\` yourself (or re-emit with \`--verify-kind\`, which installs and builds a scratch copy) before treating this scaffold as build-verified. A tree-run executes these declared tools when it can resolve them (the emitted tree's own \`node_modules\`, else the emitting repo's own installed root): a type-clean tree reports \`declaredScriptsVerified: true\`, and a tool it cannot resolve reports \`declaredScriptsVerified: false\` + \`unverifiedDeclaredScripts: [...]\` in its JSON — never a silent pass.`,
+    `> The emitted \`package.json\` declares ${label}, but this emitter NEVER runs ${isOne ? "it" : "them"} over the tree it writes â€” no \`npm install\`, no declared-script execution. ${isOne ? "It is a scaffold claim" : "They are scaffold claims"} â€” NOT verified behavior. Run \`npm install && ${run}\` yourself (or re-emit with \`--verify-kind\`, which installs and builds a scratch copy) before treating this scaffold as build-verified. A tree-run executes these declared tools when it can resolve them (the emitted tree's own \`node_modules\`, else the emitting repo's own installed root): a type-clean tree reports \`declaredScriptsVerified: true\`, and a tool it cannot resolve reports \`declaredScriptsVerified: false\` + \`unverifiedDeclaredScripts: [...]\` in its JSON â€” never a silent pass.`,
   ].join("\n");
 }
 
@@ -8204,49 +8222,49 @@ function readmeBody(
   jobScope: ReadmeJobScope = {},
 ): string {
   const files: [string, string][] = [
-    ["README.md", "this file — mission + commands"],
+    ["README.md", "this file â€” mission + commands"],
     ["DEPLOY.md", "run/test/env/deploy notes (honest local-only framing)"],
-    [".env.example", "PLACEHOLDER env template — copy to .env, never commit real values"],
+    [".env.example", "PLACEHOLDER env template â€” copy to .env, never commit real values"],
     [
       ".gitignore",
       "keeps an install/build/verify run (node_modules/, dist/, .rapidtool/logs/) out of the review diff",
     ],
     ["LICENSE", "MIT licence text (year + holder derived from this project's own record)"],
-    [".github/workflows/ci.yml", "CI — installs, typechecks and tests THIS emitted tree (fixes/352)"],
+    [".github/workflows/ci.yml", "CI â€” installs, typechecks and tests THIS emitted tree (fixes/352)"],
     ["package.json", "per-kind skeleton (scripts/deps) + tsconfig.json"],
     [".rapidtool/project.json", "the full exported project (packet, artifacts, oracle, contracts)"],
   ];
   if (kind === "webapp" || kind === "game") {
     const entry = kind === "webapp" ? "src/main.tsx" : "src/main.ts";
     files.push(
-      ["index.html", `vite HTML entry — mounts ${entry} (fixes/135 bootability)`],
+      ["index.html", `vite HTML entry â€” mounts ${entry} (fixes/135 bootability)`],
       [
         "vite.config.ts",
         kind === "webapp"
-          ? "vite config — react + tailwindcss plugins (the declared devDeps)"
-          : "vite config — plain (this kind declares no framework plugin)",
+          ? "vite config â€” react + tailwindcss plugins (the declared devDeps)"
+          : "vite config â€” plain (this kind declares no framework plugin)",
       ],
       [entry, "browser entry that mounts the UI shell (src/ui)"],
     );
-    // W52 / 338-5: declare-or-strike — the README tables every emitted file, so
+    // W52 / 338-5: declare-or-strike â€” the README tables every emitted file, so
     // the Tailwind entry the declared plugin compiles is named for webapp.
     if (kind === "webapp") {
       files.push(["src/styles.css", "Tailwind v4 CSS entry compiled by the declared @tailwindcss/vite plugin"]);
     }
   }
   // W52 / 338-5: the per-kind runnable entry the emitter writes and package.json
-  // DECLARES (main/bin/start) — never omitted from the file table that claims to
+  // DECLARES (main/bin/start) â€” never omitted from the file table that claims to
   // list what ships.
   if (kind === "cli-tool" || kind === "library" || kind === "service") {
     files.push(["src/main.ts", "runnable entry declared by package.json (main/bin/start)"]);
     if (kind === "cli-tool") {
-      files.push([`bin/${slugName(project.name)}.mjs`, "package bin launcher — delegates to src/main.ts"]);
+      files.push([`bin/${slugName(project.name)}.mjs`, "package bin launcher â€” delegates to src/main.ts"]);
     }
   }
   // A10 (SYNTHSPEC F-03 / BF-11): the "What ships" table must name only files
   // that are ON DISK. A declared spec-graph job node the tree did not
   // materialise (tree mode: `unmaterialisedJobs`) or a refused tree row has NO
-  // file — listing it beside emitted modules was the measured self-contradiction
+  // file â€” listing it beside emitted modules was the measured self-contradiction
   // (README:34 listed 5 `src/jobs/*.ts` the tree never wrote, while "Honest
   // boundaries" said so ~50 lines below). Split those rows into a labelled
   // "declared, NOT emitted" sub-table instead of dropping them (never silent).
@@ -8260,24 +8278,24 @@ function readmeBody(
   files.push(...specRows.filter(([p]) => !notEmitted.has(p)));
   // fixes/144 (M2): generated-tree files the spec graph does not already table
   // (their paths are added under their node rows) get their own rows so the
-  // README names every emitted file — never a stale "spec graph only" claim.
+  // README names every emitted file â€” never a stale "spec graph only" claim.
   for (const [treePath, origin] of treeRows) {
     if (!files.some(([p]) => p === treePath)) files.push([treePath, origin]);
   }
   if (kind === "game")
-    files.push(["assets/manifest.json", "expected asset roster — NOT engine-generated"]);
+    files.push(["assets/manifest.json", "expected asset roster â€” NOT engine-generated"]);
   const kindNote = project.kind
     ? `kind ${kind} (mapped from declared kind "${project.kind}")`
-    : `kind ${kind} (inferred from brief/domain — no declared kind yet)`;
+    : `kind ${kind} (inferred from brief/domain â€” no declared kind yet)`;
   // fixes/144 (M2): the honest-boundary core line names whichever substance the
-  // emit actually carries — the generated TREE (multi-file) or the legacy P6
+  // emit actually carries â€” the generated TREE (multi-file) or the legacy P6
   // module string. Never both, and never a claim about the absent one.
   const coreLine = treeRows.length
-    ? "- The machine-verified substance is the generated tree under `src/` + `tests/` (project.generatedTree — fixes/144 M2): every file was emitted verbatim at its own repo-relative path and content-hashed at P6; `tests/oracle.spec.ts` imports the tree's ENTRY module (the file at the path the legacy P6 host would have used) so `npm test` executes the real tree. Scaffold infrastructure outside the tree is exactly that — infrastructure."
+    ? "- The machine-verified substance is the generated tree under `src/` + `tests/` (project.generatedTree â€” fixes/144 M2): every file was emitted verbatim at its own repo-relative path and content-hashed at P6; `tests/oracle.spec.ts` imports the tree's ENTRY module (the file at the path the legacy P6 host would have used) so `npm test` executes the real tree. Scaffold infrastructure outside the tree is exactly that â€” infrastructure."
     : "- The machine-verified core is the generated P6 module under `src/` (project.generatedSource); everything else is a typed stub awaiting implementation.";
   // fixes/216b (106 T-08 / F-05) + fixes/354 A2-F7: the oracle-row census. A
   // row the emitted modules give no surface to assert against is NOT IMPLEMENTED
-  // — emitted as a MARKED skip (fixes/356 / W356 A3) and COUNTED HERE, separately
+  // â€” emitted as a MARKED skip (fixes/356 / W356 A3) and COUNTED HERE, separately
   // from the rows that carry a real assertion, so an unwired row can never read
   // as green evidence and is never silent. The sentence branches on the SAME
   // predicate the spec body uses (`notImplemented.length > 0`), so the README
@@ -8292,38 +8310,38 @@ function readmeBody(
     oracleCensus === null
       ? null
       : !hasOracleShortfall
-        ? `- Oracle rows (\`tests/oracle.spec.ts\`): all ${oracleCensus.total} pinned row(s) assert the emitted modules' real current behavior — no NOT IMPLEMENTED rows.`
-        : `- Oracle rows (\`tests/oracle.spec.ts\`): ACCEPTANCE SHORTFALL — ${missing} of ${oracleCensus.total} pinned row(s) are NOT IMPLEMENTED and are emitted as MARKED skips under their pinned ids (\`{ skip: ... }\` — the marker prints on each row's own TAP line, and the same total is counted in the emitted spec's header); the remaining ${oracleCensus.assertable} assert the emitted modules' real current behavior. A skip is not a pass: the shortfall is named here and never silent: ${censusIds(oracleCensus.notImplemented)}.`;
+        ? `- Oracle rows (\`tests/oracle.spec.ts\`): all ${oracleCensus.total} pinned row(s) assert the emitted modules' real current behavior â€” no NOT IMPLEMENTED rows.`
+        : `- Oracle rows (\`tests/oracle.spec.ts\`): ACCEPTANCE SHORTFALL â€” ${missing} of ${oracleCensus.total} pinned row(s) are NOT IMPLEMENTED and are emitted as MARKED skips under their pinned ids (\`{ skip: ... }\` â€” the marker prints on each row's own TAP line, and the same total is counted in the emitted spec's header); the remaining ${oracleCensus.assertable} assert the emitted modules' real current behavior. A skip is not a pass: the shortfall is named here and never silent: ${censusIds(oracleCensus.notImplemented)}.`;
   // fixes/216d (106 T-04 / F-03): a refused generatedTree row is NEVER a silent
   // drop. The reference to "the oracle-row census under Honest boundaries" in
   // commandBlock is only true when oracleRowLine actually renders (inserted
-  // below); a refusal is recorded in the shipped README itself — declared path
-  // + reason — so the artifact says which declared file is absent and why.
+  // below); a refusal is recorded in the shipped README itself â€” declared path
+  // + reason â€” so the artifact says which declared file is absent and why.
   // Every entry is single-line (refusal text JSON-escapes paths) and backticks
   // are stripped, so a hostile row cannot break the markdown.
   const refusalLine =
     treeRefusals.length === 0
       ? null
-      : `- **${treeRefusals.length} generated tree row(s) were REFUSED and are NOT on disk** (never a silent drop — each declared file below is absent from this scaffold): ${censusIds(treeRefusals)}.`;
+      : `- **${treeRefusals.length} generated tree row(s) were REFUSED and are NOT on disk** (never a silent drop â€” each declared file below is absent from this scaffold): ${censusIds(treeRefusals)}.`;
   // fixes/354 A2-F11: the `game` kind emits ONE deterministic platformer shell,
-  // byte-identical across briefs. Say so — never present a scaffold template as
+  // byte-identical across briefs. Say so â€” never present a scaffold template as
   // work generated from this brief (declare-or-strike).
   const gameTemplateLine =
     kind === "game"
-      ? "- The emitted browser game module is a DETERMINISTIC SCAFFOLD TEMPLATE — a fixed platformer shell, byte-identical across briefs, with no mechanics derived from this brief. Treat it as a starting harness, not as generated product work; replace it with the brief's real mechanics before shipping (`gameTemplate:true` rides the emit envelope)."
+      ? "- The emitted browser game module is a DETERMINISTIC SCAFFOLD TEMPLATE â€” a fixed platformer shell, byte-identical across briefs, with no mechanics derived from this brief. Treat it as a starting harness, not as generated product work; replace it with the brief's real mechanics before shipping (`gameTemplate:true` rides the emit envelope)."
       : null;
-  // fixes/216k (TA-15): the tree-mode job-scope / bridge census lines — rendered
+  // fixes/216k (TA-15): the tree-mode job-scope / bridge census lines â€” rendered
   // only when non-empty, so zero-count emissions stay byte-identical to the
   // pre-216k output. Never silent: an unmaterialised job node is named.
   const jobScopeLines: string[] = [];
   if ((jobScope.unmaterialisedJobs?.length ?? 0) > 0) {
     const jobs = jobScope.unmaterialisedJobs as { id: string; file: string; label: string | null }[];
     jobScopeLines.push(
-      `- ${jobs.length} declared spec-graph job node(s) were NOT materialised by the generated tree (never bridged — a re-export at a job path would read as a leftover job): ${censusIds(jobs.map((j) => j.file))}.`,
+      `- ${jobs.length} declared spec-graph job node(s) were NOT materialised by the generated tree (never bridged â€” a re-export at a job path would read as a leftover job): ${censusIds(jobs.map((j) => j.file))}.`,
     );
   } else if (jobScope.treeMode === true) {
     // OV-16 (W23-L2): on a CLEAN tree-mode emission the unmaterialised list is
-    // empty — the honest zero must be STATED, not left to the reader: the
+    // empty â€” the honest zero must be STATED, not left to the reader: the
     // non-empty branch above renders nothing here, and silence would read as
     // "unknown" rather than "every declared job module materialised".
     jobScopeLines.push(
@@ -8338,7 +8356,7 @@ function readmeBody(
   }
   const body = [
     // W48 / 334-3 (T1a): the declared-scripts-unverified banner leads the README
-    // (see declaredScriptsBanner) — a blank line separates it from the title.
+    // (see declaredScriptsBanner) â€” a blank line separates it from the title.
     declaredScriptsBanner(kind),
     "",
     `# ${mdLine(project.name, 120)}`,
@@ -8348,8 +8366,8 @@ function readmeBody(
     mdLine(project.brief || "_No brief recorded._", 500),
     "",
     "## Status",
-    `- **Kind:** ${kind} — ${KIND_LABEL[kind]} (${kindNote})`,
-    `- **Status:** ${project.status ?? "intake"} · **Current phase:** P${project.currentPhase ?? 0} · **Model route:** ${project.modelRoute ?? "unset"}`,
+    `- **Kind:** ${kind} â€” ${KIND_LABEL[kind]} (${kindNote})`,
+    `- **Status:** ${project.status ?? "intake"} Â· **Current phase:** P${project.currentPhase ?? 0} Â· **Model route:** ${project.modelRoute ?? "unset"}`,
     project.createdAt ? `- **Created:** ${iso(project.createdAt)}` : null,
     "",
     "## What ships in this scaffold",
@@ -8367,7 +8385,7 @@ function readmeBody(
           "",
           "| File (declared) | Why it is not on disk |",
           "| --- | --- |",
-          ...declaredRows.map(([f, why]) => `| \`${f}\` | declared in the spec graph, no file emitted by this scaffold — see Honest boundaries (${why}) |`),
+          ...declaredRows.map(([f, why]) => `| \`${f}\` | declared in the spec graph, no file emitted by this scaffold â€” see Honest boundaries (${why}) |`),
         ]
       : []),
     "",
@@ -8390,7 +8408,7 @@ function readmeBody(
     "## Machine record",
     "",
     "- `.rapidtool/project.json` is the live exported project: packet, artifacts, oracle, contracts.",
-    "- Regenerate this scaffold from it with the RapidTool emit command — hand-edits are overwritten.",
+    "- Regenerate this scaffold from it with the RapidTool emit command â€” hand-edits are overwritten.",
     "",
     "## Honest boundaries",
     "",
@@ -8400,7 +8418,7 @@ function readmeBody(
     gameTemplateLine,
     ...jobScopeLines,
     "- `src/ui/` is a contract-level shell (P8 interface contract), not a finished UI.",
-    "- Deploy templates from P9/P12 are recorded artifacts only — see DEPLOY.md; nothing here deploys by itself.",
+    "- Deploy templates from P9/P12 are recorded artifacts only â€” see DEPLOY.md; nothing here deploys by itself.",
     "- `assets/` and `public/` are expected at the emitted scaffold and are NOT engine-generated.",
     "",
   ]
@@ -8410,8 +8428,8 @@ function readmeBody(
 }
 
 // ---------------------------------------------------------------------------
-// DEPLOY.md (E-27 ship notes — deployNotes is the canonical export name;
-// deplyNotes is the legacy-misspelling alias — fixes/309 A3 · M4-16)
+// DEPLOY.md (E-27 ship notes â€” deployNotes is the canonical export name;
+// deplyNotes is the legacy-misspelling alias â€” fixes/309 A3 Â· M4-16)
 // ---------------------------------------------------------------------------
 
 /** Find a recorded engine artifact by kind + title predicate (stable titles). */
@@ -8431,7 +8449,7 @@ function recordedArtifacts(project: Project): string[] {
   const out: string[] = [];
   const push = (label: string, a: { title: string; body: string } | null): void => {
     if (!a) return;
-    out.push(`### ${label} — ${mdLine(a.title, 120)}`, "");
+    out.push(`### ${label} â€” ${mdLine(a.title, 120)}`, "");
     const f = fence(a.body);
     out.push(`${f}text`, a.body.trim(), f, "");
   };
@@ -8472,14 +8490,14 @@ export function deployNotes(project: Project, census?: OracleRowCensus | null): 
         "```",
         "",
         notImplemented > 0
-          ? `Oracle specs in \`tests/oracle.spec.ts\` assert the emitted modules' real current behavior — NOT that every row is implemented. ${notImplemented} pinned row(s) are NOT IMPLEMENTED (this tree's ACCEPTANCE SHORTFALL) and are emitted as MARKED skips under their pinned ids — with no assert in the skipped body, so a non-executed assertion is never read as evidence — and the same total is counted on the emitted spec's header and in README.md's oracle-row census. A skip is not a pass: those rows carry no acceptance evidence until their seam lands, and the tree-run refuses a skip-dominated spec as a vacuous green (\`RT_E_SPEC_SKIP_VACUOUS\`). Every row keeps its pinned \`orc-*\` id; green means the scaffold modules are intact and the remaining rows' real assertions held. A seam test fails the moment that seam is implemented — that is the cue to replace the row's \`{ skip: ... }\` option with its real acceptance assertion.`
-          : "Oracle specs in `tests/oracle.spec.ts` are REAL assertions over the emitted modules (fixes/135) — no todo stubs. Every row keeps its pinned `orc-*` id; green means the scaffold modules are intact and every oracle seam is still honestly stubbed. A seam test fails the moment that seam is implemented — that is the cue to replace it with the row's real acceptance assertion.",
+          ? `Oracle specs in \`tests/oracle.spec.ts\` assert the emitted modules' real current behavior â€” NOT that every row is implemented. ${notImplemented} pinned row(s) are NOT IMPLEMENTED (this tree's ACCEPTANCE SHORTFALL) and are emitted as MARKED skips under their pinned ids â€” with no assert in the skipped body, so a non-executed assertion is never read as evidence â€” and the same total is counted on the emitted spec's header and in README.md's oracle-row census. A skip is not a pass: those rows carry no acceptance evidence until their seam lands, and the tree-run refuses a skip-dominated spec as a vacuous green (\`RT_E_SPEC_SKIP_VACUOUS\`). Every row keeps its pinned \`orc-*\` id; green means the scaffold modules are intact and the remaining rows' real assertions held. A seam test fails the moment that seam is implemented â€” that is the cue to replace the row's \`{ skip: ... }\` option with its real acceptance assertion.`
+          : "Oracle specs in `tests/oracle.spec.ts` are REAL assertions over the emitted modules (fixes/135) â€” no todo stubs. Every row keeps its pinned `orc-*` id; green means the scaffold modules are intact and every oracle seam is still honestly stubbed. A seam test fails the moment that seam is implemented â€” that is the cue to replace it with the row's real acceptance assertion.",
         "",
       ]
     : [
         "## Test",
         "",
-        "No oracle rows are recorded yet, so the emitted `package.json` declares no `test` script — run the pipeline to P0/P1, then re-emit.",
+        "No oracle rows are recorded yet, so the emitted `package.json` declares no `test` script â€” run the pipeline to P0/P1, then re-emit.",
         "",
       ];
   const hasTemplates = project.artifacts.some(
@@ -8493,30 +8511,30 @@ export function deployNotes(project: Project, census?: OracleRowCensus | null): 
     library: "an npm registry publish is the common destination for this kind",
     service: "a container host (e.g. Cloud Run) is a common destination for this kind",
   };
-  // R13-f13 (W31 · T3): the per-kind deploy HANDOFF — commands only, never
+  // R13-f13 (W31 Â· T3): the per-kind deploy HANDOFF â€” commands only, never
   // credentials. This is the "what do I actually type next" layer the prose
   // destination above lacked; it assumes your own account/login outside the
   // repo. Every command here is either backed by a script the emitted
   // package.json declares (dev/build/preview/typecheck/test per PKG_SCRIPTS)
   // or an explicitly-marked vendor example. Nothing in this list was executed
-  // or validated by the pipeline — the honesty stamp above governs.
+  // or validated by the pipeline â€” the honesty stamp above governs.
   const kindHandoff: Record<ProjectKind, string[]> = {
     webapp: [
-      "npm run build            # vite build → dist/ (declared by the emitted package.json)",
+      "npm run build            # vite build â†’ dist/ (declared by the emitted package.json)",
       "npm run preview          # sanity-check the built output locally",
-      "# then hand dist/ to your static host, after your own login — e.g.:",
+      "# then hand dist/ to your static host, after your own login â€” e.g.:",
       "#   npx firebase-tools deploy --only hosting      (after `firebase init hosting`)",
     ],
     game: [
-      "npm run build            # vite build → dist/",
+      "npm run build            # vite build â†’ dist/",
       "npm run preview          # play the built bundle locally",
-      "# then publish dist/ to any static host, after your own login — e.g.:",
+      "# then publish dist/ to any static host, after your own login â€” e.g.:",
       "#   butler push dist <your-user>/<your-game>:html5      (itch.io)",
     ],
     "cli-tool": [
       "npm run typecheck && npm test    # the emitted oracle suite",
       "npm pack --dry-run               # inspect the package contents",
-      "# the emitted package.json declares `private: true` — flip it deliberately,",
+      "# the emitted package.json declares `private: true` â€” flip it deliberately,",
       "# then publish after your own `npm login`:",
       "#   npm publish --access public",
     ],
@@ -8528,8 +8546,8 @@ export function deployNotes(project: Project, census?: OracleRowCensus | null): 
     ],
     service: [
       "npm run typecheck && npm test    # the emitted oracle suite",
-      "# no Dockerfile is emitted — containerize yourself (`docker init` scaffolds one),",
-      "# then build/push under your own account — e.g.:",
+      "# no Dockerfile is emitted â€” containerize yourself (`docker init` scaffolds one),",
+      "# then build/push under your own account â€” e.g.:",
       "#   docker build -t <image> . && docker run -p 3000:3000 <image>",
       "#   gcloud run deploy <service> --source .        (the host reads $PORT; see .env.example)",
     ],
@@ -8538,19 +8556,19 @@ export function deployNotes(project: Project, census?: OracleRowCensus | null): 
     kind === "webapp" || kind === "game"
       ? [
           "```text",
-          "  npm run dev   # vite dev server — index.html + src/main entry are emitted",
+          "  npm run dev   # vite dev server â€” index.html + src/main entry are emitted",
           "```",
         ]
-      : ["  (no dev server: this kind has no UI entry yet — run `npm test` while implementing)"];
+      : ["  (no dev server: this kind has no UI entry yet â€” run `npm test` while implementing)"];
   const body = [
-    `# DEPLOY.md — ${mdLine(project.name, 120)}`,
+    `# DEPLOY.md â€” ${mdLine(project.name, 120)}`,
     "",
     `> ${MACHINE_STAMP(project.id)}`,
     `> ${DEPLOY_HONESTY_STAMP}`,
     "",
     "## What this is",
     "",
-    `Local-first scaffold for “${mdLine(project.name, 120)}” (kind ${kind}, ${KIND_LABEL[kind]}), emitted from the RapidTool packet record. It is a starting point for the human/agent build work — not a shipped, hosted product.`,
+    `Local-first scaffold for â€œ${mdLine(project.name, 120)}â€ (kind ${kind}, ${KIND_LABEL[kind]}), emitted from the RapidTool packet record. It is a starting point for the human/agent build work â€” not a shipped, hosted product.`,
     "",
     "## Run locally",
     "",
@@ -8558,7 +8576,7 @@ export function deployNotes(project: Project, census?: OracleRowCensus | null): 
     "  npm install            # requires Node >= 22",
     "  cp .env.example .env   # then replace every PLACEHOLDER with a REAL local value",
     "  npm run typecheck",
-    `  ${project.oracle.length ? "npm test" : "# no oracle rows yet — run the pipeline to P0/P1, then re-emit"}`,
+    `  ${project.oracle.length ? "npm test" : "# no oracle rows yet â€” run the pipeline to P0/P1, then re-emit"}`,
     "```",
     ...(kind === "webapp" || kind === "game" ? ["", "  # dev server"] : []),
     ...devCommand,
@@ -8567,23 +8585,23 @@ export function deployNotes(project: Project, census?: OracleRowCensus | null): 
     "",
     "## Environment",
     "",
-    `The only env contract is \`.env.example\` (PLACEHOLDER values — never commit real secrets). Variables:`,
+    `The only env contract is \`.env.example\` (PLACEHOLDER values â€” never commit real secrets). Variables:`,
     "",
     "| Variable | Local meaning |",
     "| --- | --- |",
     ...envNames.map((name) => `| \`${name}\` | ${ENV_MEANING[name] ?? "see .env.example"} |`),
     "",
     ...testSection,
-    "## Deploy — human-gated, nothing automatic",
+    "## Deploy â€” human-gated, nothing automatic",
     "",
     "No deployment is configured, wired or implied by this repository. Concretely:",
     "",
     "- The pipeline **recorded** CI/IaC/ADR/OpenAPI templates (P9/P12 artifacts, below and in `.rapidtool/project.json`); it never executed or validated them.",
     "- Deploying needs credentials and tooling **you** provision outside this repo; nothing here pushes to any cloud, registry or host.",
-    `- For this kind, ${kindDestinations[kind]}. If you go that route: create the account/project yourself, then fill \`.env\` from \`.env.example\` — and verify credentials before any deploy.`,
-    "- RapidTool's own P9 approval was a recorded, advisory gate — re-verify before a real deploy.",
+    `- For this kind, ${kindDestinations[kind]}. If you go that route: create the account/project yourself, then fill \`.env\` from \`.env.example\` â€” and verify credentials before any deploy.`,
+    "- RapidTool's own P9 approval was a recorded, advisory gate â€” re-verify before a real deploy.",
     "",
-    "- Handoff commands (a TEMPLATE — none of it ran here; run from the emitted folder after your own account/login; the scripts used are declared by the emitted package.json):",
+    "- Handoff commands (a TEMPLATE â€” none of it ran here; run from the emitted folder after your own account/login; the scripts used are declared by the emitted package.json):",
     "",
     "```text",
     ...kindHandoff[kind],
@@ -8593,7 +8611,7 @@ export function deployNotes(project: Project, census?: OracleRowCensus | null): 
     "",
     "`assets/` and `public/` are expected at the emitted scaffold and are NOT engine-generated" +
       (kind === "game"
-        ? " — `assets/manifest.json` lists the placeholder roster to supply or render procedurally"
+        ? " â€” `assets/manifest.json` lists the placeholder roster to supply or render procedurally"
         : "") +
       ".",
     "",
@@ -8601,14 +8619,14 @@ export function deployNotes(project: Project, census?: OracleRowCensus | null): 
       ? [
           "## Recorded pipeline templates (P9/P12)",
           "",
-          "Verbatim from the project artifacts — recorded, never executed:",
+          "Verbatim from the project artifacts â€” recorded, never executed:",
           "",
           ...recordedArtifacts(project),
         ]
       : [
           "## Recorded pipeline templates (P9/P12)",
           "",
-          "_None yet — the project has not reached the P9/P12 phases that record CI/IaC/ADR/OpenAPI templates._",
+          "_None yet â€” the project has not reached the P9/P12 phases that record CI/IaC/ADR/OpenAPI templates._",
         ]),
     "",
   ];
@@ -8616,16 +8634,16 @@ export function deployNotes(project: Project, census?: OracleRowCensus | null): 
 }
 
 // ---------------------------------------------------------------------------
-// deplyNotes — legacy-misspelling alias for `deployNotes` (N6-W8 · P4 naming
-// pass, fixes/295_p4_sweeps.md; alias direction flipped by fixes/309 A3 ·
+// deplyNotes â€” legacy-misspelling alias for `deployNotes` (N6-W8 Â· P4 naming
+// pass, fixes/295_p4_sweeps.md; alias direction flipped by fixes/309 A3 Â·
 // M4-16, taking the 295 migration path: the call site + scaffold.test.ts moved
-// to the correct spelling in the SAME change). Back-compat only — every new
+// to the correct spelling in the SAME change). Back-compat only â€” every new
 // caller uses `deployNotes`.
 // ---------------------------------------------------------------------------
 export const deplyNotes = deployNotes;
 
 // ---------------------------------------------------------------------------
-// scaffoldProject — assemble the deterministic file tree
+// scaffoldProject â€” assemble the deterministic file tree
 // ---------------------------------------------------------------------------
 
 /** Validate a Project enough to scaffold (defensive: callers may hand-build). */
@@ -8641,17 +8659,17 @@ function validProject(project: Project): { ok: true } | { ok: false; error: stri
 /**
  * fixes/277 (R3-f03 / W-06): the machine-readable trail verdicts the emit
  * envelope carries (see `ScaffoldResult.redTree`/`partial`). Read off the
- * project's own durable log rows — the same signals headless's red-tree guard
+ * project's own durable log rows â€” the same signals headless's red-tree guard
  * (`treeRunTrail`) and codegen's `partialTreeRefuse` write:
  *
- *   redTree — the LAST tree verdict on the trail is `p6.tree.failure` with no
+ *   redTree â€” the LAST tree verdict on the trail is `p6.tree.failure` with no
  *             green run since (`p6.journey.converged` / `p6.tree.tested` /
  *             `p6.tree.tested.skipped`): this artifact is a RECORD of a
- *             failed tree-run, not a verified build. LAST row wins — a tree
+ *             failed tree-run, not a verified build. LAST row wins â€” a tree
  *             repaired to green by a later run reads clean.
- *   partial — a phase-6 `p6.synthesis.refused` on the trail AND real generated
+ *   partial â€” a phase-6 `p6.synthesis.refused` on the trail AND real generated
  *             substance exists (`generatedSource` / `generatedTree`): prior
- *             chunks' real files were kept — a PARTIAL tree, neither the
+ *             chunks' real files were kept â€” a PARTIAL tree, neither the
  *             deterministic floor nor a full pass. The oracle spec's
  *             `capability.N` rows then skip-with-reason instead of reddening
  *             (the pre-fix 28-red cascade read as product failure).
@@ -8693,8 +8711,8 @@ function trailVerdictOf(project: Project): { redTree: boolean; partial: boolean 
  * instead. Returns the recorded under-production detail (its registered code
  * prefix included) when the FINAL synthesis verdict is a refusal AND an
  * under-production refusal was recorded on the trail AND real generated
- * substance exists; else null. Pure; absent log ⇒ null (byte-identical legacy
- * emissions — pre-C1-01 persisted projects carry no such row).
+ * substance exists; else null. Pure; absent log â‡’ null (byte-identical legacy
+ * emissions â€” pre-C1-01 persisted projects carry no such row).
  */
 export function underProductionRefusalOf(project: Project): string | null {
   const hasSubstance =
@@ -8703,11 +8721,11 @@ export function underProductionRefusalOf(project: Project): string | null {
   if (!hasSubstance) return null;
   const rows = Array.isArray(project.logs) ? project.logs : [];
   // Two recorded facts, both required:
-  //  1. the FINAL synthesis verdict is a REFUSAL — a journey that refused on
+  //  1. the FINAL synthesis verdict is a REFUSAL â€” a journey that refused on
   //     cycle 1 but sealed a full tree on cycle 2 (`p6.synthesis` success,
   //     flower-shop/scheduler) must still emit. `p6.synthesis` = the treeUpgraded
   //     success stamp; a later one clears the refusal.
-  //  2. an under-production refusal was recorded on the trail — the coded
+  //  2. an under-production refusal was recorded on the trail â€” the coded
   //     `RT_E_PLAN_UNDERPRODUCED` whose detail names the missing declared
   //     modules. A below-floor tree keeps its best partial even when the FINAL
   //     cycle refused for another coded reason (office-stock-tracker: the model
@@ -8730,7 +8748,7 @@ export function underProductionRefusalOf(project: Project): string | null {
 }
 
 /**
- * The GitHub alert opener EVERY withheld-tree README banner leads with — this
+ * The GitHub alert opener EVERY withheld-tree README banner leads with â€” this
  * file's `belowFloorBanner` and the emit seam's `redTreeBannerText`
  * (`software-export.ts`). One constant, so the Preview's copy (358 / R-10) and
  * the banner it describes cannot drift apart.
@@ -8740,20 +8758,20 @@ export const CAUTION_ALERT_LEAD = "> [!CAUTION]";
 /**
  * fixes/354 A2-F4 (Decision D1): the unmissable banner stamped at the TOP of the
  * emitted `README.md` when a REAL-but-below-floor partial lands by default. It
- * states the recorded refusal — never a pass — so the artifact cannot be read
+ * states the recorded refusal â€” never a pass â€” so the artifact cannot be read
  * as a complete build. This is the scaffold-owned twin of headless's
  * `underProducedBanner`; headless should consume this producer (see the A2-F4
  * caller change in `fixes/354_a2_emission.md`) so the two banners cannot drift.
  */
 export function belowFloorBanner(detail: string): string {
-  const reason = String(detail ?? "").trim().replace(/^RT_E_PLAN_UNDERPRODUCED\s*·\s*/, "");
+  const reason = String(detail ?? "").trim().replace(/^RT_E_PLAN_UNDERPRODUCED\s*Â·\s*/, "");
   const tail = reason.replace(/\r?\n/g, " ").replace(/`/g, "'");
   return [
     CAUTION_ALERT_LEAD,
-    "> ## BELOW-FLOOR PLAN — THIS ARTIFACT IS NOT A COMPLETE BUILD (RapidTool A2-F4)",
+    "> ## BELOW-FLOOR PLAN â€” THIS ARTIFACT IS NOT A COMPLETE BUILD (RapidTool A2-F4)",
     ">",
     "> The project's own P6 journal records a synthesis refusal (`RT_E_PLAN_UNDERPRODUCED`):",
-    "> the emitted tree is a REAL but BELOW-FLOOR PARTIAL — fewer modules than the brief-declared",
+    "> the emitted tree is a REAL but BELOW-FLOOR PARTIAL â€” fewer modules than the brief-declared",
     "> floor. It is an artifact of a refused plan, never a passing build, and its delivery",
     "> commit is withheld.",
     tail.length > 0 ? `> Recorded refusal: \`${tail}\`` : "> The recorded refusal carried no detail.",
@@ -8764,12 +8782,12 @@ export function belowFloorBanner(detail: string): string {
 }
 
 /**
- * 358 (R-10): true when an emitted README LEADS with the caution banner — the
+ * 358 (R-10): true when an emitted README LEADS with the caution banner â€” the
  * opener BOTH withheld-tree writers stamp at the top of the file: this module's
  * `belowFloorBanner` (a below-floor partial) and the emit seam's
  * `redTreeBannerText` (an uncleared red trail / a synthesis partial). The console
  * Preview decides its copy from THESE bytes, never from one branch's detail line:
- * keying on the `RED TREE …` literal told the operator of a below-floor run that
+ * keying on the `RED TREE â€¦` literal told the operator of a below-floor run that
  * the archived README carried no caution banner while the README led with the
  * scaffold's own `> [!CAUTION]` / `BELOW-FLOOR PLAN` banner, for exactly the
  * withheld reason the alert named.
@@ -8791,10 +8809,10 @@ export function withheldTreeReadmeNote(readmeBody: string): string {
 
 /**
  * Derive the full file tree for one project. Pure: returns {path, body} pairs
- * (the CLI writes them); deterministic: same project ⇒ same bytes. File order:
- * root docs → env/package → .rapidtool → boot files (webapp/game) → game
- * manifest → spec-graph modules in topo order (generatedSource hosted on the
- * first job node) → oracle spec.
+ * (the CLI writes them); deterministic: same project â‡’ same bytes. File order:
+ * root docs â†’ env/package â†’ .rapidtool â†’ boot files (webapp/game) â†’ game
+ * manifest â†’ spec-graph modules in topo order (generatedSource hosted on the
+ * first job node) â†’ oracle spec.
  */
 export function scaffoldProject(project: Project, options: ScaffoldOptions = {}): ScaffoldResult {
   const check = validProject(project);
@@ -8802,14 +8820,14 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
 
   // fixes/356 (W356 A3; restores 355-A3 L6): the SAFETY DEFAULT is refuse. A
   // recorded below-floor plan writes ZERO files unless the caller opts in
-  // explicitly — `"partial"` (or `"banner"`, the headless/CLI spelling) lands
+  // explicitly â€” `"partial"` (or `"banner"`, the headless/CLI spelling) lands
   // the best PARTIAL tree with the `> [!CAUTION]` / `## BELOW-FLOOR PLAN`
   // banner at the top of the emitted README and reports
   // `underProduced{code,detail}`, so a deliberately shipped partial can never
   // read as a clean pass. The 354 wave made `"partial"` the default, which made
   // an explicit `"refuse"` inert downstream; an absent option pair no longer
   // materializes anything. Precedence: an explicit `underProduced` string wins;
-  // else the legacy boolean (`true` = the INTERNAL candidate emit — the pre-seal
+  // else the legacy boolean (`true` = the INTERNAL candidate emit â€” the pre-seal
   // self-typecheck must still run the candidate's real tsc, `false` = refuse);
   // else refuse. Absent the recorded refusal the emission is byte-identical in
   // every policy (a pre-C1-01 project, or a synthetic fixture).
@@ -8823,11 +8841,11 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
           : "refuse";
   const underProducedDetail = underProductionRefusalOf(project);
   if (underProducedDetail !== null && underProducedPolicy === "refuse") {
-    const reason = underProducedDetail.replace(/^RT_E_PLAN_UNDERPRODUCED\s*·\s*/, "");
+    const reason = underProducedDetail.replace(/^RT_E_PLAN_UNDERPRODUCED\s*Â·\s*/, "");
     return {
       ok: false,
       code: "RT_E_PLAN_UNDERPRODUCED",
-      error: `RT_E_PLAN_UNDERPRODUCED · artifact refused (below-floor plan): ${reason}`,
+      error: `RT_E_PLAN_UNDERPRODUCED Â· artifact refused (below-floor plan): ${reason}`,
     };
   }
 
@@ -8848,9 +8866,9 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     files.push({ path, body });
   };
 
-  // fixes/277 (A3-f07): resolve the emitted-UI generation hook for this emit —
+  // fixes/277 (A3-f07): resolve the emitted-UI generation hook for this emit â€”
   // the caller's hook (ScaffoldOptions.uiGeneration) with the default
-  // generator as the fallback — and track whether a caller's lines actually
+  // generator as the fallback â€” and track whether a caller's lines actually
   // landed (the `uiGeneration` record on the result below). The wrapper
   // always returns string[] (the default is total), satisfying the hook
   // contract's `null` ("keep the default") without changing emitUi's own
@@ -8867,8 +8885,8 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     return defaultUiGeneration(request);
   };
 
-  // fixes/277 (R3-f03): the emission's trail verdicts (see trailVerdictOf) —
-  // consumed by the oracle-spec ctx (`partial` ⇒ capability skip-with-reason)
+  // fixes/277 (R3-f03): the emission's trail verdicts (see trailVerdictOf) â€”
+  // consumed by the oracle-spec ctx (`partial` â‡’ capability skip-with-reason)
   // and the result envelope (redTree/partial), both below.
   const verdict = trailVerdictOf(project);
 
@@ -8897,11 +8915,11 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     node.id === "tests"
       ? "tests/oracle.spec.ts" // tests always materialize at the fixed oracle path
       : safeNodePath(node.file, node.id, idxById.get(node.id) ?? nodes.indexOf(node)),
-    `${node.id} — ${prose(node.purpose)}`,
+    `${node.id} â€” ${prose(node.purpose)}`,
   ]);
 
   // Surface paths the oracle spec + boot entry import from (sanitized = the
-  // paths actually pushed below). Undefined node ids ⇒ no module to import.
+  // paths actually pushed below). Undefined node ids â‡’ no module to import.
   const nodePath = (id: string): string | null => {
     const entry = ordered.find((o) => o.node.id === id);
     if (!entry) return null;
@@ -8916,9 +8934,9 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   // pass, node bridges, oracle ctx) agrees on the accepted file set, its
   // sorted order, and the tree ENTRY module. The entry path keeps the legacy
   // host-selection contract: the first job node's file in topo order, else
-  // src/generated.ts — when the tree ships no file at that path, the entry is
+  // src/generated.ts â€” when the tree ships no file at that path, the entry is
   // the tree's src/generated.ts file if present, else the first accepted file
-  // in sorted order (always deterministic; treeMode ⇒ entryPath non-null).
+  // in sorted order (always deterministic; treeMode â‡’ entryPath non-null).
   const rawTree = Array.isArray(project.generatedTree) ? project.generatedTree : [];
   const treeAccepted: { path: string; source: string; hash: string; attempt: number }[] = [];
   const treeRefusals: string[] = [];
@@ -8944,7 +8962,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     }
     const path = pathRaw as string;
     if (seenTreePaths.has(path)) {
-      treeRefusals.push(`generatedTree:refused:${JSON.stringify(path)}:duplicate path — first row wins`);
+      treeRefusals.push(`generatedTree:refused:${JSON.stringify(path)}:duplicate path â€” first row wins`);
       continue;
     }
     seenTreePaths.add(path);
@@ -8970,7 +8988,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
         // C1-02: prefer the tree's ESM BARREL `src/generated.ts` (codegen
         // `materializeImportableTree` writes it for EVERY tree) over the
         // first-job role path. The barrel `export *`s every tree module, so the
-        // UI shell that imports it can genuinely call a real generated export —
+        // UI shell that imports it can genuinely call a real generated export â€”
         // a first-job role path that the tree happens to contain exposes only
         // that one job module and left the shell unwired. The role path stays
         // the fallback for a hand-built tree with no barrel.
@@ -8985,7 +9003,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
         .map(
           (f): [string, string] => [
             f.path,
-            "generated tree file — brief capability module (project.generatedTree, fixes/144 M2)",
+            "generated tree file â€” brief capability module (project.generatedTree, fixes/144 M2)",
           ],
         )
     : [];
@@ -8995,9 +9013,9 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   // the README census must agree on which A7 rows carry a real assertion. The
   // host the node loop below will write generatedSource to is deterministic
   // (the FIRST job-* node in topo order, else the legacy src/generated.ts
-  // fallback — the same rule the loop applies), so it can be named up front.
+  // fallback â€” the same rule the loop applies), so it can be named up front.
   const jobLabelOf = (node: { purpose: string }): string | null => {
-    const m = node.purpose.match(/["“]([^"”]+)["”]/);
+    const m = node.purpose.match(/["â€œ]([^"â€]+)["â€]/);
     return m ? collapse(m[1]) : null;
   };
   const generated = (project.generatedSource ?? "").trim();
@@ -9019,15 +9037,15 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   // that still carries CommonJS residue cannot load in that tenant, yet
   // compile-check is a syntactic parse (a CJS body parses fine), the emitted
   // spec imports only its own surfaces, and a webapp's tree-run entry is a
-  // UI-shell skip — so the unloadable product would ship with every gate green
+  // UI-shell skip â€” so the unloadable product would ship with every gate green
   // (reproduced live on a generatedSource-only CJS project: `tree-run` ok:true
   // while `import()` throws TypeError). The emit pipeline's materializer
-  // (headless.materializeEmitTree) rewrites stored TREE residue AND — since
-  // 331-3 — a lone generatedSource with residue (both convert to an ESM tree
+  // (headless.materializeEmitTree) rewrites stored TREE residue AND â€” since
+  // 331-3 â€” a lone generatedSource with residue (both convert to an ESM tree
   // before this runs). A DIRECT scaffold caller bypasses that host-side seam
   // (this function is pure + synchronous and cannot import codegen), so the
   // residue still reaches here; that is the case this refuse closes. Never
-  // ship bytes that contradict the package we declare — refuse loudly
+  // ship bytes that contradict the package we declare â€” refuse loudly
   // (declare-or-strike).
   const cjsOffenders: string[] = [];
   for (const tf of treeAccepted) {
@@ -9040,7 +9058,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     return {
       ok: false,
       error: emittedRefusal(
-        `assembled generated module body is CommonJS but the emitted package declares "type":"module" — ` +
+        `assembled generated module body is CommonJS but the emitted package declares "type":"module" â€” ` +
           `importing it throws "module is not defined in ES module scope", so the emitted product could not load ` +
           `(offending file(s): ${cjsOffenders.slice(0, 5).join(", ")}${cjsOffenders.length > 5 ? `, +${cjsOffenders.length - 5} more` : ""}). ` +
           `Materialize the module to ESM (codegen.materializeImportableTree) before emitting; the emitter refuses rather than ship an unloadable tree.`,
@@ -9066,7 +9084,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   // --- fixes/328 P2 (TA-15 / P0-04): the recorded API surface + its binding --
   // Parsed ONCE here so the node loop (real job modules), the router
   // (`emitApi`'s dispatch table) and the oracle-row classification all consume
-  // the SAME binding — no second derivation can drift.
+  // the SAME binding â€” no second derivation can drift.
   const parsedSignatures: ParsedSignature[] = (() => {
     const spec = project.implementationSpec;
     const raw = spec && Array.isArray(spec.typeSignatures) ? spec.typeSignatures : [];
@@ -9077,7 +9095,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     }
     return out;
   })();
-  /** Spec-graph job nodes the binding may key (label ≥3 chars, mirrors codegen). */
+  /** Spec-graph job nodes the binding may key (label â‰¥3 chars, mirrors codegen). */
   const bindableJobTargets = ordered
     .map(({ node, index }) => ({
       id: node.id,
@@ -9102,7 +9120,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
    * bound signatures AND a path the emit owns. Tree mode never overwrites a
    * tree file (the tree's own bytes win); legacy mode leaves the generatedSource
    * host node to its hosted P6 module (machine-verified code, fixes/135).
-   * Empty for the keyless floor (no specRecord ⇒ no recorded surface) — the
+   * Empty for the keyless floor (no specRecord â‡’ no recorded surface) â€” the
    * honest coded refusal stays there, by design.
    */
   const firstHostJobId = ordered.find((o) => o.node.id.startsWith("job-"))?.node.id ?? null;
@@ -9115,33 +9133,42 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     realJobTargets.push({ id: t.id, label: t.label, path: t.path, signatures: sigs });
   }
   const realJobById = new Map(realJobTargets.map((t) => [t.id, t]));
-  /** label → path for the router + oracle classification (deterministic order). */
+  /** label â†’ path for the router + oracle classification (deterministic order). */
   const realJobModules: { label: string; path: string }[] = realJobTargets.map((t) => ({
     label: t.label,
     path: t.path,
   }));
   const wiredJobLabels = new Set(realJobTargets.map((t) => t.label));
-  // A wired leftover job emits a REAL module, never a bridge — drop it from the
+  // A wired leftover job emits a REAL module, never a bridge â€” drop it from the
   // planned-bridge census so the oracle rows classify it as the real seam.
   for (const label of wiredJobLabels) plannedBridgedLabels.delete(label);
 
   /**
    * fixes/216d (106 T-05 / F-03): the module the emitter ACTUALLY writes as the
-   * generated entry — the tree ENTRY (tree mode) or the module hosting
+   * generated entry â€” the tree ENTRY (tree mode) or the module hosting
    * generatedSource (legacy mode), both resolved above from the same data the
    * node loop consumes. The emitted webapp shell imports exactly this path
-   * (relative to its own emitted file); null ⇒ no generated substance at all,
+   * (relative to its own emitted file); null â‡’ no generated substance at all,
    * so the shell carries no generated import. Pre-fix the shell imported the
-   * literal "../generated.ts", which the allow-list refused ⇒ dangling.
+   * literal "../generated.ts", which the allow-list refused â‡’ dangling.
    */
   const generatedEntryPath: string | null = treeMode ? treeEntryPath : plannedHostPath;
+  // fixes/359 (W359 kind-gate): the multi-page React site is emitted ONLY for a
+  // kind whose emitted package DECLARES the renderer that site imports
+  // (`PKG_DEPS[kind].react` â€” webapp today; never a kind list). Its sibling
+  // `rendererFiles` gates on the same fact (scaffold.ts webMarketingSiteFiles).
+  // A react-less kind has no react, no `@types/react`, no vite script and no
+  // `index.html`, so the site is unreachable dead weight that reds the tree's
+  // OWN declared `tsc --noEmit` (TS17004 / TS6142 / TS2307) â€” and for a game it
+  // REPLACED the canvas shell `src/main.ts` imports (TS2614 `bootGame`).
+  const declaresRenderer = PKG_DEPS[kind]?.react !== undefined;
   // 351: the web-marketing multi-page site. When the brief's domain is
   // `web-marketing` and the generated module exposes page content, the emitted
   // UI becomes a real one-file-per-page site (router + layout + pages + cart)
   // instead of the single-file shell. A caller-supplied uiGeneration hook still
   // wins (the documented override contract), so the site is skipped then.
   const marketingSite =
-    options.uiGeneration === undefined
+    options.uiGeneration === undefined && declaresRenderer
       ? webMarketingSiteFiles({
           project: proj,
           kind,
@@ -9158,33 +9185,33 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     // names src/ui/console.tsx, so it is skipped here to avoid a duplicate.
     for (const file of marketingSite) {
       if (file.path === uiPath) continue;
-      treeDocRows.push([file.path, "emitted marketing site page/module (351) — one file per page, real router"]);
+      treeDocRows.push([file.path, "emitted marketing site page/module (351) â€” one file per page, real router"]);
     }
   }
   // 353: the shape-tolerant briefed site. Fires when the web-marketing site did
   // not (a different domain, or the entry exposes async getters / no matching
-  // content role) but the brief/spec names ≥2 pages and the entry exposes a real
-  // mountable export. Precedence: web-marketing site → briefed site → shell.
+  // content role) but the brief/spec names â‰¥2 pages and the entry exposes a real
+  // mountable export. Precedence: web-marketing site â†’ briefed site â†’ shell.
   const briefedSite =
-    options.uiGeneration === undefined && marketingSite === null
+    options.uiGeneration === undefined && marketingSite === null && declaresRenderer
       ? briefedSiteFiles({ project: proj, kind, uiPath: uiPath ?? null, generatedEntryPath })
       : null;
   if (briefedSite !== null) {
     uiHookRan = true;
     for (const file of briefedSite) {
       if (file.path === uiPath) continue;
-      treeDocRows.push([file.path, "emitted briefed site page/module (353) — one file per page, real router"]);
+      treeDocRows.push([file.path, "emitted briefed site page/module (353) â€” one file per page, real router"]);
     }
   }
   /** The multi-page site this emit chose (web-marketing 351 or briefed 353). */
   const uiSite = marketingSite ?? briefedSite;
   /**
    * fixes/216k D2 (TA-15): the JOB modules the generated tree actually
-   * materialised — spec-graph job-* nodes whose sanitized path a tree file
+   * materialised â€” spec-graph job-* nodes whose sanitized path a tree file
    * covers, in graph order, importable (.ts) only (node strip-types cannot
    * load .tsx). Each entry keys its A7 oracle row (row.job === label) to the
    * REAL module file, so the row asserts that module's real export surface
-   * instead of skipping. Empty in legacy mode and for uncovered job nodes —
+   * instead of skipping. Empty in legacy mode and for uncovered job nodes â€”
    * both keep byte-identical pre-216k output.
    */
   const treeJobModules: { label: string; path: string }[] = treeMode
@@ -9200,7 +9227,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
         }))
     : [];
   // fixes/352: tree-covered job modules bound to a REAL run export the tree
-  // source genuinely exposes (verified) — the TREE api module dispatches to
+  // source genuinely exposes (verified) â€” the TREE api module dispatches to
   // these. Empty when the tree materialised no job module (the api then refuses
   // honestly) or when no recorded signature binds to a tree job.
   const treeApiModules: { label: string; path: string; run: string; arity: number; extraArgs: string[] }[] = [];
@@ -9243,10 +9270,10 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   const treeApiPath = treeMode && typeof apiPath === "string" && /\.ts$/.test(apiPath) ? apiPath : null;
   const treeStorePath = treeMode && typeof storePath === "string" && /\.ts$/.test(storePath) ? storePath : null;
   // The surface the spec's row loop switches on (mirrors the ctx it receives:
-  // tree mode imports only the tree entry — plus, per D2, each tree-covered
-  // job module — and, per fixes/352, the REAL tree api/store modules).
+  // tree mode imports only the tree entry â€” plus, per D2, each tree-covered
+  // job module â€” and, per fixes/352, the REAL tree api/store modules).
   const oracleTreeEntryOk = treeMode && typeof treeEntryPath === "string" && /\.ts$/.test(treeEntryPath);
-  // fixes/357 (R-7): the labels whose modules the EMITTED spec imports — the
+  // fixes/357 (R-7): the labels whose modules the EMITTED spec imports â€” the
   // same lists `emitOracleSpec` receives below, so the census here and the row
   // body there classify every row identically.
   const oracleImportableJobs = importableOracleJobLabels(treeJobModules, realJobModules, oracleTreeEntryOk);
@@ -9266,21 +9293,21 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     importableWiredModules: oracleImportableJobs.wired,
   });
   const oracleCensus = proj.oracle.length ? censusOracleRows(proj.oracle, oracleSurface) : null;
-  /** fixes/216k D3: tree-mode job nodes the tree did not cover — never bridged
+  /** fixes/216k D3: tree-mode job nodes the tree did not cover â€” never bridged
    *  (a bridged job path would keep doctor's census `reexports > 0` forever).
    *  Filled by the spec-graph node loop below; rendered by readmeBody + warnings. */
   const unmaterialisedJobs: { id: string; file: string; label: string | null }[] = [];
   /** fixes/216k: tree-mode non-job nodes bridged to the tree entry (now counted). */
   const bridgedNonJobPaths: string[] = [];
   /** 353: nodes whose concept the tree already ships under a dash/underscore/case
-   *  variant (`path -> treePath`) — reused, so no duplicate module is written. */
+   *  variant (`path -> treePath`) â€” reused, so no duplicate module is written. */
   const treeTwinReused: string[] = [];
-  /** 353: non-job nodes neither the tree nor an emitter covers — emitted EMPTY. */
+  /** 353: non-job nodes neither the tree nor an emitter covers â€” emitted EMPTY. */
   const emptyNonJobPaths: string[] = [];
 
   // --- Root documents + skeleton files -------------------------------------
   // (fixes/216k parent boundary repair: the README push moved BELOW the
-  // spec-graph node loop — it renders the job-scope/bridge census arrays the
+  // spec-graph node loop â€” it renders the job-scope/bridge census arrays the
   // loop fills; emitting it here ran before the loop: TDZ + empty counts.)
   push("DEPLOY.md", deployNotes(proj, oracleCensus));
   push(".env.example", envExample(kind));
@@ -9288,7 +9315,13 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   push("LICENSE", licenseFile(proj));
   push(".github/workflows/ci.yml", ciWorkflowFile(kind, proj.oracle.length > 0));
   push("package.json", packageJson(kind, proj, proj.oracle.length > 0));
-  push("tsconfig.json", tsconfigJson(kind, proj.oracle.length > 0));
+  // fixes/359 (W359 kind-gate): the emitted `jsx` must admit every module this
+  // emit writes (see tsconfigJson), and the emitted file set is not complete
+  // until the spec-graph node loop and the site pass have run. The row is
+  // pushed here so the emitted order is unchanged; its body is filled from the
+  // COMPLETE file set after the last push below.
+  const tsconfigRow: ScaffoldFile = { path: "tsconfig.json", body: "" };
+  files.push(tsconfigRow);
   push(".rapidtool/project.json", exportProjectJson(project));
 
   // --- Browser boot files (fixes/135): kinds whose package.json declares
@@ -9297,7 +9330,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   if (kind === "webapp" || kind === "game") {
     const entryFile = kind === "webapp" ? "src/main.tsx" : "src/main.ts";
     push("index.html", emitIndexHtml(proj, `/${entryFile}`));
-    // fixes/277 (R3-f06 / W-15): BOTH vite kinds get their config — webapp
+    // fixes/277 (R3-f06 / W-15): BOTH vite kinds get their config â€” webapp
     // with the react + tailwindcss plugins (W52 / 338-5 wires tailwindcss so
     // the declared devDeps are never inert), game plain (its devDeps carry no
     // framework plugin; the webapp body would break `npm run build` there).
@@ -9305,7 +9338,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     push("vite.config.ts", emitViteConfig(kind));
     push(entryFile, emitMainEntry(kind, proj, uiPath ? relSpecifier("src", uiPath) : null));
     // W52 / 338-5: the Tailwind v4 CSS entry the webapp's declared
-    // `@tailwindcss/vite` plugin compiles — the file that makes the two
+    // `@tailwindcss/vite` plugin compiles â€” the file that makes the two
     // declared devDeps do work (main.tsx imports it; vite.config registers it).
     if (kind === "webapp") push("src/styles.css", emitStylesCss());
   }
@@ -9316,13 +9349,13 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
 
   // --- fixes/277 (R3-f06): per-kind runnable entries ------------------------
   // packageJson DECLARES these paths (cli-tool `bin` + `main`; library
-  // `main`/`exports`; service `main` + the start script) — emit exactly what
+  // `main`/`exports`; service `main` + the start script) â€” emit exactly what
   // it declares so no emitted package field points at a file that was never
   // written.
   // cli-tool: the bin launcher (spawns src/main.ts, argv passthrough) + the
   // entry; library: the importable module entry; service: the `npm start`
   // entry with the real PORT wiring; each entry's structured refusal keeps
-  // the canonical TODO(E-15) stub marker + the RT_E_VALIDATION · prefix.
+  // the canonical TODO(E-15) stub marker + the RT_E_VALIDATION Â· prefix.
   if (kind === "cli-tool" || kind === "library" || kind === "service") {
     push("src/main.ts", emitKindEntry(kind, proj));
     if (kind === "cli-tool") {
@@ -9332,7 +9365,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
 
   // --- Generated tree files (fixes/144 M2) ----------------------------------
   // TREE MODE ONLY: every accepted tree file is emitted VERBATIM at its own
-  // repo-relative path (never wrapped in scaffold headers — bodies must stay
+  // repo-relative path (never wrapped in scaffold headers â€” bodies must stay
   // byte-identical to the synthesized source), in sorted path order. A file
   // whose path a spec-graph node also claims is emitted HERE once; the node
   // loop below skips every tree-covered path.
@@ -9344,7 +9377,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
 
   // 216b: `jobLabelOf` and `generated` are declared ONCE, above, in the oracle-row
   // census block. This second pair was a duplicate in the SAME function scope
-  // (TS2451 — Cannot redeclare block-scoped variable), left behind when the census
+  // (TS2451 â€” Cannot redeclare block-scoped variable), left behind when the census
   // block was inserted ahead of it. Removed; the earlier declarations serve this
   // code too (identical bodies, same `${project.generatedSource}` source).
   let hosted = false;
@@ -9359,7 +9392,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     let body: string;
     if (treeMode) {
       // fixes/144 (M2): a path a tree file owns was emitted by the tree pass
-      // above — never double-push. An uncovered ui node is rebuilt by emitUi
+      // above â€” never double-push. An uncovered ui node is rebuilt by emitUi
       // (340-6: the webapp body is generated from the entry's real exports;
       // the game/service shells stay honest contract-level stubs);
       // every other uncovered graph node becomes a thin re-export of the tree
@@ -9370,12 +9403,12 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
       // tree does not cover is NEVER bridged. `doctor --tree` classifies any
       // `src/jobs/*.ts` re-export as a leftover job, so a bridged job path
       // would keep `reexports > 0` (and the factory latch false) no matter how
-      // real the tree-covered job modules are — exactly the artifact TA-15
+      // real the tree-covered job modules are â€” exactly the artifact TA-15
       // removes. The node gets NO file; it is counted + surfaced (warnings +
       // shipped README line) as an unmaterialised job node, never silently.
       if (isJob) {
         // fixes/328 P2: a job node with a bound recorded API surface becomes a
-        // REAL module — materialisation, not a bridge (so the D3 rule "never
+        // REAL module â€” materialisation, not a bridge (so the D3 rule "never
         // bridge a job node" holds: no re-export is ever written). Jobs with
         // no recorded surface stay counted as unmaterialised, never silent.
         const realJob = realJobById.get(node.id);
@@ -9398,7 +9431,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
       }
       // 353: the tree already ships the real module for this concept under a
       // dash/underscore/case variant (the measured web-marketing/web_marketing
-      // and custom-software/custom_software duplicate pair) — reuse it and never
+      // and custom-software/custom_software duplicate pair) â€” reuse it and never
       // write a second, duplicate module. The graph's documented path is
       // remapped to the tree's real file so no README row dangles.
       const twin = treeTwinPath(treeAccepted, path);
@@ -9406,7 +9439,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
         const row = specRows.find(([p]) => p === path);
         if (row) {
           row[0] = twin;
-          row[1] = `${node.id} — ${prose(node.purpose)} (real module in the generated tree)`;
+          row[1] = `${node.id} â€” ${prose(node.purpose)} (real module in the generated tree)`;
         }
         treeTwinReused.push(`${path} -> ${twin}`);
         continue;
@@ -9429,14 +9462,14 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
         body = emitSchema(node, proj);
       } else if (node.id === "api" && treeApiPath !== null) {
         // fixes/352: a REAL router over the recorded A6 endpoints, dispatching
-        // to the generated tree's own job modules — the tree no longer lies
+        // to the generated tree's own job modules â€” the tree no longer lies
         // about having an API.
         body = emitTreeApi(node, proj, { apiPath: path, jobModules: treeApiModules });
       } else if (node.id === "store" && treeStorePath !== null) {
         // fixes/352: the REAL persisted state container, never a bridge.
         body = emitStore(node, proj);
       } else {
-        // 353: no emitter owns this node and the tree ships no twin — emit an
+        // 353: no emitter owns this node and the tree ships no twin â€” emit an
         // explicit EMPTY module and record the gap. Never the pre-353 barrel
         // alias (`export * from "../generated.ts"`) that pretended the whole
         // generated tree was this one module (the measured fake-layering
@@ -9444,7 +9477,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
         body = [
           ...sourceHeader(path, node.purpose, proj, [
             "// 353: the generated tree ships no module for this spec-graph node,",
-            "// so this file is intentionally empty — never a re-export of the",
+            "// so this file is intentionally empty â€” never a re-export of the",
             "// whole tree barrel (which would fake a real module boundary).",
           ]),
           "export {};",
@@ -9459,14 +9492,14 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
       body = emitSchema(node, proj);
     } else if (node.id === "api") {
       // fixes/328 P2: the router dispatches to the REAL job modules emitted
-      // this run (empty for the keyless floor ⇒ the pre-328 refusal bytes).
+      // this run (empty for the keyless floor â‡’ the pre-328 refusal bytes).
       body = emitApi(node, proj, { apiPath: path, jobModules: realJobModules });
     } else if (node.id === "store") {
       body = emitStore(node, proj);
     } else if (isJob) {
       const realJob = realJobById.get(node.id);
       if (realJob) {
-        // fixes/328 P2: this job has a recorded API surface — emit the REAL
+        // fixes/328 P2: this job has a recorded API surface â€” emit the REAL
         // module instead of a stub or a re-export bridge of one shared file.
         body = emitJobModule(
           { file: path, purpose: node.purpose, id: node.id },
@@ -9544,12 +9577,12 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   // --- Oracle acceptance spec ------------------------------------------------
   // fixes/352: the emitted .ts module sources, so a capability row can bind to
   // and CALL the real export the tree wires (behavioural), not just detect its
-  // presence. Built from the already-assembled file set — one source of truth.
+  // presence. Built from the already-assembled file set â€” one source of truth.
   const sourceByPath = new Map<string, string>();
   for (const f of files) {
     if (/\.[cm]?ts$/.test(f.path)) sourceByPath.set(f.path, f.body);
   }
-  // Real assertions over the emitted module surfaces (fixes/135) — the ctx
+  // Real assertions over the emitted module surfaces (fixes/135) â€” the ctx
   // names the sanitized modules the spec may import (store/api) and the path
   // hosting generatedSource (template modules gain an export surface). TREE
   // mode names the tree ENTRY module instead: the spec imports only the tree
@@ -9565,13 +9598,13 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
             treePaths: treeAccepted.map((f) => f.path),
             treeJobModules,
             // fixes/352: the REAL tree api/store modules are importable .ts
-            // surfaces — the row loop asserts their dispatch/round-trip.
+            // surfaces â€” the row loop asserts their dispatch/round-trip.
             apiPath: treeApiPath,
             storePath: treeStorePath,
             // fixes/328 P2: tree-mode job nodes materialised as REAL modules.
             wiredJobLabels,
             wiredJobModules: realJobModules,
-            // fixes/277 (R3-f03): a partial tree ⇒ capability rows skip with
+            // fixes/277 (R3-f03): a partial tree â‡’ capability rows skip with
             // their reason instead of asserting (non-partial bytes unchanged).
             partial: verdict.partial,
             sourceByPath,
@@ -9589,16 +9622,25 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     );
   }
 
-  // fixes/216k (TA-15 done-when 2): the D3 count/surface for TREE mode —
+  // fixes/359 (W359 kind-gate): fill the emitted tsconfig from the COMPLETE
+  // emitted file set (last push above) â€” the derived `jsx` reads the bytes this
+  // emit actually writes, so it cannot drift from a kind list again.
+  tsconfigRow.body = tsconfigJson(
+    kind,
+    proj.oracle.length > 0,
+    files.some((f) => JSX_SOURCE_EXT_RE.test(f.path)),
+  );
+
+  // fixes/216k (TA-15 done-when 2): the D3 count/surface for TREE mode â€”
   // unmaterialised spec-graph job nodes (each NEVER bridged; one warning row
   // apiece) and the surviving non-job bridges (bytes unchanged, now counted).
   // Both render in the shipped README and the CLI-facing summary. Zero counts
-  // in both ⇒ byte-identical pre-216k output for every existing fixture.
+  // in both â‡’ byte-identical pre-216k output for every existing fixture.
   const unmaterialisedWarnings = unmaterialisedJobs.map(
     (j) =>
       `specGraph:unmaterialised-job:${JSON.stringify(j.file)}:${
         j.label ? `job ${JSON.stringify(j.label)}` : j.id
-      } has no generated tree file — tree mode NEVER bridges a job node (fixes/216k D3 / TA-15)`,
+      } has no generated tree file â€” tree mode NEVER bridges a job node (fixes/216k D3 / TA-15)`,
   );
   // 353: the tree-twin reuse (a duplicate module was NOT written) and the empty
   // non-job nodes (never a barrel alias). Both surfaced so nothing is silent.
@@ -9606,13 +9648,13 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     (entry) => `specGraph:tree-twin:reused existing generated module instead of writing a duplicate: ${entry}`,
   );
   const emptyNodeWarnings = emptyNonJobPaths.map(
-    (p) => `specGraph:empty-node:${JSON.stringify(p)}: no generated tree file covers this node — emitted EMPTY (never a barrel bridge)`,
+    (p) => `specGraph:empty-node:${JSON.stringify(p)}: no generated tree file covers this node â€” emitted EMPTY (never a barrel bridge)`,
   );
   const summary = treeMode
-    ? `${files.length} files · kind ${kind} · packet ${project.id || "unknown"} — tree files already on disk · generatedTree: ${treeAccepted.length} file${treeAccepted.length === 1 ? "" : "s"} assembled${treeRefusals.length ? `, ${treeRefusals.length} refused (see warnings)` : ""}${unmaterialisedJobs.length ? `, ${unmaterialisedJobs.length} job node${unmaterialisedJobs.length === 1 ? "" : "s"} unmaterialised (never bridged — see warnings)` : ""}${treeTwinReused.length ? `, ${treeTwinReused.length} node${treeTwinReused.length === 1 ? "" : "s"} satisfied by an existing tree module (no duplicate written)` : ""}${emptyNonJobPaths.length ? `, ${emptyNonJobPaths.length} node${emptyNonJobPaths.length === 1 ? "" : "s"} emitted empty (no bridge)` : ""}`
-    : `${files.length} files · kind ${kind} · packet ${project.id || "unknown"} — write them to disk with the emit command`;
+    ? `${files.length} files Â· kind ${kind} Â· packet ${project.id || "unknown"} â€” tree files already on disk Â· generatedTree: ${treeAccepted.length} file${treeAccepted.length === 1 ? "" : "s"} assembled${treeRefusals.length ? `, ${treeRefusals.length} refused (see warnings)` : ""}${unmaterialisedJobs.length ? `, ${unmaterialisedJobs.length} job node${unmaterialisedJobs.length === 1 ? "" : "s"} unmaterialised (never bridged â€” see warnings)` : ""}${treeTwinReused.length ? `, ${treeTwinReused.length} node${treeTwinReused.length === 1 ? "" : "s"} satisfied by an existing tree module (no duplicate written)` : ""}${emptyNonJobPaths.length ? `, ${emptyNonJobPaths.length} node${emptyNonJobPaths.length === 1 ? "" : "s"} emitted empty (no bridge)` : ""}`
+    : `${files.length} files Â· kind ${kind} Â· packet ${project.id || "unknown"} â€” write them to disk with the emit command`;
   const warnings = [...treeRefusals, ...unmaterialisedWarnings, ...twinWarnings, ...emptyNodeWarnings];
-  // fixes/277 (A3-f07): the UI-generation record — present only when a webapp
+  // fixes/277 (A3-f07): the UI-generation record â€” present only when a webapp
   // UI shell was actually emitted this run (the hook ran); `applied` is true
   // when a caller hook's lines replaced the default generator. Absent for
   // every other kind/path, so existing consumers keep byte-identical output.
@@ -9653,7 +9695,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   }
 
   // fixes/354 A2-F4 (D1) / fixes/356 (W356 A3): land the bannered below-floor
-  // partial — reachable ONLY under an explicit `"partial"`/`"banner"` policy
+  // partial â€” reachable ONLY under an explicit `"partial"`/`"banner"` policy
   // (the default refused before the first write). The banner is prepended to the
   // emitted README so the artifact itself declares the refusal (never a silent
   // partial); the result carries the same detail for the envelope. A clean
@@ -9674,7 +9716,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     files,
     summary,
     ...(warnings.length ? { warnings } : {}),
-    // fixes/277 (R3-f03 / W-06): trail verdicts — present only when true.
+    // fixes/277 (R3-f03 / W-06): trail verdicts â€” present only when true.
     ...(verdict.redTree ? { redTree: true as const } : {}),
     ...(verdict.partial ? { partial: true as const } : {}),
     ...(kind === "game" ? { gameTemplate: true as const } : {}),

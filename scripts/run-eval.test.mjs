@@ -1,3 +1,4 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,6 +18,7 @@ import {
   classifyLlmPreflight,
   classifyRunOutcome,
   corpusDomainIndex,
+  declaredCorpusKind,
   drainPipeline,
   emitEvalRunRow,
   endTrialCallTap,
@@ -47,6 +49,7 @@ import {
   priorFor,
   probeFundedness,
   probeP6Reachability,
+  projectKindForEntry,
   readRunMarker,
   RUN_MARKER_NAME,
   RUN_OUTCOME_CLASSES,
@@ -68,19 +71,19 @@ import { intentLattice } from "../src/lib/algorithms.ts";
 import { projectRoot } from "./with-app-env.mjs";
 
 /**
- * W5-L5 / T-107.5 (`wave_plans/W5/lane-5.md`) — pins for the run-side grader
+ * W5-L5 / T-107.5 (`wave_plans/W5/lane-5.md`) â€” pins for the run-side grader
  * layer + trials/pass@k accounting of the maker-loop eval driver.
  *
  * Three claims, each provable WITHOUT running the (slow) eval pipeline:
- *   (a) GRADER INVISIBILITY — every corpus case's acceptance bar lives in a
+ *   (a) GRADER INVISIBILITY â€” every corpus case's acceptance bar lives in a
  *       run-side grader file that is outside every emit path, the driver grades
  *       from it (never from the frontmatter copy), and no emitted tree on disk
  *       contains or references it (leak scan, with a planted-leak control so
  *       the scan itself is falsifiable).
- *   (b) pass@k MATH — the human-eval estimator + pass^k + the flakiness
+ *   (b) pass@k MATH â€” the human-eval estimator + pass^k + the flakiness
  *       classification, on synthetic outcomes, including the edge cases
  *       (k > n, 1 trial = flakiness unmeasurable, strict `true` counting).
- *   (c) HONEST KEYLESS SKIPS — a keyless run says what it does NOT do, a
+ *   (c) HONEST KEYLESS SKIPS â€” a keyless run says what it does NOT do, a
  *       `--keyed` request without the key degrades with a reason, no key
  *       material can reach the notices, and a case without a run-side grader
  *       is SKIPPED (recorded) instead of scored against an undeclared bar.
@@ -173,7 +176,7 @@ test("(a) graderLeakScan flags planted grader content and clears a clean tree", 
   }
 });
 
-test("F4 (314): treeRunToEvidence carries the verdict hash — and never invents one", () => {
+test("F4 (314): treeRunToEvidence carries the verdict hash â€” and never invents one", () => {
   const hashed = treeRunToEvidence({
     ok: true,
     dir: "/tmp/x",
@@ -188,7 +191,7 @@ test("F4 (314): treeRunToEvidence carries the verdict hash — and never invents
   assert.equal(hashed.ok, true);
   assert.equal(hashed.testsPass, 4);
   assert.equal(hashed.verdictHash, "deadbeefcafef00d");
-  // Legacy/no-hash evidence stays legacy-shaped — the key is omitted, never guessed.
+  // Legacy/no-hash evidence stays legacy-shaped â€” the key is omitted, never guessed.
   const legacy = treeRunToEvidence({ ok: true, dir: "d", tests: [] });
   assert.ok(legacy);
   assert.equal(legacy.verdictHash, undefined);
@@ -199,7 +202,7 @@ test("F4 (314): treeRunToEvidence carries the verdict hash — and never invents
   assert.equal(treeRunToEvidence(null), null);
 });
 
-test("T9.3 (W44 · G3/320 · from 319_f3_promote §C): the promotion run-eval wires after a green M2 run stamps the emitted record; red leaves it byte-identical", async () => {
+test("T9.3 (W44 Â· G3/320 Â· from 319_f3_promote Â§C): the promotion run-eval wires after a green M2 run stamps the emitted record; red leaves it byte-identical", async () => {
   const dir = mkdtempSync(join(tmpdir(), "rapidtool-runeval-t93-"));
   try {
     mkdirSync(join(dir, ".rapidtool"), { recursive: true });
@@ -238,7 +241,7 @@ test("(a) emitted trees on disk carry no grader content (leak scan over the real
   const slugs = corpusSlugs();
   const present = slugs.filter((slug) => existsSync(join(OUT_DIR, slug)));
   if (present.length === 0) {
-    t.skip("no emitted trees under research/eval-out yet — run `npm run eval` first");
+    t.skip("no emitted trees under research/eval-out yet â€” run `npm run eval` first");
     return;
   }
   for (const slug of present) {
@@ -307,7 +310,7 @@ test("(a) a grader that cannot be trusted never grades (parse guards)", () => {
 });
 
 // 342-2 (W56): `passWhen.firstRun` is the per-run-kind corpus bar 342-3 declared
-// in all 11 graders. The driver must CARRY it (validated) — a malformed block is
+// in all 11 graders. The driver must CARRY it (validated) â€” a malformed block is
 // refused, never silently dropped (a dropped bar would judge first runs at the
 // warm bar and keep them capped at 8/9 by arithmetic).
 test("342-2: parseGrader carries passWhen.firstRun, validated; a malformed block is a coded refusal", () => {
@@ -319,7 +322,7 @@ test("342-2: parseGrader carries passWhen.firstRun, validated; a malformed block
   assert.equal(good.ok, true);
   assert.deepEqual(good.grader.passWhen.firstRun, { meanAtLeast: 1, excludeCriteria: ["M7"] });
   assert.equal(good.grader.passWhen.meanAtLeast, 1, "the warm bar is unchanged by the firstRun block");
-  // No block → null (never a fabricated first-run bar).
+  // No block â†’ null (never a fabricated first-run bar).
   const none = parseGrader(JSON.stringify(base), "s");
   assert.equal(none.ok, true);
   assert.equal(none.grader.passWhen.firstRun, null);
@@ -341,7 +344,7 @@ test("342-2: parseGrader carries passWhen.firstRun, validated; a malformed block
   assert.equal(parseGrader(JSON.stringify({ ...base, passWhen: { firstRun: "nope" } }), "s").ok, false);
 });
 
-test("342-2: every declared corpus firstRun bar reaches the parsed grader (declared ⇒ consumed)", () => {
+test("342-2: every declared corpus firstRun bar reaches the parsed grader (declared â‡’ consumed)", () => {
   const dir = join(projectRoot(), "research", "eval-corpus", "graders");
   const files = readdirSync(dir).filter((f) => f.endsWith(".grader.json"));
   assert.equal(files.length, 11, "the corpus declares 11 graders");
@@ -383,7 +386,7 @@ test("(b) pass@k estimator matches 1 - C(n-c,k)/C(n,k) on synthetic outcomes", (
   assert.equal(passAtK(4, 2, 2), 0.8333); // 1 - C(2,2)/C(4,2)
   // k beyond the observed trials clamps to n instead of inventing a number:
   assert.equal(passAtK(3, 1, 5), passAtK(3, 1, 3));
-  // Invalid records are null — never a fabricated 0:
+  // Invalid records are null â€” never a fabricated 0:
   assert.equal(passAtK(0, 0, 1), null);
   assert.equal(passAtK(2, 3, 1), null);
   assert.equal(passAtK(2, -1, 1), null);
@@ -417,9 +420,9 @@ test("(b) trialsSummary classifies flakiness honestly (strict boolean counting)"
   assert.equal(flip.failed, 1);
   assert.equal(flip.passAt1, 0.5);
   // Parent boundary fix (W5): standard post-hoc pass@k (Chen et al.) is
-  // 1 − C(n−c,k)/C(n,k). Here n=2, c=1, k=2 → 1 − C(1,2)/C(2,2) = 1 (any draw
+  // 1 âˆ’ C(nâˆ’c,k)/C(n,k). Here n=2, c=1, k=2 â†’ 1 âˆ’ C(1,2)/C(2,2) = 1 (any draw
   // of 2 from 2 includes the single pass). The original 0.5 conflated pass@k
-  // with the mean pass@1 — the implementation was right, the expectation wrong.
+  // with the mean pass@1 â€” the implementation was right, the expectation wrong.
   assert.equal(flip.passAtK, 1);
   assert.equal(flip.passAllTrials, 0);
 
@@ -444,7 +447,7 @@ test("(b) trialsSummary classifies flakiness honestly (strict boolean counting)"
   assert.equal(empty.passAt1, null);
   assert.equal(empty.flaky, null);
 
-  // Only a literal `true` is a pass — no truthiness inflation.
+  // Only a literal `true` is a pass â€” no truthiness inflation.
   const truthy = trialsSummary(["yes", 1, {}], { k: 3 });
   assert.equal(truthy.passes, 0, "non-boolean outcomes must not inflate passes");
 });
@@ -465,7 +468,7 @@ test("(b) passesAcceptance ANDs the rubric threshold with the run-side file/cont
 });
 
 // 255 (W20-L2): the pass verdict is a boolean asked of FOUR different clauses
-// (finite mean → mean threshold → files → content). The run-2 record (`pass:no`
+// (finite mean â†’ mean threshold â†’ files â†’ content). The run-2 record (`pass:no`
 // with filesOk+contentOk green and an EMPTY shortfall list) could not name its
 // own cause, because the log line only listed missingFiles/failedContent.
 // acceptanceFailReason names the FIRST false clause; it must stay clause-exact
@@ -473,7 +476,7 @@ test("(b) passesAcceptance ANDs the rubric threshold with the run-side file/cont
 test("(b) acceptanceFailReason names the failing clause (mean threshold vs files/content)", () => {
   const grader = { passWhen: { meanAtLeast: 1, requireExpectedFiles: true, requireExpectedContent: true } };
   const okAcc = { filesOk: true, contentOk: true, missingFiles: [], failedContent: [] };
-  // The exact run-2 shape: files+content green, 6/9 mean → the ONLY false clause is the threshold.
+  // The exact run-2 shape: files+content green, 6/9 mean â†’ the ONLY false clause is the threshold.
   assert.equal(passesAcceptance({ mean: 0.6667 }, okAcc, grader), false);
   const belowThreshold = acceptanceFailReason({ mean: 0.6667 }, okAcc, grader);
   assert.ok(belowThreshold, "a below-threshold mean must name its clause");
@@ -492,14 +495,14 @@ test("(b) acceptanceFailReason names the failing clause (mean threshold vs files
   );
   assert.ok(missingContent);
   assert.match(missingContent, /package\.json/);
-  // Lenient grader: both assertion clauses are OFF → no reason even when red.
+  // Lenient grader: both assertion clauses are OFF â†’ no reason even when red.
   const lenient = { passWhen: { meanAtLeast: 0.5, requireExpectedFiles: false, requireExpectedContent: false } };
   assert.equal(acceptanceFailReason({ mean: 0.5556 }, { ...okAcc, filesOk: false, contentOk: false, missingFiles: ["x"], failedContent: ["y"] }, lenient), null);
 });
 
 // 342-2 (W56): the first-run bar is CONSUMED by the pass predicate. A first run
 // cannot score M7 (no prior lesson), so its bar excludes M7 over the remaining
-// eight — every one still required (mean 1 over 8 = all eight, not a lowered
+// eight â€” every one still required (mean 1 over 8 = all eight, not a lowered
 // bar). A warm run keeps the full nine. No false green: the keyless floor and a
 // warm card missing M7 both fail.
 test("342-2: passesAcceptance selects the per-run-kind bar (first clears 8/9; warm still needs M7)", () => {
@@ -533,7 +536,7 @@ test("342-2: passesAcceptance selects the per-run-kind bar (first clears 8/9; wa
 });
 
 // 342-2b (verifier A + B): an ABSENT or unknown `runKind` must be judged on the
-// STRICTER warm bar (all nine) — never the lenient first-run bar. A legacy /
+// STRICTER warm bar (all nine) â€” never the lenient first-run bar. A legacy /
 // synthetic re-judge of a warm row that carries a criteria map must not clear
 // 8/9 by silently dropping M7.
 test("342-2b: an absent/unknown runKind is judged on the warm bar (all nine), never the lenient first-run bar", () => {
@@ -558,10 +561,10 @@ test("342-2b: an absent/unknown runKind is judged on the warm bar (all nine), ne
   assert.equal(passesAcceptance({ ...eight, runKind: "bogus" }, okAcc, grader), false, "an UNKNOWN runKind is judged warm");
   const reason = acceptanceFailReason({ ...eight }, okAcc, grader);
   assert.ok(reason, "an 8/9 unknown-kind row must report a fail reason");
-  assert.ok(!reason.includes("M7"), `an unknown kind is not a first run — no M7 exclusion claim (${reason})`);
+  assert.ok(!reason.includes("M7"), `an unknown kind is not a first run â€” no M7 exclusion claim (${reason})`);
 });
 
-// 342-2b (verifier B): the first-run exclusion list is ONE list —
+// 342-2b (verifier B): the first-run exclusion list is ONE list â€”
 // maker-score's FIRST_RUN_UNSCOREABLE_CRITERIA. The driver must refuse a graded
 // bar that excludes a SCOREABLE criterion (a hollow first run could otherwise
 // pass by dropping M1-M4). The 11 real graders exclude only M7.
@@ -578,7 +581,7 @@ test("342-2b: firstRun.excludeCriteria may name only the first-run-unscoreable c
   }
 });
 
-// 342-2b (verifier B): the driver consumes maker-score's shared bar helpers —
+// 342-2b (verifier B): the driver consumes maker-score's shared bar helpers â€”
 // one exclusion list, one mean comparison. This source pin makes those exports
 // genuinely consumed (a re-implementation would drift while its own test stayed
 // green).
@@ -659,7 +662,7 @@ test("(c) a case with no run-side grader is SKIPPED with a reason, never scored"
   ];
   const graders = new Map([
     ["has-grader", { ok: true, path: join(GRADER_DIR, "has-grader.grader.json"), grader: { slug: "has-grader", requiredCapabilities: ["x"], requiredIdentifiers: [] } }],
-    ["no-grader", { ok: false, path: join(GRADER_DIR, "no-grader.grader.json"), error: "no run-side grader at X — case SKIPPED (never graded against an undeclared bar)" }],
+    ["no-grader", { ok: false, path: join(GRADER_DIR, "no-grader.grader.json"), error: "no run-side grader at X â€” case SKIPPED (never graded against an undeclared bar)" }],
   ]);
   const plan = planTargets(entries, (slug) => graders.get(slug));
   assert.deepEqual(plan.targets.map((t) => t.entry.slug), ["has-grader"]);
@@ -669,7 +672,7 @@ test("(c) a case with no run-side grader is SKIPPED with a reason, never scored"
   assert.match(plan.skips[0].reason, /SKIPPED/);
   assert.equal(plan.targets.some((t) => t.entry.slug === "no-grader"), false, "an ungraded case must not run");
 
-  // …and the skip lands in the persisted summary (honest accounting), while the
+  // â€¦and the skip lands in the persisted summary (honest accounting), while the
   // gradeable case keeps its own row.
   const summary = buildSummary(
     [
@@ -707,7 +710,7 @@ test("(c) buildSummary counts passes, flaky cases and grader leaks without touch
   assert.deepEqual(summary.graderLeaks, ["flaky-case"]);
   assert.equal(summary.passAtK.meanPassAt1, 0.5);
   assert.equal(summary.skipped, 0);
-  // The legacy summary keys are produced by persist(), not here — but the
+  // The legacy summary keys are produced by persist(), not here â€” but the
   // W5-L5 block must never redefine them either:
   assert.equal("entries" in summary, false);
   assert.equal("meanTotal" in summary, false);
@@ -716,7 +719,7 @@ test("(c) buildSummary counts passes, flaky cases and grader leaks without touch
 test("(c) the recorded results.json keeps the legacy contract and adds W5-L5 keys", (t) => {
   const resultsPath = join(OUT_DIR, "results.json");
   if (!existsSync(resultsPath)) {
-    t.skip("no research/eval-out/results.json yet — run `npm run eval` first");
+    t.skip("no research/eval-out/results.json yet â€” run `npm run eval` first");
     return;
   }
   const doc = JSON.parse(readFileSync(resultsPath, "utf8"));
@@ -751,12 +754,12 @@ test("(c) the recorded results.json keeps the legacy contract and adds W5-L5 key
 });
 
 // ---------------------------------------------------------------------------
-// (d) fixes/237 — C-2 (`223` §4, `230` OV-5(a)): a hard-DoD stop is a CODED
+// (d) fixes/237 â€” C-2 (`223` Â§4, `230` OV-5(a)): a hard-DoD stop is a CODED
 // TERMINAL stop in the drain. Today the terminal set is {complete, blocked,
-// error}, so a `dod` round (headless.ts:587-606 — a real hard stop) reads as
+// error}, so a `dod` round (headless.ts:587-606 â€” a real hard stop) reads as
 // "progress" and the drain re-enters the block for its full 80-round guard
 // (~80 `dod.blocked` rows), then reports a SILENT `position:"stalled",
-// onTime:false` → M9=0. These two pins close that.
+// onTime:false` â†’ M9=0. These two pins close that.
 // ---------------------------------------------------------------------------
 
 test("(d) drain terminality pins all seven RunOutcome values", () => {
@@ -772,9 +775,9 @@ test("(d) drain terminality pins all seven RunOutcome values", () => {
   assert.equal(new Set([...terminal, ...looping]).size, 7, "exactly the seven RunOutcome values are pinned");
 });
 
-test("(d) the drain exits on the FIRST dod round with a coded stop (WB-2 → M9)", async () => {
-  // Same shape as `223` §C-2's scratch probe: a project COMPLETE at phase 1
-  // with a red gate under enforceDod:true — runUntilGate returns outcome
+test("(d) the drain exits on the FIRST dod round with a coded stop (WB-2 â†’ M9)", async () => {
+  // Same shape as `223` Â§C-2's scratch probe: a project COMPLETE at phase 1
+  // with a red gate under enforceDod:true â€” runUntilGate returns outcome
   // "dod", stopped, cursor unmoved (the headless.test.ts:1744 recipe).
   const p0 = createProject({
     brief: "Build a small notes app with add/list/search and its own tests.",
@@ -801,15 +804,15 @@ test("(d) the drain exits on the FIRST dod round with a coded stop (WB-2 → M9)
   assert.equal(drain.code, "RT_E_GATE_PENDING", "the stop carries the wild path's code for the same block (engine.ts:3571)");
   assert.match(String(drain.stall), /DoD unmet/, "the stall evidence is the hard-DoD message");
   const rowsAfter = (drain.p.logs ?? []).filter((l) => l.event === "dod.blocked").length;
-  assert.equal(rowsAfter, 1, `exactly ONE drain round ran the hard-DoD block — got ${rowsAfter} (80 before this fix)`);
-  assert.equal(drain.p.currentPhase, 1, "cursor unmoved — a hard stop advances nothing");
+  assert.equal(rowsAfter, 1, `exactly ONE drain round ran the hard-DoD block â€” got ${rowsAfter} (80 before this fix)`);
+  assert.equal(drain.p.currentPhase, 1, "cursor unmoved â€” a hard stop advances nothing");
   assert.equal(drain.approved.length, 0, "no gate was approved on the way out");
 });
 
 test("342-2: drainPipeline threads researchLive to the research phase (keyless free search)", async () => {
   // The post-journey drain used to pass keyed:false only, so P7's live research
   // never ran (the harness gap). researchLive drives the KEYLESS bare-Node
-  // overlay for research phases without keying the P8–P12 narratives.
+  // overlay for research phases without keying the P8â€“P12 narratives.
   const savedKey = process.env.DEEPSEEK_API_KEY;
   const real = globalThis.fetch;
   const calls = [];
@@ -820,7 +823,7 @@ test("342-2: drainPipeline threads researchLive to the research phase (keyless f
       // The fixture must be ON-TOPIC for the project: W61 C9's relevance filter
       // (engine.filterRelevantResearch, applied by the headless overlay) drops a
       // result that shares no content term with the phase intent, the domain or
-      // the project's vocabulary — the old "breakout paddle physics" snippet was
+      // the project's vocabulary â€” the old "breakout paddle physics" snippet was
       // such a result and was correctly filtered out, which made this threading
       // test assert on an empty corpus.
       const target = encodeURIComponent("https://example.com/notes-app-research");
@@ -857,7 +860,7 @@ test("342-2: drainPipeline threads researchLive to the research phase (keyless f
       `no LLM/other network call (saw: ${calls.join(", ")})`,
     );
     const without = await drainPipeline(p7Ready(), {});
-    assert.equal(without.p.research?.length ?? 0, 0, "the default drain stays keyless — byte-identical");
+    assert.equal(without.p.research?.length ?? 0, 0, "the default drain stays keyless â€” byte-identical");
   } finally {
     globalThis.fetch = real;
     if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -866,8 +869,8 @@ test("342-2: drainPipeline threads researchLive to the research phase (keyless f
 });
 
 // ---------------------------------------------------------------------------
-// (e) OV-35 (fixes/244, W16-L1) — the Step-0 preflight: OV-27 reachability +
-// failure-class triage + kill-safety run marker. The three clauses `235` §2
+// (e) OV-35 (fixes/244, W16-L1) â€” the Step-0 preflight: OV-27 reachability +
+// failure-class triage + kill-safety run marker. The three clauses `235` Â§2
 // row 3 names as unasserted are pinned here: (a) marker ORDERING (before entry
 // 1), (b) one distinct coded output per preflight class (stubbed 401/402/400),
 // (c) the keyless path writes nothing new.
@@ -891,7 +894,7 @@ test("OV-35: the run-start marker is written before the first corpus entry", asy
     for (const s of seen) {
       assert.ok(s.marker, `${s.slug}: the marker must exist BEFORE the entry runs (ordering, not existence)`);
       assert.equal(s.marker.mode, "keyed");
-      assert.equal(s.marker.finishedAt, null, "the marker is UNFINISHED while entries run — a kill at any point leaves it so");
+      assert.equal(s.marker.finishedAt, null, "the marker is UNFINISHED while entries run â€” a kill at any point leaves it so");
       assert.equal(s.marker.done, false);
       assert.equal(typeof s.marker.startedAt, "string");
       assert.ok(!Number.isNaN(Date.parse(s.marker.startedAt)), "startedAt is a parseable timestamp");
@@ -919,7 +922,7 @@ test("OV-35: preflight maps not-configured/401/402/400 to distinct coded output"
     ],
     [
       // W24/B2 (fixes/263): W23-L1 gave the vendor's balance class its OWN
-      // class+code (`RT_E_LLM_NO_BALANCE` — never the session budget
+      // class+code (`RT_E_LLM_NO_BALANCE` â€” never the session budget
       // `RT_E_BUDGET_EXHAUSTED`) and the fundedness verdict reads
       // `class === "no-balance"`; this pin was left on the pre-W23-L1 names and
       // was RED at HEAD.
@@ -945,7 +948,7 @@ test("OV-35: preflight maps not-configured/401/402/400 to distinct coded output"
     assert.ok(Object.keys(ERROR_CODE_DOC).includes(c.code), `${c.code} must be a real registry code (errors.ts)`);
   }
   assert.equal(classes.size, 4, "the four demanded endings are CLASS-distinct");
-  assert.equal(codes.size, 4, "the four demanded endings are CODE-distinct (235 §2 row 3)");
+  assert.equal(codes.size, 4, "the four demanded endings are CODE-distinct (235 Â§2 row 3)");
   // The request-rejected detail names the requested model id (D1.4's drift question):
   assert.match(classifyLlmPreflight(cases[3][0]).detail, /deepseek-v4-flash/);
   // The remaining endings classify too (no silent fallthrough):
@@ -954,7 +957,7 @@ test("OV-35: preflight maps not-configured/401/402/400 to distinct coded output"
   assert.equal(classifyLlmPreflight({ configured: true, wire: null }).class, "configured-unprobed");
   assert.equal(classifyLlmPreflight({ configured: true, wire: { attempted: true, ok: true, httpStatus: 200, model: "deepseek-v4-flash" } }).class, "wire-ok");
   const ok = classifyLlmPreflight({ configured: true, wire: { attempted: true, ok: true, httpStatus: 200 } });
-  assert.equal(ok.code, null, "wire-ok is not a failure — no code");
+  assert.equal(ok.code, null, "wire-ok is not a failure â€” no code");
   assert.equal(ok.ok, true);
 });
 
@@ -978,7 +981,7 @@ test("OV-35: a keyless run writes no run-start marker and adds no fields to resu
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  // The persisted summary schema is pinned by key set — no new fields may appear:
+  // The persisted summary schema is pinned by key set â€” no new fields may appear:
   assert.deepEqual(
     Object.keys(buildSummary([])).sort(),
     ["cases", "flakyCases", "graderLeaks", "passAtK", "skipped", "skips", "trials"],
@@ -986,7 +989,7 @@ test("OV-35: a keyless run writes no run-start marker and adds no fields to resu
   );
 });
 
-test("OV-35: a ≤4/9 outcome is routed to the named branch", () => {
+test("OV-35: a â‰¤4/9 outcome is routed to the named branch", () => {
   const low = keyedRunDecision({ mode: "keyed", meanOfNine: 3.5 });
   assert.equal(low.branch, "retrace-first");
   assert.ok(low.line, "the retrace-first branch must carry its line");
@@ -1002,13 +1005,13 @@ test("OV-35: a ≤4/9 outcome is routed to the named branch", () => {
   assert.equal(high.branch, "above-prediction");
   const keyless = keyedRunDecision({ mode: "keyless", meanOfNine: 6 });
   assert.equal(keyless.branch, "n/a");
-  assert.equal(keyless.line, null, "the rule is keyed-only — keyless stays byte-identical (no line)");
+  assert.equal(keyless.line, null, "the rule is keyed-only â€” keyless stays byte-identical (no line)");
   const nan = keyedRunDecision({ mode: "keyed", meanOfNine: Number.NaN });
   assert.equal(nan.branch, "no-score");
 });
 
 test("OV-35: every drain ending and all seven RunOutcome values classify to a coded class", () => {
-  // All seven RunOutcome values (headless.ts:527) — none may be silent:
+  // All seven RunOutcome values (headless.ts:527) â€” none may be silent:
   const outcomes = ["hitl", "complete", "blocked", "error", "progress", "cap", "dod"];
   assert.deepEqual(Object.keys(RUN_OUTCOME_CLASSES).sort(), [...outcomes].sort(), "exactly the seven RunOutcome values are classified");
   for (const o of outcomes) {
@@ -1025,7 +1028,7 @@ test("OV-35: every drain ending and all seven RunOutcome values classify to a co
   const capStall = classifyDrainEnding({ position: "stalled", outcome: "progress", code: "RT_E_BUDGET_EXHAUSTED" });
   assert.equal(capStall.class, "iteration-budget-exhausted");
   assert.equal(capStall.code, "RT_E_BUDGET_EXHAUSTED");
-  // An uncoded stall can never be silent either — it reports the emitter bug:
+  // An uncoded stall can never be silent either â€” it reports the emitter bug:
   const uncoded = classifyDrainEnding({ position: "stalled", outcome: null, code: null });
   assert.equal(uncoded.class, "stalled-uncoded");
   assert.equal(uncoded.code, "RT_E_UNKNOWN");
@@ -1048,7 +1051,7 @@ test("OV-35: a real unapprovable gate ends the drain as a CODED stall, never a s
     brief: "Build a small notes app with add/list/search and its own tests.",
     name: "GateStall",
   });
-  // Park GENUINELY on a stock HITL gate (P4 — `autopilot:false` stops there),
+  // Park GENUINELY on a stock HITL gate (P4 â€” `autopilot:false` stops there),
   // then make it forceHuman: the drain's machine-seat approve() refuses it,
   // which is exactly the approve-throw stall branch (was uncoded before OV-35).
   const pre = await runUntilGate(p0, { autopilot: false, maxSteps: 60 });
@@ -1067,7 +1070,7 @@ test("OV-35: the reachability probe loads the P6 separate specifiers and classif
   const before = process.env.DEEPSEEK_API_KEY;
   process.env.DEEPSEEK_API_KEY = "dummy-key-for-probe-test";
   try {
-    // 401 stub: the vendor answers, the key is refused — NO network in tests.
+    // 401 stub: the vendor answers, the key is refused â€” NO network in tests.
     let calls401 = 0;
     const stub401 = async () => {
       calls401 += 1;
@@ -1108,11 +1111,11 @@ test("OV-35: the reachability probe loads the P6 separate specifiers and classif
     assert.ok(probe2.wire, "the 200 probe must record its wire attempt");
     assert.equal(probe2.wire.httpStatus, 200);
     assert.equal(probe2.wire.model, "deepseek-v4-flash");
-    // wire:false → configured but UNPROBED (never a silent pass):
+    // wire:false â†’ configured but UNPROBED (never a silent pass):
     const unprobed = await probeP6Reachability({ wire: false });
     assert.equal(unprobed.class, "configured-unprobed");
     assert.equal(unprobed.wire, null);
-    // No key → not-configured, wire skipped entirely:
+    // No key â†’ not-configured, wire skipped entirely:
     delete process.env.DEEPSEEK_API_KEY;
     const keyless = await probeP6Reachability({});
     assert.equal(keyless.configured, false);
@@ -1139,7 +1142,7 @@ test("OV-35: an unfinished marker marks a killed run (the stale results.json can
     assert.equal(state.state, "unfinished");
     assert.ok(state.note && /results\.json/.test(state.note), "the read states what cannot be trusted");
     assert.ok(/killed/.test(state.note));
-    // The stale file is still on disk (the kill cannot remove it) — the marker
+    // The stale file is still on disk (the kill cannot remove it) â€” the marker
     // is the only signal that separates it from THIS run's result:
     const stale = JSON.parse(readFileSync(join(dir, "results.json"), "utf8"));
     assert.ok(stale.generatedAt < readRunMarker(dir).startedAt, "the stale file PREDATES the killed run");
@@ -1157,31 +1160,31 @@ test("OV-35: an unfinished marker marks a killed run (the stale results.json can
 });
 
 // ---------------------------------------------------------------------------
-// (e) OV-7 (W19-L4) — corpus spread + grader FREEZE + the brief leak scan.
+// (e) OV-7 (W19-L4) â€” corpus spread + grader FREEZE + the brief leak scan.
 //
-// The row's done-when: "M7 measurable across ≥2 domains; graders frozen and
+// The row's done-when: "M7 measurable across â‰¥2 domains; graders frozen and
 // leak-scanned". These pins hold the three halves without running the (slow)
 // eval pipeline; the row's own evidence run (`npm run eval -- --trials=2`) is
 // the integration proof and lives in fixes/252_lane4_ov7.md.
 // ---------------------------------------------------------------------------
 
-test("OV-7: the corpus spans ≥2 domains and ≥2 of them carry ≥2 fixtures (a citable same-domain peer)", () => {
+test("OV-7: the corpus spans â‰¥2 domains and â‰¥2 of them carry â‰¥2 fixtures (a citable same-domain peer)", () => {
   const found = listCorpusEntries();
   const entries = found.filter((f) => f.entry !== null).map((f) => f.entry);
   assert.ok(entries.length >= 7, `expected the seven corpus fixtures, saw ${entries.length}`);
   const index = corpusDomainIndex(entries);
   const domains = Object.keys(index);
-  assert.ok(domains.length >= 2, `the corpus must span ≥2 domains, saw ${domains.length}: ${domains.join(", ")}`);
+  assert.ok(domains.length >= 2, `the corpus must span â‰¥2 domains, saw ${domains.length}: ${domains.join(", ")}`);
   const multi = domains.filter((d) => index[d].length >= 2);
   assert.ok(
     multi.length >= 2,
-    `expected ≥2 domains with ≥2 fixtures (the OV-7 expansion), saw ${multi.length}: ${JSON.stringify(index)}`,
+    `expected â‰¥2 domains with â‰¥2 fixtures (the OV-7 expansion), saw ${multi.length}: ${JSON.stringify(index)}`,
   );
   // The domain the expansion targeted: construction had exactly one fixture
   // before this lane; its peer is permit-inspection-tracker.
   assert.ok((index.construction ?? []).length >= 2, `construction needs its second fixture: ${JSON.stringify(index.construction ?? [])}`);
   assert.ok((index["real-estate"] ?? []).length >= 2, `real-estate keeps its fixture set: ${JSON.stringify(index["real-estate"] ?? [])}`);
-  // Trap guard (230 §OV-7): a domain's second fixture must not duplicate a brief.
+  // Trap guard (230 Â§OV-7): a domain's second fixture must not duplicate a brief.
   for (const d of multi) {
     const briefs = index[d].map((slug) => entries.find((e) => e.slug === slug)?.brief.trim() ?? "");
     assert.ok(briefs.every((b) => b.length > 0), `${d}: every fixture must carry a brief`);
@@ -1191,16 +1194,16 @@ test("OV-7: the corpus spans ≥2 domains and ≥2 of them carry ≥2 fixtures (
 
 // ---------------------------------------------------------------------------
 // FIX-2b (W44 window #4; D3's LEX root cause, fixes/321_d3_keyed_eval.md
-// :159-176) — the arcade-breakout fixture brief must HIT the LEX register.
-// The pre-rewrite brief scored 0 LEX hits → `lattice.vague:true` → scorecard
-// `reframe:true` → P0 forceHuman park → the eval's autopilot seat honestly
+// :159-176) â€” the arcade-breakout fixture brief must HIT the LEX register.
+// The pre-rewrite brief scored 0 LEX hits â†’ `lattice.vague:true` â†’ scorecard
+// `reframe:true` â†’ P0 forceHuman park â†’ the eval's autopilot seat honestly
 // stalled (llmCalls 0). The rewritten brief keeps the SAME game intent and
 // was proven KEYLESS (create + wild --start --steps 1, deterministic P0:
-// C:/Users/mnril/f2b_probe/lexprobe323.sh → outcome:"advanced", vague:false,
+// C:/Users/mnril/f2b_probe/lexprobe323.sh â†’ outcome:"advanced", vague:false,
 // verdict:"proceed", 0 reframe rows). This pin holds the LATTICE half
 // mechanically through the driver's own corpus loader + the engine's own
 // `intentLattice` (no second parser, no brief copy): a future edit that drops
-// the LEX vocabulary — or silently drops the game nouns — turns THIS red
+// the LEX vocabulary â€” or silently drops the game nouns â€” turns THIS red
 // before any keyed run spends a token on the guaranteed reframe park.
 // ---------------------------------------------------------------------------
 test("FIX-2b: the arcade-breakout fixture brief hits the LEX register (non-vague lattice) and keeps the game intent", () => {
@@ -1211,18 +1214,18 @@ test("FIX-2b: the arcade-breakout fixture brief hits the LEX register (non-vague
   assert.equal(
     lat.vague,
     false,
-    `0 LEX hits ⇒ vague ⇒ scorecard reframe ⇒ P0 forceHuman park (the reframe the rewrite closes). jobs=${JSON.stringify(lat.jobs)} entities=${JSON.stringify(lat.entities)}`,
+    `0 LEX hits â‡’ vague â‡’ scorecard reframe â‡’ P0 forceHuman park (the reframe the rewrite closes). jobs=${JSON.stringify(lat.jobs)} entities=${JSON.stringify(lat.entities)}`,
   );
   for (const job of ["drag", "track", "persist"]) {
     assert.ok(lat.jobs.includes(job), `the brief must register LEX job \`${job}\`: ${JSON.stringify(lat.jobs)}`);
   }
   assert.ok(lat.entities.includes("player"), `the brief must register LEX actor \`player\`: ${JSON.stringify(lat.entities)}`);
-  // Intent guard: the LEX rewrite is additive vocabulary — every original game
+  // Intent guard: the LEX rewrite is additive vocabulary â€” every original game
   // noun the grader's identifiers/capabilities line back to stays present.
   for (const noun of ["paddle", "ball", "brick", "level", "speed", "score", "keyboard", "pause", "resume", "win", "lose", "canvas"]) {
     assert.ok(
       entry.brief.toLowerCase().includes(noun),
-      `the rewrite must keep the original game intent — \`${noun}\` missing from: ${entry.brief}`,
+      `the rewrite must keep the original game intent â€” \`${noun}\` missing from: ${entry.brief}`,
     );
   }
   assert.equal(entry.kind, "game", "the declared kind stays `game` (the run-side grader's expectedKind)");
@@ -1237,7 +1240,7 @@ test("OV-7: the agent-facing brief carries no grader text (real corpus) and a pl
     assert.equal(scan.leaked, false, `${entry.slug}: agent-facing brief carries grader text: ${JSON.stringify(scan.hits)}`);
     assert.deepEqual(scan.fields, ["brief", "name"], "the agent-facing surface is exactly brief + name (what createProject receives)");
   }
-  // Control: a scan that cannot fail is not a scan — bake the bar into a
+  // Control: a scan that cannot fail is not a scan â€” bake the bar into a
   // synthetic brief and it MUST be flagged (the playbook's named trap).
   const g = loadGrader("permit-inspection-tracker");
   assert.ok(g.ok, "the control grader must load");
@@ -1255,7 +1258,7 @@ test("OV-7: the agent-facing brief carries no grader text (real corpus) and a pl
   assert.equal(clean.leaked, false);
 });
 
-test("OV-7: grader freeze — an untouched grader verifies ok; a mid-run edit is caught and named", () => {
+test("OV-7: grader freeze â€” an untouched grader verifies ok; a mid-run edit is caught and named", () => {
   const dir = tempDir("freeze");
   try {
     const path = join(dir, "frozen.grader.json");
@@ -1270,10 +1273,10 @@ test("OV-7: grader freeze — an untouched grader verifies ok; a mid-run edit is
     assert.equal(fp.readable, true);
     assert.equal(typeof fp.hash, "string");
     assert.equal(fp.bytes, text.length);
-    // Unchanged since the fingerprint → the run is gradeable:
+    // Unchanged since the fingerprint â†’ the run is gradeable:
     const ok = verifyGraderFreeze([fp]);
     assert.deepEqual(ok, { checked: 1, ok: true, changed: [] });
-    // Edited mid-run (the bar is weakened by one word) → flagged with slug + hashes:
+    // Edited mid-run (the bar is weakened by one word) â†’ flagged with slug + hashes:
     writeFileSync(path, text.replace("original", "softened!!"), "utf8");
     const moved = verifyGraderFreeze([fp]);
     assert.equal(moved.ok, false);
@@ -1281,7 +1284,7 @@ test("OV-7: grader freeze — an untouched grader verifies ok; a mid-run edit is
     assert.equal(moved.changed[0].slug, "frozen");
     assert.equal(moved.changed[0].reason, "bytes-changed-mid-run");
     assert.notEqual(moved.changed[0].hashAtStart, moved.changed[0].hashNow);
-    // Deleted mid-run → flagged as unreadable, never a throw:
+    // Deleted mid-run â†’ flagged as unreadable, never a throw:
     rmSync(path);
     const gone = verifyGraderFreeze([fp]);
     assert.equal(gone.ok, false);
@@ -1307,16 +1310,16 @@ test("OV-7: the driver resolves each grader exactly once, at plan time (freeze b
       grader: { slug, acceptanceBar: "bar", requiredIdentifiers: [], requiredCapabilities: [] },
     };
   });
-  assert.equal(calls, entries.length, "one resolution per entry — the plan is the only load site");
+  assert.equal(calls, entries.length, "one resolution per entry â€” the plan is the only load site");
   assert.equal(plan.targets.length, 3);
   assert.deepEqual(plan.skips, [], "every case with a grader is a target");
   for (const t of plan.targets) {
     assert.equal(t.grader.slug, t.entry.slug, "each target carries the PLAN-TIME grader object");
-    assert.equal(typeof t.graderPath, "string", "the path rides the target — for the freeze fingerprint only");
+    assert.equal(typeof t.graderPath, "string", "the path rides the target â€” for the freeze fingerprint only");
   }
 });
 
-test("OV-7: M7 prior resolution — rows resolve per slug across domains; a first run is honestly null", () => {
+test("OV-7: M7 prior resolution â€” rows resolve per slug across domains; a first run is honestly null", () => {
   const dir = tempDir("m7-history");
   try {
     const historyPath = join(dir, "history.json");
@@ -1328,10 +1331,10 @@ test("OV-7: M7 prior resolution — rows resolve per slug across domains; a firs
       ]),
       "utf8",
     );
-    // Two domains, both resolvable — the prior exists in each:
+    // Two domains, both resolvable â€” the prior exists in each:
     assert.deepEqual(priorFor("real-estate-crm", historyPath), { m1: 0, m2: 1, m3: 0 });
     assert.deepEqual(priorFor("field-ops-suite", historyPath), { m1: 0, m2: 0, m3: 0 });
-    // A slug with no rows is null — "no prior same-domain run", never a fabricated 0/0/0:
+    // A slug with no rows is null â€” "no prior same-domain run", never a fabricated 0/0/0:
     assert.equal(priorFor("permit-inspection-tracker", historyPath), null);
     // The LAST recorded row wins (run #3 cites run #2, not run #1):
     writeFileSync(
@@ -1351,7 +1354,7 @@ test("OV-7: M7 prior resolution — rows resolve per slug across domains; a firs
 });
 
 // ---------------------------------------------------------------------------
-// W24/B2 (fixes/263_lane2_periphery_bughunt.md) — the W23-L1 eval wires.
+// W24/B2 (fixes/263_lane2_periphery_bughunt.md) â€” the W23-L1 eval wires.
 // Every fetch below is STUBBED: no request leaves the process, no keyed call.
 // ---------------------------------------------------------------------------
 
@@ -1359,14 +1362,14 @@ test("OV-7: M7 prior resolution — rows resolve per slug across domains; a firs
  *  network: each provider call injects its own `fetch`. */
 const W24_B2_DUMMY_KEY = "w24-b2-dummy-not-a-real-key";
 
-test("W24/B2 — a THROWING tap never breaks the call it observes (deepseek.ts tapLlmCall)", async () => {
+test("W24/B2 â€” a THROWING tap never breaks the call it observes (deepseek.ts tapLlmCall)", async () => {
   const ds = await import("../src/lib/deepseek.server.ts");
   const savedKey = process.env.DEEPSEEK_API_KEY;
   // Keyless: the honest not-configured refusal still dispatches the tap, so the
   // guard is provable without any key, fetch or network.
   delete process.env.DEEPSEEK_API_KEY;
   ds.setLlmCallTap(() => {
-    throw new Error("hostile tap — must never reach the caller");
+    throw new Error("hostile tap â€” must never reach the caller");
   });
   try {
     const res = await ds.completeDeepSeek("w24/b2 hostile tap");
@@ -1379,15 +1382,15 @@ test("W24/B2 — a THROWING tap never breaks the call it observes (deepseek.ts t
   }
 });
 
-test("W24/B2 — the provider call tap is WIRED: install → window → live record → folded evidence", async () => {
+test("W24/B2 â€” the provider call tap is WIRED: install â†’ window â†’ live record â†’ folded evidence", async () => {
   const ds = await import("../src/lib/deepseek.server.ts");
   const savedKey = process.env.DEEPSEEK_API_KEY;
   process.env.DEEPSEEK_API_KEY = W24_B2_DUMMY_KEY;
   try {
-    // The driver's install must succeed against the real provider surface…
+    // The driver's install must succeed against the real provider surfaceâ€¦
     assert.equal(await installLlmCallTap(), true, "the provider module must expose setLlmCallTap");
     assert.equal(llmCallTapIsInstalled(), true);
-    // …and the SAME module instance the keyed leg calls must then be observed.
+    // â€¦and the SAME module instance the keyed leg calls must then be observed.
     beginTrialCallTap();
     const bodies = [];
     const res = await ds.completeDeepSeek("w24/b2 tap wire", {
@@ -1406,7 +1409,7 @@ test("W24/B2 — the provider call tap is WIRED: install → window → live rec
         );
       },
     });
-    assert.equal(bodies.length, 1, "the stubbed fetch is the only transport — no network");
+    assert.equal(bodies.length, 1, "the stubbed fetch is the only transport â€” no network");
     assert.equal(res.ok, true);
     const records = endTrialCallTap();
     assert.equal(records.length, 1, "the installed tap must observe the call inside its window");
@@ -1428,7 +1431,7 @@ test("W24/B2 — the provider call tap is WIRED: install → window → live rec
     beginTrialCallTap();
     assert.deepEqual(endTrialCallTap(), []);
     const none = llmEvidenceFromCallRecords([]);
-    assert.ok(none, "an empty window must still fold (the tap observed nothing — never null)");
+    assert.ok(none, "an empty window must still fold (the tap observed nothing â€” never null)");
     assert.equal(none.llmCalls, 0);
     assert.match(none.costBasis, /OBSERVED no calls/, "an empty window must not claim 'nothing billed'");
   } finally {
@@ -1437,13 +1440,13 @@ test("W24/B2 — the provider call tap is WIRED: install → window → live rec
   }
 });
 
-test("W43/A5 — the cache fold (M4-09): split tap record → usage.cachedPromptTokens; legacy → key absent", async () => {
+test("W43/A5 â€” the cache fold (M4-09): split tap record â†’ usage.cachedPromptTokens; legacy â†’ key absent", async () => {
   const ds = await import("../src/lib/deepseek.server.ts");
   const savedKey = process.env.DEEPSEEK_API_KEY;
   process.env.DEEPSEEK_API_KEY = W24_B2_DUMMY_KEY;
   try {
     assert.equal(await installLlmCallTap(), true);
-    // (a) the vendor response carries DeepSeek's exact cache-split keys → the
+    // (a) the vendor response carries DeepSeek's exact cache-split keys â†’ the
     // tap record AND the folded row usage both surface the measured read.
     beginTrialCallTap();
     const split = await ds.completeDeepSeek("w43/a5 cache split", {
@@ -1475,7 +1478,7 @@ test("W43/A5 — the cache fold (M4-09): split tap record → usage.cachedPrompt
     assert.equal(splitEv.usage.promptTokens, 11, "the fold still measures the prompt total");
     assert.equal(splitEv.usage.totalTokens, 14);
     assert.equal(splitEv.usage.cachedPromptTokens, 9, "the read-side fold surfaces cache reads to the row");
-    // (b) a legacy response with no cache keys → the key stays ABSENT
+    // (b) a legacy response with no cache keys â†’ the key stays ABSENT
     // end-to-end (no fabricated 0; record and folded usage keep the legacy shape).
     beginTrialCallTap();
     const legacy = await ds.completeDeepSeek("w43/a5 legacy", {
@@ -1494,10 +1497,10 @@ test("W43/A5 — the cache fold (M4-09): split tap record → usage.cachedPrompt
     });
     assert.equal(legacy.ok, true);
     const legacyRecords = endTrialCallTap();
-    assert.equal("cachedPromptTokens" in legacyRecords[0], false, "no measured split → no record key");
+    assert.equal("cachedPromptTokens" in legacyRecords[0], false, "no measured split â†’ no record key");
     const legacyEv = llmEvidenceFromCallRecords(legacyRecords);
     assert.ok(legacyEv, "the legacy window must fold to evidence");
-    assert.equal("cachedPromptTokens" in legacyEv.usage, false, "absent stays absent — never a fabricated 0");
+    assert.equal("cachedPromptTokens" in legacyEv.usage, false, "absent stays absent â€” never a fabricated 0");
     // (c) a non-number cache field is not a report (hostile-shape fold guard).
     const hostileEv = llmEvidenceFromCallRecords([
       { ok: true, promptTokens: 5, completionTokens: 2, cachedPromptTokens: "9" },
@@ -1510,10 +1513,10 @@ test("W43/A5 — the cache fold (M4-09): split tap record → usage.cachedPrompt
   }
 });
 
-test("W24/B2 — probeFundedness: 402 ⇒ funded:false · answered 200 ⇒ funded:true · keyless ⇒ unaskable", async () => {
+test("W24/B2 â€” probeFundedness: 402 â‡’ funded:false Â· answered 200 â‡’ funded:true Â· keyless â‡’ unaskable", async () => {
   const savedKey = process.env.DEEPSEEK_API_KEY;
   try {
-    // (a) keyless — unaskable by construction, ZERO network I/O.
+    // (a) keyless â€” unaskable by construction, ZERO network I/O.
     delete process.env.DEEPSEEK_API_KEY;
     let keylessFetches = 0;
     const off = await probeFundedness({
@@ -1525,10 +1528,10 @@ test("W24/B2 — probeFundedness: 402 ⇒ funded:false · answered 200 ⇒ funde
     assert.equal(keylessFetches, 0);
     assert.equal(off.configured, false);
     assert.equal(off.attempted, false);
-    assert.equal(off.funded, null, "keyless is neither funded nor unfunded — it is unaskable");
+    assert.equal(off.funded, null, "keyless is neither funded nor unfunded â€” it is unaskable");
     assert.equal(off.code, "RT_E_LLM_NOT_CONFIGURED");
 
-    // (b) dummy key + HTTP 402 ⇒ funded:false, ONE attempt, cheapest call.
+    // (b) dummy key + HTTP 402 â‡’ funded:false, ONE attempt, cheapest call.
     process.env.DEEPSEEK_API_KEY = W24_B2_DUMMY_KEY;
     const bodies = [];
     const p402 = await probeFundedness({
@@ -1540,7 +1543,7 @@ test("W24/B2 — probeFundedness: 402 ⇒ funded:false · answered 200 ⇒ funde
         });
       },
     });
-    assert.equal(bodies.length, 1, "402 is not retryable — exactly one attempt");
+    assert.equal(bodies.length, 1, "402 is not retryable â€” exactly one attempt");
     assert.equal(bodies[0].max_tokens, 1, "the probe must be the cheapest possible call");
     assert.equal(p402.funded, false, "a broke wallet stops the scored trials");
     assert.equal(p402.class, "no-balance");
@@ -1551,7 +1554,7 @@ test("W24/B2 — probeFundedness: 402 ⇒ funded:false · answered 200 ⇒ funde
     assert.ok(lines.some((l) => l.includes("funded=false")));
     assert.ok(lines.some((l) => l.includes("NO-BALANCE")), "the ONE renderer must name the stop");
 
-    // (c) an ANSWERED 200 whose 1-token window truncates to empty content ⇒
+    // (c) an ANSWERED 200 whose 1-token window truncates to empty content â‡’
     //     funded:true (the account paid). This pins the classify ladder fix:
     //     before it, the 200 status hit the generic `status !== null` branch and
     //     `empty-completion` was unreachable whenever a status was recorded.
@@ -1566,14 +1569,14 @@ test("W24/B2 — probeFundedness: 402 ⇒ funded:false · answered 200 ⇒ funde
         ),
     });
     assert.equal(p200.class, "empty-completion");
-    assert.equal(p200.funded, true, "an answered 200 means the account paid — never read as a refusal");
+    assert.equal(p200.funded, true, "an answered 200 means the account paid â€” never read as a refusal");
   } finally {
     if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
     else process.env.DEEPSEEK_API_KEY = savedKey;
   }
 });
 
-test("W24/B2 — WIRING GUARD: the tap install, the fold gate, the fundedness renderer and its skip row stay wired", () => {
+test("W24/B2 â€” WIRING GUARD: the tap install, the fold gate, the fundedness renderer and its skip row stay wired", () => {
   // These four seams are only observable in a LIVE keyed run (impossible here:
   // the account is unfunded), so the regression guard is their call sites in
   // the driver source. A future edit that re-orphans any of them goes red.
@@ -1590,7 +1593,7 @@ test("W24/B2 — WIRING GUARD: the tap install, the fold gate, the fundedness re
   );
   assert.match(src, /for \(const line of formatFundednessLines\(fundedness\)\) console\.log\(line\);/);
   assert.match(src, /kind: "account-unfunded"/, "the fundedness stop must record a skip row (it claimed to)");
-  // …and the shape it pushes is the one the summary records verbatim:
+  // â€¦and the shape it pushes is the one the summary records verbatim:
   const summary = buildSummary([], [
     { slug: null, kind: "account-unfunded", reason: "fundedness probe stopped the run: (RT_E_LLM_NO_BALANCE)" },
   ]);
@@ -1599,21 +1602,21 @@ test("W24/B2 — WIRING GUARD: the tap install, the fold gate, the fundedness re
 });
 
 // ---------------------------------------------------------------------------
-// W42·L1-E3 — the missing pins (U1 + Q4-b/c): the run-side evaluators that
+// W42Â·L1-E3 â€” the missing pins (U1 + Q4-b/c): the run-side evaluators that
 // carried NO test coverage before this wave (`git show 4af061a --stat` has no
 // test-file pin; `grep -l "entry-runs|evaluateEntryRunsRow|checkExpectedBehavior"
 // scripts/run-eval.test.mjs` was 0 hits). All keyless, all bounded:
 //   (1) evaluateEntryRunsRow REAL evaluation, driven through the exported
 //       checkExpectedBehavior / checkAcceptance seams: temp JS entries are
-//       spawned for real — exit 0 within budget passes; exit 1 fails and the
+//       spawned for real â€” exit 0 within budget passes; exit 1 fails and the
 //       row's detail carries the exit code;
 //   (2) acceptanceFailReason rides the failed row's own coded detail
-//       (≤120 chars — a noisy child cannot bloat the record);
+//       (â‰¤120 chars â€” a noisy child cannot bloat the record);
 //   (3) historyEndClass tri-state (funded / unfunded / unmeasured);
 //   (4) WIRING GUARD for E-1 (entries rows + crash row carry endClass).
 // ---------------------------------------------------------------------------
 
-/** Minimal grader for the behavior seams — only `expectedBehavior` matters. */
+/** Minimal grader for the behavior seams â€” only `expectedBehavior` matters. */
 function behaviorGrader(rows) {
   return {
     passWhen: {
@@ -1628,7 +1631,7 @@ function behaviorGrader(rows) {
   };
 }
 
-test("L1-E3(1) — evaluateEntryRunsRow REALLY runs the emitted entry: exit-0 passes, exit-1 fails with the coded detail", () => {
+test("L1-E3(1) â€” evaluateEntryRunsRow REALLY runs the emitted entry: exit-0 passes, exit-1 fails with the coded detail", () => {
   const dir = mkdtempSync(join(tmpdir(), "run-eval-entryruns-"));
   try {
     writeFileSync(join(dir, "ok-entry.mjs"), "console.log('entry ran');\nprocess.exit(0);\n", "utf8");
@@ -1645,16 +1648,16 @@ test("L1-E3(1) — evaluateEntryRunsRow REALLY runs the emitted entry: exit-0 pa
     const okRow = behavior.rows.find((r) => r.id === "e-ok");
     const badRow = behavior.rows.find((r) => r.id === "e-bad");
     assert.ok(okRow, "the passing row must be present");
-    assert.equal(okRow.status, "pass", "an exit-0 entry within budget passes — a REAL bounded spawn, not a structural skip");
+    assert.equal(okRow.status, "pass", "an exit-0 entry within budget passes â€” a REAL bounded spawn, not a structural skip");
     assert.match(okRow.detail, /exit 0 in \d+ms/);
     assert.ok(badRow, "the failing row must be present");
-    assert.equal(badRow.status, "fail", "a broken artifact FAILS the row — never a silent pass");
-    assert.match(badRow.detail, /exit 1 ≠ declared exit 0/);
+    assert.equal(badRow.status, "fail", "a broken artifact FAILS the row â€” never a silent pass");
+    assert.match(badRow.detail, /exit 1 â‰  declared exit 0/);
     assert.match(badRow.detail, /exec of broken-entry\.mjs/);
     assert.equal(behavior.ok, false);
 
-    // The same verdict rides the acceptance record — `behaviorOk:false`, the
-    // clause passesAcceptance ANDs — and the coded reason names the row's own
+    // The same verdict rides the acceptance record â€” `behaviorOk:false`, the
+    // clause passesAcceptance ANDs â€” and the coded reason names the row's own
     // exit code (Q4-b tail).
     const acceptance = checkAcceptance(grader, dir, files);
     assert.equal(acceptance.behaviorOk, false);
@@ -1668,7 +1671,7 @@ test("L1-E3(1) — evaluateEntryRunsRow REALLY runs the emitted entry: exit-0 pa
   }
 });
 
-test("L1-E3(2) — acceptanceFailReason carries the failed row's own coded detail, bounded at 120 chars", () => {
+test("L1-E3(2) â€” acceptanceFailReason carries the failed row's own coded detail, bounded at 120 chars", () => {
   const grader = {
     passWhen: {
       meanAtLeast: 1,
@@ -1682,7 +1685,7 @@ test("L1-E3(2) — acceptanceFailReason carries the failed row's own coded detai
     behaviorOk: false,
     behavior: {
       rows: [
-        { id: "r1", check: "entry-runs", entry: "cli.js", status: "fail", detail: "exit 7 ≠ declared exit 0 (exec of cli.js)" },
+        { id: "r1", check: "entry-runs", entry: "cli.js", status: "fail", detail: "exit 7 â‰  declared exit 0 (exec of cli.js)" },
       ],
     },
   };
@@ -1690,7 +1693,7 @@ test("L1-E3(2) — acceptanceFailReason carries the failed row's own coded detai
   assert.ok(reason, "the failed row must carry its reason");
   assert.match(reason, /expected behavior failed: r1/);
   assert.match(reason, /\(cli\.js\)/, "the row's location rides the reason");
-  assert.match(reason, /exit 7 ≠ declared exit 0/, "the row's OWN coded detail rides the reason (Q4-b tail)");
+  assert.match(reason, /exit 7 â‰  declared exit 0/, "the row's OWN coded detail rides the reason (Q4-b tail)");
 
   const huge = "X".repeat(500);
   const noisy = acceptanceFailReason(
@@ -1700,18 +1703,18 @@ test("L1-E3(2) — acceptanceFailReason carries the failed row's own coded detai
   );
   assert.ok(noisy, "a capped detail must still produce a reason");
   assert.ok(noisy.includes("X".repeat(120)), "the detail keeps its first 120 chars");
-  assert.ok(!noisy.includes("X".repeat(121)), "and is bounded at 120 — a noisy child cannot bloat the record");
+  assert.ok(!noisy.includes("X".repeat(121)), "and is bounded at 120 â€” a noisy child cannot bloat the record");
 });
 
-test("L1-E3(3) — historyEndClass tri-state: unfunded wins, funded needs a scored keyed verdict, else unmeasured", () => {
+test("L1-E3(3) â€” historyEndClass tri-state: unfunded wins, funded needs a scored keyed verdict, else unmeasured", () => {
   assert.equal(historyEndClass({ notes: { noBalance: true } }, "keyed"), "unfunded", "a broke wallet is never a measurement");
   assert.equal(historyEndClass({ notes: {}, acceptance: { pass: true } }, "keyed"), "funded");
   assert.equal(historyEndClass({ notes: {}, acceptance: { pass: false } }, "keyed"), "funded", "a scored FAIL is still a paid measurement");
-  assert.equal(historyEndClass({ notes: {}, acceptance: { pass: true } }, "keyless"), "unmeasured", "keyless is the floor — no wallet was involved");
-  assert.equal(historyEndClass({ notes: {} }, "keyed"), "unmeasured", "no verdict → unmeasured");
+  assert.equal(historyEndClass({ notes: {}, acceptance: { pass: true } }, "keyless"), "unmeasured", "keyless is the floor â€” no wallet was involved");
+  assert.equal(historyEndClass({ notes: {} }, "keyed"), "unmeasured", "no verdict â†’ unmeasured");
   assert.equal(historyEndClass({}, "keyed"), "unmeasured", "a row without acceptance/notes never throws");
   assert.equal(historyEndClass(null, "keyed"), "unmeasured", "a missing row never throws");
-  // E-1's seam: the class is computed from `acceptance` + `notes.noBalance` —
+  // E-1's seam: the class is computed from `acceptance` + `notes.noBalance` â€”
   // the two keys every entries row carries at classification time. A synthetic
   // entries-shaped row classifies exactly like the trial rows persist() records.
   const entryLike = { acceptance: { pass: false }, notes: { noBalance: false } };
@@ -1743,7 +1746,7 @@ function persistedRow(over = {}) {
   };
 }
 
-test("L1-E3(4) — the persisted history rows carry a REAL endClass (computed, never fabricated)", () => {
+test("L1-E3(4) â€” the persisted history rows carry a REAL endClass (computed, never fabricated)", () => {
   // B1-F10: the pre-fix leg matched two source lines. This calls the REAL
   // `persist()` writer against a scratch out-dir and reads what it wrote: the
   // history row's endClass is DERIVED from the row (a no-balance row is
@@ -1766,7 +1769,7 @@ test("L1-E3(4) — the persisted history rows carry a REAL endClass (computed, n
     assert.equal(results.entries.length, 2, "the entries array carries one entryRow per case");
     const history = JSON.parse(readFileSync(paths.historyPath, "utf8"));
     const byslug = Object.fromEntries(history.map((h) => [h.slug, h]));
-    assert.equal(byslug["scored"].endClass, "unfunded", "a no-balance row classes unfunded (the wallet refused — not a measurement)");
+    assert.equal(byslug["scored"].endClass, "unfunded", "a no-balance row classes unfunded (the wallet refused â€” not a measurement)");
     assert.equal(byslug["unscored"].endClass, "unmeasured", "an unscored keyless row classes unmeasured");
     for (const mode of ["keyed", "keyless"]) {
       assert.equal(historyEndClass({ notes: { error: "boom", trialsCrashed: true } }, mode), "unmeasured", `${mode}: the crash row is unmeasured`);
@@ -1777,10 +1780,10 @@ test("L1-E3(4) — the persisted history rows carry a REAL endClass (computed, n
 });
 
 // ---------------------------------------------------------------------------
-// W42·L1-E6 — run-eval hygiene cluster pins (atomic writes, bounded history).
+// W42Â·L1-E6 â€” run-eval hygiene cluster pins (atomic writes, bounded history).
 // ---------------------------------------------------------------------------
 
-test("L1-E6(a) — writeJsonAtomic: atomic replacement, no tmp leftovers, and a failed rename never clobbers the old target", () => {
+test("L1-E6(a) â€” writeJsonAtomic: atomic replacement, no tmp leftovers, and a failed rename never clobbers the old target", () => {
   const dir = mkdtempSync(join(tmpdir(), "run-eval-atomic-"));
   try {
     const target = join(dir, "out", "results.json");
@@ -1795,7 +1798,7 @@ test("L1-E6(a) — writeJsonAtomic: atomic replacement, no tmp leftovers, and a 
     assert.deepEqual(JSON.parse(readFileSync(target, "utf8")), { a: 2 }, "rename replaces the previous bytes");
 
     // Failed-rename path (no injection seam needed): rename(2) onto an existing
-    // directory fails (EPERM on this host; EISDIR/ENOTDIR elsewhere) — the OLD
+    // directory fails (EPERM on this host; EISDIR/ENOTDIR elsewhere) â€” the OLD
     // target must survive untouched (never truncated, never half-written).
     const blocked = join(dir, "blocked.json");
     mkdirSync(blocked);
@@ -1807,7 +1810,7 @@ test("L1-E6(a) — writeJsonAtomic: atomic replacement, no tmp leftovers, and a 
   }
 });
 
-test("L1-E6(b) — MAX_HISTORY_ROWS pins the append bound + the persist slice wiring", () => {
+test("L1-E6(b) â€” MAX_HISTORY_ROWS pins the append bound + the persist slice wiring", () => {
   assert.equal(MAX_HISTORY_ROWS, 200, "the bound is 200 rows");
   // Slice semantics: the NEWEST rows survive (this run's included) and the
   // kept count never exceeds the cap.
@@ -1816,7 +1819,7 @@ test("L1-E6(b) — MAX_HISTORY_ROWS pins the append bound + the persist slice wi
   assert.equal(kept.length, MAX_HISTORY_ROWS);
   assert.equal(kept[kept.length - 1], 259, "the newest (this run's) row is kept");
   assert.ok(!kept.includes(0), "the oldest rows are the ones dropped");
-  // B1-F10 — behavioural, via the REAL `persist()` writer: an over-long
+  // B1-F10 â€” behavioural, via the REAL `persist()` writer: an over-long
   // history is CAPPED at MAX_HISTORY_ROWS before the write, and neither write
   // leaves a `.tmp` behind (the atomic same-dir rename).
   const dir = mkdtempSync(join(tmpdir(), "run-eval-history-cap-"));
@@ -1832,7 +1835,7 @@ test("L1-E6(b) — MAX_HISTORY_ROWS pins the append bound + the persist slice wi
     assert.deepEqual(
       readdirSync(dir).filter((n) => n.endsWith(".tmp")),
       [],
-      "both writes are atomic — a failed/partial write would leave a .tmp",
+      "both writes are atomic â€” a failed/partial write would leave a .tmp",
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1840,12 +1843,12 @@ test("L1-E6(b) — MAX_HISTORY_ROWS pins the append bound + the persist slice wi
 });
 
 // ---------------------------------------------------------------------------
-// W44 · T5.4 (fixes/318_a1_oracle.md) — the eval driver's bounded run-level
+// W44 Â· T5.4 (fixes/318_a1_oracle.md) â€” the eval driver's bounded run-level
 // telemetry: catalogue-legal rows only (the guardrail refuses invented
 // names), host "cli", scope "eval-run", written where resolveLogDir points.
 // ---------------------------------------------------------------------------
 
-test("T5.4 — emitEvalRunRow writes catalogue-legal eval-run rows and refuses an invented name", () => {
+test("T5.4 â€” emitEvalRunRow writes catalogue-legal eval-run rows and refuses an invented name", () => {
   const dir = mkdtempSync(join(tmpdir(), "eval-rt-"));
   const saved = process.env.RAPIDTOOL_LOG_DIR;
   process.env.RAPIDTOOL_LOG_DIR = dir;
@@ -1854,7 +1857,7 @@ test("T5.4 — emitEvalRunRow writes catalogue-legal eval-run rows and refuses a
       level: "info",
       scope: "eval-run",
       event: "eval.run_start",
-      message: "t5.4 pin · start",
+      message: "t5.4 pin Â· start",
       capture: "run-eval.test.mjs:0",
       payload: { mode: "keyless", targets: 1 },
     });
@@ -1862,7 +1865,7 @@ test("T5.4 — emitEvalRunRow writes catalogue-legal eval-run rows and refuses a
     const file = join(dir, "rapidtool.ndjson");
     assert.ok(existsSync(file), "the legal row must land in resolveLogDir's file");
     const rows = readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
-    assert.equal(rows.length, 1, "exactly one row — the invented name is refused, never fabricated");
+    assert.equal(rows.length, 1, "exactly one row â€” the invented name is refused, never fabricated");
     assert.equal(rows[0].host, "cli", "host glue stamps cli");
     assert.equal(rows[0].scope, "eval-run", "the eval-run scope");
     assert.equal(rows[0].event, "eval.run_start");
@@ -1875,18 +1878,18 @@ test("T5.4 — emitEvalRunRow writes catalogue-legal eval-run rows and refuses a
   }
 });
 
-test("T5.4 wiring guard — the driver's bounded emit sites + the guardrail are in the source", () => {
+test("T5.4 wiring guard â€” the driver's bounded emit sites + the guardrail are in the source", () => {
   const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
   assert.match(src, /if \(!seed \|\| !isKnownRtEvent\(seed\.event\)\) return;/, "the emitter refuses unknown names");
   assert.match(src, /event: "eval\.run_start"/, "a run-start row");
   assert.match(src, /event: "eval\.run_end"/, "run-end rows (main + empty-corpus paths)");
   assert.match(src, /event: "eval\.run_error"/, "the top-catch crash row");
   const emits = src.match(/emitEvalRunRow\(\{/g) ?? [];
-  assert.equal(emits.length, 4, `the bounded set: start + end(main) + end(empty) + error — got ${emits.length}`);
+  assert.equal(emits.length, 4, `the bounded set: start + end(main) + end(empty) + error â€” got ${emits.length}`);
 });
 
 // ---------------------------------------------------------------------------
-// W44 A5 (fixes/325_a5_hunt.md B2) — the empty-corpus `results.json` writer
+// W44 A5 (fixes/325_a5_hunt.md B2) â€” the empty-corpus `results.json` writer
 // was a bare writeFileSync (truncate-then-write: a kill mid-write tears the
 // file) AND omitted the legacy `corpusDir` key that persist() always writes
 // and the scorecard reader reads (`src/lib/scorecard.ts:284`; the recording
@@ -1895,7 +1898,7 @@ test("T5.4 wiring guard — the driver's bounded emit sites + the guardrail are 
 // AND behaviorally: a REAL keyless empty-corpus spawn whose recorded shape
 // restores the legacy contract with no tmp residue beside the atomic write.
 // ---------------------------------------------------------------------------
-test("W44 A5 — the empty-corpus results.json writer is atomic and keeps the legacy corpusDir key (no tmp residue)", () => {
+test("W44 A5 â€” the empty-corpus results.json writer is atomic and keeps the legacy corpusDir key (no tmp residue)", () => {
   // (a) source slice: the empty-corpus block must write atomically, carry
   // corpusDir, and never regress to a bare writeFileSync (the tear class).
   const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
@@ -1907,7 +1910,7 @@ test("W44 A5 — the empty-corpus results.json writer is atomic and keeps the le
   assert.match(block, /corpusDir:\s*CORPUS_DIR/, "the empty-corpus shape must keep the legacy corpusDir key");
   assert.ok(
     !/writeFileSync\(/.test(block),
-    "a bare writeFileSync is back in the empty-corpus writer — a kill mid-write tears results.json",
+    "a bare writeFileSync is back in the empty-corpus writer â€” a kill mid-write tears results.json",
   );
 
   // (b) behavioral spawn: a REAL keyless run over an empty corpus dir.
@@ -1937,31 +1940,31 @@ test("W44 A5 — the empty-corpus results.json writer is atomic and keeps the le
     assert.ok(Array.isArray(doc.entries));
     assert.equal(doc.entries.length, 0);
     assert.equal(doc.summary.entries, 0);
-    // Atomic discipline: the same-dir tmp file was renamed away — nothing but
+    // Atomic discipline: the same-dir tmp file was renamed away â€” nothing but
     // results.json may sit beside it (a stray tmp = the tear window is back).
     const strays = readdirSync(out).filter((f) => f !== "results.json");
-    assert.deepEqual(strays, [], `no tmp/half-written residue may remain beside results.json — got: ${strays.join(", ")}`);
+    assert.deepEqual(strays, [], `no tmp/half-written residue may remain beside results.json â€” got: ${strays.join(", ")}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 // ---------------------------------------------------------------------------
-// W50 · 336-4 (Switchboard) — the eval OUT_DIR safety guard. `npm run eval`
+// W50 Â· 336-4 (Switchboard) â€” the eval OUT_DIR safety guard. `npm run eval`
 // used to default OUT_DIR to the TRACKED research/eval-out/** and rewrite it in
 // place, so the scorecard could not be produced without dirtying the tree.
 // `evalOutRefusal` refuses an UN-CHOSEN in-repo OUT_DIR and allows an explicit
 // `--out`/EVAL_OUT_DIR (including the tracked dir on purpose). The pure decision
 // is RED-first: before the guard existed this export (and the call) were absent.
 // ---------------------------------------------------------------------------
-test("W50 336-4 — evalOutRefusal refuses an un-chosen in-repo OUT_DIR and allows explicit/outside", () => {
+test("W50 336-4 â€” evalOutRefusal refuses an un-chosen in-repo OUT_DIR and allows explicit/outside", () => {
   const tracked = join(ROOT, "research", "eval-out");
   const refusal = evalOutRefusal(tracked, { explicit: false, repoRoot: ROOT });
   assert.ok(refusal && typeof refusal.message === "string" && refusal.code === "RT_E_VALIDATION");
   assert.match(refusal.message, /git status/, "the refusal names the dirty-tree consequence");
   assert.match(refusal.message, /--out/, "the refusal names the --out remedy");
   assert.match(refusal.message, /EVAL_OUT_DIR/, "the refusal names the env remedy");
-  // An EXPLICIT choice of the same tracked dir is allowed — the guard refuses
+  // An EXPLICIT choice of the same tracked dir is allowed â€” the guard refuses
   // surprise, not intent (regenerating the tracked scorecard is a real action).
   assert.equal(evalOutRefusal(tracked, { explicit: true, repoRoot: ROOT }), null);
   // A dir OUTSIDE the repo needs no opt-in, even without explicit naming.
@@ -1970,7 +1973,7 @@ test("W50 336-4 — evalOutRefusal refuses an un-chosen in-repo OUT_DIR and allo
   assert.equal(evalOutRefusal(`${ROOT}-sibling`, { explicit: false, repoRoot: ROOT }), null);
 });
 
-test("W50 336-4 — `--out` directs the artifacts and WINS over EVAL_OUT_DIR (env dir stays empty)", () => {
+test("W50 336-4 â€” `--out` directs the artifacts and WINS over EVAL_OUT_DIR (env dir stays empty)", () => {
   const dir = mkdtempSync(join(tmpdir(), "rapidtool-3364-out-"));
   const corpus = join(dir, "emptycorpus");
   const envOut = join(dir, "env-out");
@@ -1990,7 +1993,7 @@ test("W50 336-4 — `--out` directs the artifacts and WINS over EVAL_OUT_DIR (en
     assert.equal(
       existsSync(join(envOut, "results.json")),
       false,
-      "--out must WIN over EVAL_OUT_DIR — the env dir must stay empty",
+      "--out must WIN over EVAL_OUT_DIR â€” the env dir must stay empty",
     );
     assert.match(res.stdout, /out: .*(arg-out)/, "the run names the effective out dir it used");
   } finally {
@@ -1998,7 +2001,7 @@ test("W50 336-4 — `--out` directs the artifacts and WINS over EVAL_OUT_DIR (en
   }
 });
 
-test("W50 336-4 — main() invokes the OUT_DIR guard before any write (source pin)", () => {
+test("W50 336-4 â€” main() invokes the OUT_DIR guard before any write (source pin)", () => {
   const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
   assert.match(src, /const outRefusal = evalOutRefusal\(OUT_DIR, \{ explicit: OUT_EXPLICIT \}\);/);
   assert.match(src, /console\.error\(outRefusal\.message\);\s*\n\s*process\.exit\(2\);/);
@@ -2007,3 +2010,57 @@ test("W50 336-4 — main() invokes the OUT_DIR guard before any write (source pi
   assert.match(src, /const OUT_DIR = OUT_ARG !== null \? resolve\(OUT_ARG\) : process\.env\.EVAL_OUT_DIR/);
 });
 
+
+// ---------------------------------------------------------------------------
+// W359 (resolve-kind) â€” the driver's corpus-kind bridge, and the ABSENCE of a
+// second resolver.
+//
+// The mapper this replaces routed `library`/`service`/`""` to `undefined`: the
+// driver stamped "no kind" while codegen still routed those fixtures down the
+// library path, so the corpus could not tell a correct `service` emission from
+// a masked one. The pin below is the mask itself: every corpus entry resolves to
+// a LEGAL kind, and the declared contract words survive the bridge verbatim.
+// ---------------------------------------------------------------------------
+test("W359: the corpus-kind bridge is a vocabulary map, never a resolver", () => {
+  assert.equal(declaredCorpusKind("webapp"), "app");
+  assert.equal(declaredCorpusKind("app"), "app");
+  assert.equal(declaredCorpusKind("game"), "game");
+  assert.equal(declaredCorpusKind("tool"), "tool");
+  assert.equal(declaredCorpusKind("cli-tool"), "tool");
+  // THE MASK W359 REMOVES: these two used to become `undefined`.
+  assert.equal(declaredCorpusKind("library"), "library");
+  assert.equal(declaredCorpusKind("service"), "service");
+  // Case/space normalisation, and an unknown word is NOT invented into a kind.
+  assert.equal(declaredCorpusKind(" WebApp "), "app");
+  assert.equal(declaredCorpusKind(""), null);
+  assert.equal(declaredCorpusKind(undefined), null);
+  assert.equal(declaredCorpusKind("desktop-app"), null);
+});
+
+test("W359: every corpus fixture resolves to a legal kind (no entry is left kind-less)", () => {
+  const entries = listCorpusEntries().map((r) => r.entry).filter((e) => e !== null);
+  assert.ok(entries.length > 0, "the tracked corpus is readable");
+  const legal = new Set(["app", "tool", "game", "library", "service"]);
+  for (const entry of entries) {
+    const kind = projectKindForEntry(entry);
+    assert.ok(legal.has(kind), `${entry.slug}: resolves to the legal kind ${kind}`);
+    assert.equal(kind, declaredCorpusKind(entry.kind), `${entry.slug}: the declared contract word decides`);
+  }
+  // The two the old mapper swallowed keep their declared contract (the library/
+  // service fixtures are exactly the ones the corpus could not measure).
+  const bySlug = new Map(entries.map((e) => [e.slug, e]));
+  assert.equal(projectKindForEntry(bySlug.get("date-rrule-library")), "library");
+  assert.equal(projectKindForEntry(bySlug.get("order-webhook-service")), "service");
+  assert.equal(projectKindForEntry(bySlug.get("arcade-breakout")), "game");
+  assert.equal(projectKindForEntry(bySlug.get("showing-booking")), "app");
+});
+
+test("W359: the driver imports the ONE decision and carries no local resolver", () => {
+  const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
+  assert.match(src, /import \{ deliveryKindOf \} from "\.\.\/src\/lib\/engine\.ts"/);
+  assert.equal(/function deliveryKindOf\(corpusKind\)/.test(src), false, "the local resolver is gone");
+  assert.equal(/default:\s*\n\s*return undefined; \/\/ library/.test(src), false, "the mask is gone");
+  // The project is built WITH the resolved kind (never a conditional `...(kind ? â€¦)`).
+  assert.match(src, /const kind = projectKindForEntry\(entry\);/);
+  assert.match(src, /createProject\(\{ brief: entry\.brief, name: entry\.name, kind \}\)/);
+});

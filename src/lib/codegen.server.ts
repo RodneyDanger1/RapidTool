@@ -1,36 +1,37 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// codegen.server.ts — keyed P6 brief-faithful module synthesis (fixes/97
+// codegen.server.ts â€” keyed P6 brief-faithful module synthesis (fixes/97
 // P0-01 Part B, THE FINAL LEAPFROG CORE). Server-only.
 //
 // liveP6Synthesis(project) upgrades a deterministic P6 result (the honest
 // NO-KEY placeholder module, sandbox.ts buildPhase6Module) into a
 // brief-faithful CommonJS module under the one-key constraint set
-// (LEAPFROG §12.3): one json:true synthesis call on deepseek-v4-pro + one
+// (LEAPFROG Â§12.3): one json:true synthesis call on deepseek-v4-pro + one
 // bounded repair re-prompt + deterministic envelope validation + the EXISTING
-// machine verify loop (verify.server.ts verifyAndFixServer — reused, never
+// machine verify loop (verify.server.ts verifyAndFixServer â€” reused, never
 // rebuilt).
 //
 // Pipeline (each step honest, each failure degrades to the deterministic
-// floor — a run never strands and never fabricates a pass):
-//   0. Not configured → return the SAME project reference (caller falls back
+// floor â€” a run never strands and never fabricates a pass):
+//   0. Not configured â†’ return the SAME project reference (caller falls back
 //      to the deterministic applyPhaseResult path).
-//   1. Spec — reuse project.implementationSpec when its briefHash matches
+//   1. Spec â€” reuse project.implementationSpec when its briefHash matches
 //      fnv1a(brief); otherwise expandBrief() once. Persisted back onto the
-//      returned project (closes the 87 S7 / 88 §7.2 orphan spec).
-//   2. Synthesis — fixes/144 (M2 / S-01 T2, fixes/134 §4): CHUNKED SEQUENTIAL
+//      returned project (closes the 87 S7 / 88 Â§7.2 orphan spec).
+//   2. Synthesis â€” fixes/144 (M2 / S-01 T2, fixes/134 Â§4): CHUNKED SEQUENTIAL
 //      synthesis replaces the ONE 60k-envelope call. The spec's typeSignatures
-//      are grouped ≤8 per chunk in expand order (MetaGPT decomposition); ≤8
+//      are grouped â‰¤8 per chunk in expand order (MetaGPT decomposition); â‰¤8
 //      signatures on a KIND-ABSENT (undeclared/legacy, single-module-library
-//      eligible) project ⇒ ONE chunk ⇒ the legacy byte-identical path below
-//      (single pro call + bounded repair re-prompts + machine verify →
-//      upgraded); fixes/148 (F1 — tree-trigger scope): every MULTI-FILE
+//      eligible) project â‡’ ONE chunk â‡’ the legacy byte-identical path below
+//      (single pro call + bounded repair re-prompts + machine verify â†’
+//      upgraded); fixes/148 (F1 â€” tree-trigger scope): every MULTI-FILE
 //      delivery kind (`app` = webapp / `tool` = CLI-agent / `game` = playable;
 //      `library` and `service` are single-entry) and every >8-signature spec
-//      routes to the chunked tree REGARDLESS of signature count — a
-//      ≤8-signature webapp brief must never fall into the single-module path
-//      (fixes/145 M1=0 root cause); >8 signatures ⇒ one call PER chunk
-//      (216 T0.1: the FLASH tier — fixes/125's "pro is stronger" premise is
-//      inverted by V4.1-Flash; json:true, thinking:false — fixes/156 E1: a
+//      routes to the chunked tree REGARDLESS of signature count â€” a
+//      â‰¤8-signature webapp brief must never fall into the single-module path
+//      (fixes/145 M1=0 root cause); >8 signatures â‡’ one call PER chunk
+//      (216 T0.1: the FLASH tier â€” fixes/125's "pro is stronger" premise is
+//      inverted by V4.1-Flash; json:true, thinking:false â€” fixes/156 E1: a
 //      structured json envelope needs OUTPUT budget, not chain-of-thought, so
 //      pro reasoning is DISABLED instead of out-budgeted; maxTokens 32 000)
 //      with the
@@ -38,72 +39,72 @@
 //      signatures + the earlier chunks' exported top-level names + reqTrace
 //      (so later files call earlier exports by name in the assembled bundle)
 //      + the capped DATA CONTRACTS block rendered from project.contracts
-//      (R10-f01 · W39 Z2: both user-prompt builders, non-empty-gated — an
-//      absent/empty contract keeps the exact legacy prompt bytes; ≤12 rows
+//      (R10-f01 Â· W39 Z2: both user-prompt builders, non-empty-gated â€” an
+//      absent/empty contract keeps the exact legacy prompt bytes; â‰¤12 rows
 //      with a visible elision marker past the cap),
 //      deterministic per-file validation, deterministic assembly into
 //      Project.generatedTree (per-file fnv1a hash + attempt:0) with
 //      generatedSource = the materialized ENTRY file's own bytes
-//      (`materializeImportableTree`: every tree — one chunk or many — is
+//      (`materializeImportableTree`: every tree â€” one chunk or many â€” is
 //      rewritten to real ESM, with `src/generated.ts` as the barrel entry;
 //      fixes/258 closed the single-chunk identity path that shipped raw
 //      CommonJS into the `"type":"module"` tenant and killed the emitted spec
-//      at import; FM-01 (W37 Y1) closed the LAST raw-CJS path — the
+//      at import; FM-01 (W37 Y1) closed the LAST raw-CJS path â€” the
 //      single-module branch below materializes at synthesis time through the
 //      same function, so every synthesis is ESM BEFORE emit and the emit-time
 //      residue guard stays purely a backstop). A chunk refusal keeps
 //      the prior chunks' files on the returned project + records
-//      p6.synthesis.refused naming the chunk index (honest partial — never a
+//      p6.synthesis.refused naming the chunk index (honest partial â€” never a
 //      fabricated full pass).
-//   3. Deterministic validation — single-chunk (legacy) path: the envelope's
+//   3. Deterministic validation â€” single-chunk (legacy) path: the envelope's
 //      claimed exports must be real top-level names in the module; every
 //      typeSignature function name must be exported (the mechanical brief-fit
-//      floor — no LLM involved); the module must pass the FORBIDDEN primitive
+//      floor â€” no LLM involved); the module must pass the FORBIDDEN primitive
 //      scan (maskLiteralsAndComments so literals/comments never trip it) and
-//      the p6-brief-fit pre-check (briefNounHits + identifierHits — code
+//      the p6-brief-fit pre-check (briefNounHits + identifierHits â€” code
 //      identifiers, not prose). Chunked path: the same checks run PER FILE
 //      against that chunk's own signatures; the brief-fit pre-acceptance runs
 //      at tree level over the assembled entry (brief nouns legitimately spread
 //      across files), so a per-file vocabulary gate would be wrong.
-//   4. Machine verify — single-chunk (legacy) path only:
+//   4. Machine verify â€” single-chunk (legacy) path only:
 //      verifyAndFixServer(module, brief, {maxIterations:3}). status "passed"
 //      is minted ONLY by the machine harness, never the model. Multi-chunk
 //      trees record no machine-verified lastTest (honest: the tree machine-run
-//      is the tree-run lane's step) — per-file deterministic validation is the
+//      is the tree-run lane's step) â€” per-file deterministic validation is the
 //      mechanical floor until then.
-//   5. Honest state — on a pass the returned project carries
+//   5. Honest state â€” on a pass the returned project carries
 //      generatedSource = the materialized ESM entry (the barrel; the verified
-//      module's own bytes live in the tree's chunk file — FM-01), lastTest
+//      module's own bytes live in the tree's chunk file â€” FM-01), lastTest
 //      {label:"tested", evidenceHash}, the kind-"code" artifact "Generated
 //      module (LLM, machine-verified)", a "verify" outcome artifact, the
 //      persisted implementationSpec, and modelRoute derived from the SERVED
 //      model id (FM-04; expand/oracle are request-pinned flash). On ANY failure
-//      (unparseable envelope ×2, validation, brief-fit, verify failed/error,
+//      (unparseable envelope Ã—2, validation, brief-fit, verify failed/error,
 //      chunk refusal) the deterministic floor stands and a `p6.synthesis.refused`
-//      warn log records the RT_E_* code — never a fabricated pass; a multi-chunk
+//      warn log records the RT_E_* code â€” never a fabricated pass; a multi-chunk
 //      refusal keeps the prior chunks' real files + generatedSource = the
 //      assembled partial entry (honest partial). Every synthesis-model call
 //      also stamps a bounded `p6.synthesis.attempt` journal event (chunk
-//      index/count · attempt · timeoutMs · outcome ok/refused/timeout + the
-//      model's refusal-text excerpt — fixes/153 P1) so a reader sees WHY each
+//      index/count Â· attempt Â· timeoutMs Â· outcome ok/refused/timeout + the
+//      model's refusal-text excerpt â€” fixes/153 P1) so a reader sees WHY each
 //      call failed. W45/331-4: when a declared spec-graph job's label is named
 //      by no typeSignature, `treeChunkPlanCensus` counts it and a bounded
-//      `p6.tree.shortfall` warn row names it — a declared job is never silently
+//      `p6.tree.shortfall` warn row names it â€” a declared job is never silently
 //      absent from the plan. A reply that ARRIVED but could not be READ as a
 //      patch or synthesis envelope stamps a bounded `p6.synthesis.envelope.unreadable`
 //      warn entry (on the patch level: the existing `p6.repair.patch.refused`
-//      event) carrying RT_E_LLM_REJECTED + a bounded received-text excerpt —
+//      event) carrying RT_E_LLM_REJECTED + a bounded received-text excerpt â€”
 //      fixes/217k (216y G6: the silent-null sink; absent/blank replies stay
 //      unlogged, so "no output" and "unreadable output" are distinguishable).
 //      W46/332-1 (P1): `validateSynthesisModule` also refuses an un-awaited
 //      async call whose result is used as a value (property read, destructure,
 //      or stored-then-read; a `Promise.resolve().then` body binding one), with
-//      ONE bounded await re-prompt — the real keyed tree's `src/jobs/rehab.ts`
+//      ONE bounded await re-prompt â€” the real keyed tree's `src/jobs/rehab.ts`
 //      read `.ok` off the un-awaited async `getProperty` and reded its spec.
 //      W46/332-1 (P2): the plan census partitions by label and the persisted
 //      shortfall row carries declared/planned/unbound counts, so a coverage
 //      gap is deterministic and legible, never random.
-//      W52/338-1: the plan is SPEC-DRIVEN — `reconcilePlanTypeSignatures` maps
+//      W52/338-1: the plan is SPEC-DRIVEN â€” `reconcilePlanTypeSignatures` maps
 //      every declared spec-graph job to a planned src/jobs/<label>.ts file by
 //      rule (the model's bound signatures when present, else the deterministic
 //      `deriveTypeSignatures` floor), and the persisted implementationSpec is
@@ -144,7 +145,7 @@ import {
   type TokenLedger,
 } from "./token-ledger.ts";
 // R12-f04 (fixes/271): the P6 phase max lives in the client-safe constants
-// table; this module consumes it (single source — no literal fork).
+// table; this module consumes it (single source â€” no literal fork).
 import { P6_PHASE_MAX_MS } from "./rt-events.ts";
 // fixes/343-1: the opt-in best-of-N policy (count resolution + deterministic
 // lazy selection). The gates it selects against stay in this module.
@@ -158,7 +159,7 @@ import {
   selectBestOfN,
   type CandidateEvaluation,
 } from "./synthesis-policy.ts";
-// fixes/343-1 follow-up (343-2 STOP-and-REPORT): the deterministic repo map —
+// fixes/343-1 follow-up (343-2 STOP-and-REPORT): the deterministic repo map â€”
 // the ranked, budgeted outline of the persisted tree, fed to the PRIMARY chunk
 // prompt so a resumed/re-synthesized run extends a tree it can see. Client-safe
 // and dependency-free, so this server module may import it freely.
@@ -169,40 +170,46 @@ import type { TreeRunOutcome } from "./compile-check.server.ts";
 // the candidate tree with. RUNTIME imports: the gate genuinely runs `tsc`.
 import { typecheckDir, type TreeProjectScriptVerdict } from "./compile-check.server.ts";
 import { scaffoldProject, stampEmittedSurface } from "./scaffold.ts";
-// 346 E1 · A1-04: the E-08 oracle-pinning seam's pure renderer (verify.server.ts
-// consumes the rendered string + pinned ids — it never imports dod.ts itself).
+// 346 E1 Â· A1-04: the E-08 oracle-pinning seam's pure renderer (verify.server.ts
+// consumes the rendered string + pinned ids â€” it never imports dod.ts itself).
 import { oracleToCaseSeeds } from "./dod.ts";
-import type { Artifact, ArtifactKind, DataContract, GeneratedTreeFile, JsonLog, ModelRoute, PhaseId, Project } from "./types.ts";
+import type { Artifact, ArtifactKind, DataContract, DeliveryKind, GeneratedTreeFile, JsonLog, ModelRoute, PhaseId, Project } from "./types.ts";
+// W359 (kind fidelity): the ONE delivery-kind decision (engine.deliveryKindOf â€”
+// declared kind wins, else the brief). A RUNTIME import: the synthesis prompts
+// must carry the resolved kind, never a re-derivation. engine.ts reaches this
+// module only through a dynamic `import()` (engine.ts:4076), so this edge adds
+// no static cycle.
+import { deliveryKindOf } from "./engine.ts";
 // T5.4 (W18 LANE 5): the artifact-provenance shape + vocabulary live in io.ts
 // (the serialization boundary that validates and round-trips them). TYPE-ONLY
-// import — erased at runtime, so this server module gains no new runtime edge.
+// import â€” erased at runtime, so this server module gains no new runtime edge.
 import type { ArtifactProvenance } from "./io.ts";
 
 // --- constants ---------------------------------------------------------------
 
-/** Headroom for a module (≤ ~600 lines) + the JSON envelope (97 P0-01 §3.2). */
+/** Headroom for a module (â‰¤ ~600 lines) + the JSON envelope (97 P0-01 Â§3.2). */
 export const P6_SYNTH_MAX_TOKENS = 32_000;
-/** Deterministic size guard on the returned module string (≈ 600 lines × 80). */
+/** Deterministic size guard on the returned module string (â‰ˆ 600 lines Ã— 80). */
 export const P6_MODULE_MAX_CHARS = 60_000;
 // fixes/144 (M2) + fixes/150: the pro-tier chunk synthesis budget. The 90s
 // expansion budget (DEEPSEEK_LONG_TIMEOUT_MS) is for brief expansion; a
 // pro-tier chunk synthesis with thinking enabled (pre-fixes/156 E1) could
-// legitimately run 2-4 minutes — a 90s abort starved every keyed journey
+// legitimately run 2-4 minutes â€” a 90s abort starved every keyed journey
 // (M3 evidence: RT_E_LLM_TIMEOUT chunk 1/N on both keyed runs). 240s keeps
 // the abort honesty (a truly hung call still dies loudly) while letting
 // real synthesis finish; fixes/156 E1 turns pro thinking OFF for the
 // envelope (output budget, not CoT), which also shortens the wall clock.
 export const P6_SYNTH_TIMEOUT_MS = P6_PHASE_MAX_MS;
 /**
- * 216 (T0.1 — model-tier correction; supersedes fixes/125): the MAIN synthesis
+ * 216 (T0.1 â€” model-tier correction; supersedes fixes/125): the MAIN synthesis
  * call and its repair re-prompts run on the FLASH tier. The original fixes/125
- * rationale — "pro is a materially stronger coder" — is INVERTED as of
+ * rationale â€” "pro is a materially stronger coder" â€” is INVERTED as of
  * DeepSeek-V4.1-Flash (model card, 2026-09-10): flash wins every
  * agentic/coding axis against V4-Pro (DeepSWE v1.1 74.2 vs 62.7; Terminal-Bench
  * 2.1 90.6 vs 87.9; TB 4.0 31.2 vs 12.4) at lower cost. The cheap calls
  * (expandBrief in prompt-engine.ts, oracle generateCases in
  * verify.server.ts) were already flash. The route label (`modelRoute:
- * "deepseek-flash"`) is stamped by `upgraded()` the moment a synthesis ships —
+ * "deepseek-flash"`) is stamped by `upgraded()` the moment a synthesis ships â€”
  * the tier that really served the call, never a stale tier name.
  */
 export const P6_SYNTH_MODEL = DEEPSEEK_MODELS.flash;
@@ -213,7 +220,7 @@ export const P6_SYNTH_MODEL = DEEPSEEK_MODELS.flash;
  * temperature keeps the JSON envelope + structural shape reliable, and a seed
  * derived from the brief makes a single sample reproducible. Best-of-N
  * candidates advance the seed by their index so the N samples stay independent
- * (and reproducible as a set). These are OPT-IN provider options — every other
+ * (and reproducible as a set). These are OPT-IN provider options â€” every other
  * caller keeps the vendor default and the byte-identical request body.
  */
 export const P6_SYNTH_TEMPERATURE = 0.2;
@@ -227,7 +234,7 @@ function seededSampling(brief: string, index: number): Pick<DeepSeekCompleteOpti
 }
 /**
  * fixes/348: brief budget in the synthesis user prompt. The `p6-brief-fit` gate
- * grades the WHOLE brief (its core nouns), so the generator must SEE it — the
+ * grades the WHOLE brief (its core nouns), so the generator must SEE it â€” the
  * 2 000-char slice dropped the menu/build/non-negotiable sections, and the model
  * was then graded on a brief it never received. A generous budget keeps every
  * realistic brief intact; a brief past it is compacted NOUN-PRESERVINGLY by
@@ -236,7 +243,7 @@ function seededSampling(brief: string, index: number): Pick<DeepSeekCompleteOpti
  * visible marker. Never a silent slice.
  */
 const P6_BRIEF_MAX_CHARS = 48_000;
-const TRUNCATION_MARK = "\n…[TRUNCATED — brief longer than the synthesis budget; the visible prefix governs]";
+const TRUNCATION_MARK = "\nâ€¦[TRUNCATED â€” brief longer than the synthesis budget; the visible prefix governs]";
 
 /**
  * fixes/348: the full brief the `p6-brief-fit` gate grades, or a deliberate
@@ -260,17 +267,17 @@ export function compactBriefForPrompt(brief: string, budget: number = P6_BRIEF_M
     if (heading || tokens.some((t) => nouns.has(t))) kept.push(line);
     else elided += 1;
   }
-  const marker = `\n…[BRIEF-COMPACTED: ${elided} noun-free line(s) elided — every gate-measured noun is preserved]`;
+  const marker = `\nâ€¦[BRIEF-COMPACTED: ${elided} noun-free line(s) elided â€” every gate-measured noun is preserved]`;
   const compacted = `${kept.join("\n").trimEnd()}${marker}`;
   return compacted.length <= budget ? compacted : `${compacted.slice(0, budget).trimEnd()}${TRUNCATION_MARK}`;
 }
 
 /**
  * R12-f01: prior-render cap. Every later chunk re-sent EVERY prior file line
- * (O(chunks²) prompt growth); the assembled module binds all of them as
+ * (O(chunksÂ²) prompt growth); the assembled module binds all of them as
  * parameters regardless, so the render only needs the MOST RECENT exports.
  * Keep the last N (most recently generated = most likely to be called) and
- * mark the elision visibly — never silently drop context.
+ * mark the elision visibly â€” never silently drop context.
  */
 export const P6_SYNTH_PRIOR_MAX_FILES = 12;
 
@@ -292,11 +299,11 @@ export const P6_SYNTH_REPO_MAP_BUDGET = 1_200;
 export const P6_SYNTH_PROMPT_MAX_CHARS = 60_000;
 
 /**
- * R10-f01 (W39 Z2 · G3's wire): the DATA CONTRACTS render cap. project.contracts
- * reached scaffold/packet/engine/diagram but never the synthesis prompt — the
+ * R10-f01 (W39 Z2 Â· G3's wire): the DATA CONTRACTS render cap. project.contracts
+ * reached scaffold/packet/engine/diagram but never the synthesis prompt â€” the
  * model wrote module bodies blind to the A6 contract. The prompt renders at
  * most this many contract rows (entity + endpoint combined, entities first);
- * beyond the cap a visible `…[CONTRACTS-ELIDED: …]` marker names the elision —
+ * beyond the cap a visible `â€¦[CONTRACTS-ELIDED: â€¦]` marker names the elision â€”
  * never a silent drop.
  */
 export const P6_SYNTH_CONTRACTS_MAX_ROWS = 12;
@@ -305,10 +312,10 @@ export const P6_SYNTH_CONTRACTS_MAX_ROWS = 12;
  * Forbidden-primitive split (fixes/116 reliability repair). The sandbox's
  * FORBIDDEN_PRIMITIVES denylist bundles arbitrary-code-execution primitives
  * with zero-dep/zero-IO contract violations. That made a single accidental
- * `document`/`fetch`/`window` reference a hard refusal with no recovery path —
+ * `document`/`fetch`/`window` reference a hard refusal with no recovery path â€”
  * one of the 0/6 probe failure classes. Split them:
  *   - HARD (eval/Function/import): a code-execution / module-escape boundary.
- *     Never repaired — a model that emits these cannot be trusted to rewrite.
+ *     Never repaired â€” a model that emits these cannot be trusted to rewrite.
  *   - SOFT (process/require/globalThis/window/self/fetch/WebSocket/XMLHttpRequest/
  *     document/localStorage/indexedDB): a zero-deps/zero-IO contract violation
  *     that is NOT arbitrary code execution. One bounded repair re-prompt is safe
@@ -320,12 +327,12 @@ const FORBIDDEN_SOFT =
   /\b(?:process|require|globalThis|window|self|fetch|WebSocket|XMLHttpRequest|document|localStorage|indexedDB)\b/;
 
 /**
- * fixes/215b: canonical display names of EVERY banned primitive — the single
+ * fixes/215b: canonical display names of EVERY banned primitive â€” the single
  * source the synthesis system prompt quotes. Drift-proof by test: each name is
  * asserted to be matched by FORBIDDEN_HARD|FORBIDDEN_SOFT, and the system
  * prompt is asserted to name them all. Root cause this closes: the prompt's
  * rule 4 omitted `require`/`globalThis`/`self`/`XMLHttpRequest` while the
- * validator enforced them — a keyed chunk 2/4 refused on exactly `globalThis`,
+ * validator enforced them â€” a keyed chunk 2/4 refused on exactly `globalThis`,
  * a primative the model was never told to avoid.
  */
 export const FORBIDDEN_PRIMITIVE_NAMES = [
@@ -334,7 +341,7 @@ export const FORBIDDEN_PRIMITIVE_NAMES = [
   "import",
   // 353: `enum` is TS-runtime-only syntax; under type-stripping it throws
   // ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX at run time. It was accepted by the
-  // synthesis validator and only died later at the tree-run spec leg — after
+  // synthesis validator and only died later at the tree-run spec leg â€” after
   // spend. Refuse it at synthesis like sandbox's FORBIDDEN already does.
   "enum",
   "process",
@@ -361,7 +368,7 @@ export function forbiddenPrimitiveHit(maskedSource: string): { hard: string | nu
  * 216f (T-15 / F-06): the non-determinism ban. The emitted
  * `research/eval-out/coffeehouse2home-property-ledger/src/generated/compute-rent-roll.ts:35,40,55`
  * minted entity ids with `Math.random()` inside a nominally deterministic
- * system — two identical runs produce different entities, so nothing about the
+ * system â€” two identical runs produce different entities, so nothing about the
  * emitted product is reproducible. Matched against MASKED source (callers pass
  * `maskLiteralsAndComments` output, the `forbiddenPrimitiveHit` contract), so
  * the token inside a literal or comment is data, never a violation. Returns the
@@ -374,7 +381,7 @@ export function nondeterministicPrimitiveHit(maskedSource: string): string | nul
   return maskedSource.match(NONDETERMINISTIC_PRIMITIVE)?.[0] ?? null;
 }
 
-/** 216f (T-09): one prose line hit — 1-based line number + a bounded excerpt. */
+/** 216f (T-09): one prose line hit â€” 1-based line number + a bounded excerpt. */
 export type ProseLineHit = { line: number; text: string };
 
 /** Minimum whitespace-separated words a line needs to count as prose. */
@@ -397,106 +404,106 @@ const PROSE_CODE_CHARS = "()[]{}<>=|&+*_\\/@#$%^~";
 /** Sentence-shaped ASCII line; parentheses are admitted but gated separately. */
 const PROSE_LINE_SHAPE = /^[A-Za-z][A-Za-z0-9 ,.:;!?'"()-]*$/;
 /**
- * W23-262 (B1): arithmetic-minus code shape — `<operand> <spaced minus> <operand>`
- * with an identifier-ish, ≥2-char operand on each side. `-` is the ONE arithmetic
+ * W23-262 (B1): arithmetic-minus code shape â€” `<operand> <spaced minus> <operand>`
+ * with an identifier-ish, â‰¥2-char operand on each side. `-` is the ONE arithmetic
  * operator whose character is not in PROSE_CODE_CHARS, so a legal expression whose
  * only punctuation is a spaced minus still reads as sentence-shaped ASCII text and
  * tripped the prose gate. Proven cost: run #2's chunk 2/7 was refused as
- * `prose-in-code … line 40: "balance: amountDue - amountPaid"` (fixes/255 §2); the
+ * `prose-in-code â€¦ line 40: "balance: amountDue - amountPaid"` (fixes/255 Â§2); the
  * refusal cascaded through `partialTreeRefuse` into a 1-file partial tree and the
- * emitted suite could then only report capability.9–36 red (fixes/260 §2: 43 tests,
- * 9 pass / 28 fail / 6 skip). A spaced minus between two ≥2-char operands is a code
+ * emitted suite could then only report capability.9â€“36 red (fixes/260 Â§2: 43 tests,
+ * 9 pass / 28 fail / 6 skip). A spaced minus between two â‰¥2-char operands is a code
  * position: none of the pinned prose fixtures (`LEAKED_BLOB_PROSE`, the chunk-e2e
  * blob) carries that shape, and the legal shipped-code shapes it must never refuse
  * (object-literal entries like `balance: amountDue - amountPaid`, `return net -
  * fees;`, budget/payroll arithmetic) all do. The deliberate narrowing is the trade
- * this fix makes — a legal-code false refusal costs a whole chunk (and, via the
+ * this fix makes â€” a legal-code false refusal costs a whole chunk (and, via the
  * partial-tree cascade, up to 8 capability rows), while the residual prose shape it
- * no longer catches (a spaced dash between two ≥2-char English words) is rare in
+ * no longer catches (a spaced dash between two â‰¥2-char English words) is rare in
  * the deliberation this gate exists for.
  */
 /**
  * W45/331-4 (class fix): one arithmetic operand. The member-expression
- * alternative (`a.index`, `this.total`) is the missing form — the pre-fix
+ * alternative (`a.index`, `this.total`) is the missing form â€” the pre-fix
  * `[A-Za-z_$0-9][\w$]+` cannot cross a `.`, so `return a.index - b.index;`
  * stayed sentence-shaped and was refused as prose (the repair loop's own
- * `src/jobs/invoice.ts` patch, parent-keyed-findings §3b-2).
+ * `src/jobs/invoice.ts` patch, parent-keyed-findings Â§3b-2).
  */
 const PROSE_ARITH_OPERAND = String.raw`(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+|\d+(?:\.\d+)?|[A-Za-z_$0-9][\w$]+)`;
 const PROSE_ARITH_MINUS = new RegExp(String.raw`\b${PROSE_ARITH_OPERAND}\s+-\s+${PROSE_ARITH_OPERAND}\b`);
 /**
- * 322 X3 (BUG-4): ternary-expression code shape — a single-line `cond ? a : b`
+ * 322 X3 (BUG-4): ternary-expression code shape â€” a single-line `cond ? a : b`
  * whose arms are single identifier/numeric tokens (unary minus and dotted
  * paths admitted) at the end of the line (optional `;`/`,` terminal). `?`,
  * `:`, `;` and `-` are sentence punctuation to PROSE_LINE_SHAPE and such a
  * line carries no code-significant character at all, so it satisfied every
- * prose floor and was refused as prose — burning EXP03's final synthesis cycle
- * (`prose-in-code … line 78: "return negative ? -cents : cents;"`,
- * 322_e2_monitor §BUG-4). Excluded up front like PROSE_ARITH_MINUS, end-
+ * prose floor and was refused as prose â€” burning EXP03's final synthesis cycle
+ * (`prose-in-code â€¦ line 78: "return negative ? -cents : cents;"`,
+ * 322_e2_monitor Â§BUG-4). Excluded up front like PROSE_ARITH_MINUS, end-
  * anchored: a ternary is a whole-expression tail while deliberation prose
  * ends in a sentence terminal (`.`/`!`/`?`) and stays caught.
  *
- * W45/331-4 (class fix): an arm may also be a MASKED quoted literal — it
+ * W45/331-4 (class fix): an arm may also be a MASKED quoted literal â€” it
  * blanks to a whitespace run, so the pre-fix arm pattern (token-only) failed
- * on `arvNote: cond ? undefined : 'ARV …',` and the line was refused as prose
- * (the repair loop's own `list-line-items.ts` patch, §3b-2). An arm is now
+ * on `arvNote: cond ? undefined : 'ARV â€¦',` and the line was refused as prose
+ * (the repair loop's own `list-line-items.ts` patch, Â§3b-2). An arm is now
  * token OR whitespace run. Accepted residual (same trade as W23-262/B1): a
  * deliberation line ending exactly `word? word: word` (or a masked literal
- * arm) with NO sentence terminal is no longer flagged — rare.
+ * arm) with NO sentence terminal is no longer flagged â€” rare.
  */
 const PROSE_TERNARY_ARM = String.raw`(?:\s+|-?(?:\d+(?:\.\d+)?|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*))`;
 const PROSE_TERNARY = new RegExp(String.raw`\?\s*${PROSE_TERNARY_ARM}\s*:\s*${PROSE_TERNARY_ARM}\s*[;,]?\s*$`);
 /**
  * 2026-10-05 (keyed P6 measurement): an OBJECT-LITERAL numeric map continued on
- * its own line — `Sunday: 0, Monday: 1, …` — is a code position, never prose.
+ * its own line â€” `Sunday: 0, Monday: 1, â€¦` â€” is a code position, never prose.
  * Like the arith-minus and ternary shapes above, `,`/`:` are sentence
  * punctuation to PROSE_LINE_SHAPE and it carries no PROSE_CODE_CHARS, so a
  * legitimate map (a weekday-index table) was refused as `prose-in-code` and
  * cost its whole chunk (a live `p6.synthesis.refused` at chunk 1/15 named
  * exactly that line). fixes/354 broadened the exemption from a numeric-only map
- * to ANY ≥2-pair `key: value` continuation line whose values are single tokens,
- * dotted paths, numbers, or MASKED literals (a whitespace run) — the measured
+ * to ANY â‰¥2-pair `key: value` continuation line whose values are single tokens,
+ * dotted paths, numbers, or MASKED literals (a whitespace run) â€” the measured
  * false positive being a multi-property object line from a real emitted module
  * (`id: note.id, title: note.title, body: note.body,`), which carries no
  * PROSE_CODE_CHARS and satisfied every prose floor. A genuine sentence of
  * `word: word, word: word` is a data listing, not the deliberation this gate
  * exists to catch; a prose value of two-or-more words is NOT exempted (the
  * single-token value grammar fails on the second word). Whole-line anchored;
- * needs ≥2 pairs so a lone `foo: 1,` continuation is not exempted.
+ * needs â‰¥2 pairs so a lone `foo: 1,` continuation is not exempted.
  */
 const PROSE_OBJECT_VALUE = String.raw`(?:-?(?:\d[\d_]*(?:\.\d+)?|0[xX][0-9a-fA-F_]+|0[bB][01_]+)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|\s+)`;
 const PROSE_OBJECT_PAIR = String.raw`[A-Za-z_$][\w$]*\s*:\s*${PROSE_OBJECT_VALUE}`;
 const PROSE_OBJECT_MAP = new RegExp(
-  // ≥2 complete `key: value` pairs, plus an optional trailing bare identifier —
-  // the real map fixture cuts mid-pair (`… Friday: 5, Saturday`), so a
+  // â‰¥2 complete `key: value` pairs, plus an optional trailing bare identifier â€”
+  // the real map fixture cuts mid-pair (`â€¦ Friday: 5, Saturday`), so a
   // continuation with one name left must stay exempt.
   String.raw`^\s*${PROSE_OBJECT_PAIR}(?:\s*,\s*${PROSE_OBJECT_PAIR})+(\s*,\s*[A-Za-z_$][\w$]*)?\s*,?$`,
 );
 
 /**
- * 216f (T-09 / F-04): bare English prose written into a module body as code —
+ * 216f (T-09 / F-04): bare English prose written into a module body as code â€”
  * the 23-line LLM-deliberation leak observed shipping at
  * `research/eval-out/coffeehouse2home-property-ledger/src/generated/chunk-0.ts:340-362`
  * ("I'll write the code now."). Detection is lexical, not a parser (the
- * `typescript` devDep is not importable from this module — compile-check owns
+ * `typescript` devDep is not importable from this module â€” compile-check owns
  * that seam): a line counts as prose when, with comment content and
- * literal content blanked, it still carries ≥4 words / ≥15 letters of
+ * literal content blanked, it still carries â‰¥4 words / â‰¥15 letters of
  * sentence-shaped ASCII text and no code-significant character at all. No
  * legal top-level statement in the generated subset (functions, consts, object
- * literals, `module.exports` assigns, `'use strict';`) can match that shape —
+ * literals, `module.exports` assigns, `'use strict';`) can match that shape â€”
  * prose-as-code always can. The two legal shapes the raw sentence test WOULD
  * match are excluded up front: a spaced arithmetic minus between two operands
  * (`balance: amountDue - amountPaid`) via PROSE_ARITH_MINUS (W23-262/B1: that
  * exact line refused run #2's chunk 2/7 and cascaded into 28 honest coverage
- * reds in the emitted suite; fixes/255 §2 + fixes/260 §2), and a single-line
+ * reds in the emitted suite; fixes/255 Â§2 + fixes/260 Â§2), and a single-line
  * ternary `cond ? a : b` with single-token arms (`return negative ? -cents :
  * cents;`) via PROSE_TERNARY (322 X3, BUG-4: that exact line refused EXP03's
- * final synthesis cycle; 322_e2_monitor §BUG-4).
+ * final synthesis cycle; 322_e2_monitor Â§BUG-4).
  *
  * The masking here is deliberately LINE-SCOPED, not `maskLiteralsAndComments`:
  * the leaked blob's own deliberation quotes (`"implement every one"`) leave
  * stray quote characters in the text, and the module-global masker treats an
- * unpaired quote as an open literal — blanking every following line and
+ * unpaired quote as an open literal â€” blanking every following line and
  * disarming the gate on the exact artifact it must catch (verified against
  * `chunk-0.ts:340-362`). So: single/double-quoted spans are matched within
  * their own line (an unpaired quote stays visible, matching the JS
@@ -583,7 +590,7 @@ export function proseLineHits(source: string): ProseLineHit[] {
       }
       if (c === "\\") {
         // Stray backslash in code position (legal code has none outside a
-        // literal): blank it, so escaped-quote deliberation (`\"…\"` in the
+        // literal): blank it, so escaped-quote deliberation (`\"â€¦\"` in the
         // leaked blob) reads as the prose it is instead of tripping the
         // code-char gate on punctuation the model emitted BY MISTAKE.
         visible += " ";
@@ -605,7 +612,7 @@ export function proseLineHits(source: string): ProseLineHit[] {
           k += 1;
         }
         if (closed === -1) {
-          // Unpaired quote — a same-line literal is impossible, so this is
+          // Unpaired quote â€” a same-line literal is impossible, so this is
           // stray deliberation punctuation: keep it visible.
           visible += c;
           j += 1;
@@ -622,12 +629,12 @@ export function proseLineHits(source: string): ProseLineHit[] {
     inTemplate = template;
     const t = visible.trim();
     if (t.length === 0) continue;
-    const flat = t.replace(/([A-Za-z])'([A-Za-z])/g, "$1$2"); // "I'll write" → "Ill write"
-    // W23-262 (B1): a spaced arithmetic minus with a ≥2-char operand on each side
-    // is a code position (see PROSE_ARITH_MINUS) — never prose. Tested on the
+    const flat = t.replace(/([A-Za-z])'([A-Za-z])/g, "$1$2"); // "I'll write" â†’ "Ill write"
+    // W23-262 (B1): a spaced arithmetic minus with a â‰¥2-char operand on each side
+    // is a code position (see PROSE_ARITH_MINUS) â€” never prose. Tested on the
     // MASKED text, so a dash inside a string/comment was already blanked above.
     if (PROSE_ARITH_MINUS.test(flat)) continue;
-    // 322 X3 (BUG-4): end-anchored ternary expression — code, never prose (see
+    // 322 X3 (BUG-4): end-anchored ternary expression â€” code, never prose (see
     // PROSE_TERNARY above). Tested on the MASKED text like PROSE_ARITH_MINUS,
     // so arms inside strings/comments are already blanked away.
     if (PROSE_TERNARY.test(flat)) continue;
@@ -637,13 +644,13 @@ export function proseLineHits(source: string): ProseLineHit[] {
     if (PROSE_OBJECT_MAP.test(flat)) continue;
     const hasParens = flat.includes("(") || flat.includes(")");
     const codeProbe = hasParens ? flat.replace(/[()]/g, "") : flat;
-    // 216f (W2·R3 tightening): every code-significant char vetoes a line as
+    // 216f (W2Â·R3 tightening): every code-significant char vetoes a line as
     // prose EXCEPT a bare slash. The real blob's residual evader (chunk-0.ts:342,
     // "flip/rental/field ops") carries `/` between words and no other code char,
     // so it slipped the old veto. A slash-only line now falls through to a
     // STRICTER sentence branch below (shape checked on slash-stripped text plus
-    // sentence word/letter floors AND a sentence terminal) — no bare statement
-    // of the emitted subset ends in `.`/`?`/`!` with ≥6 words / ≥30 letters.
+    // sentence word/letter floors AND a sentence terminal) â€” no bare statement
+    // of the emitted subset ends in `.`/`?`/`!` with â‰¥6 words / â‰¥30 letters.
     let codeHit = false;
     let slashOnly = true;
     for (const ch of codeProbe) {
@@ -677,92 +684,92 @@ export function proseLineHits(source: string): ProseLineHit[] {
 }
 
 /**
- * Byte-stable system prompt (cache-hit economics, 90 §12.3). First line
+ * Byte-stable system prompt (cache-hit economics, 90 Â§12.3). First line
  * contains the literal word "json" + a complete worked example of the
- * envelope (DeepSeek JSON-output contract, [W-JSON] fixes/97 §W).
+ * envelope (DeepSeek JSON-output contract, [W-JSON] fixes/97 Â§W).
  */
 export function p6SynthesisSystemPrompt(): string {
   return [
     "You are RapidTool's P6 code generator. You implement ONE TypeScript-style module",
-    "that satisfies the brief and the spec below. Return a single JSON object — the word json,",
+    "that satisfies the brief and the spec below. Return a single JSON object â€” the word json,",
     "exactly this envelope, no markdown fences, nothing before or after:",
     '{"module":"...complete module source as one string...","exports":["f1","f2"],"reqTrace":{"req-1":"f1"}}',
-    "Worked example (shape only — the content is yours; note every parameter and the",
-    "return type are ANNOTATED — see rule 10):",
+    "Worked example (shape only â€” the content is yours; note every parameter and the",
+    "return type are ANNOTATED â€” see rule 10):",
     '{"module":"function add(a: number, b: number): number { return a + b; }","exports":["add"],"reqTrace":{"req-1":"add"}}',
-    // W61 lane D (D1 / R2 §2.2): a LEGAL refusal channel. The prose-in-code
+    // W61 lane D (D1 / R2 Â§2.2): a LEGAL refusal channel. The prose-in-code
     // detector exists because a model that cannot satisfy the spec leaks its
     // deliberation into the module; this gives it an honest, coded alternative
     // that costs no repair and can never be mistaken for a pass.
     "LEGAL REFUSAL REPLY (use ONLY when the spec and the brief cannot both be satisfied):",
-    '{"refusal":"<one sentence>","reason":"<which requirement conflicts with which signature>"} — return this INSTEAD of the module envelope; never write planning prose or a partial module into `module`, and never emit a refusal when you can implement the spec.',
+    '{"refusal":"<one sentence>","reason":"<which requirement conflicts with which signature>"} â€” return this INSTEAD of the module envelope; never write planning prose or a partial module into `module`, and never emit a refusal when you can implement the spec.',
     "RULES (all mandatory):",
     // 216f (T-10 / F-08): the export-ceiling rule and the requirement list must
     // be CONSISTENT. The old pair ("export exactly these ... nothing more" +
-    // "implement every requirement") was unsatisfiable on multi-domain briefs —
+    // "implement every requirement") was unsatisfiable on multi-domain briefs â€”
     // the model said so itself at chunk-0.ts:350. The ceiling now scopes every
     // file to its OWN listed signatures, requirement duty is scoped to what
     // those signatures cover, and hidden logic behind non-exported names is
     // explicitly forbidden (that was the leak's failed workaround).
-    "1. Export EXACTLY the functions the spec's typeSignatures name — nothing more, nothing less. When the project is generated as several files, each file exports ONLY its own listed signatures: implement every requirement those listed signatures cover, never hide a requirement's logic behind non-exported helpers, and never add functions the list does not name.",
-    // 216f (T-15): the validator refuses Math.random — the prompt must advertise
+    "1. Export EXACTLY the functions the spec's typeSignatures name â€” nothing more, nothing less. When the project is generated as several files, each file exports ONLY its own listed signatures: implement every requirement those listed signatures cover, never hide a requirement's logic behind non-exported helpers, and never add functions the list does not name.",
+    // 216f (T-15): the validator refuses Math.random â€” the prompt must advertise
     // it (215b drift-proof principle: never enforce a rule the model was not told).
     // W49/335-1: the enforcement claim is scoped to the token the validator
     // actually matches (`Math.random`, NONDETERMINISTIC_PRIMITIVE). The broader
     // determinism duty stays a model instruction, not an over-claim: the
     // validator never refuses `Date.now()`/`new Date()` (a legitimate timestamp
     // use the product may need), so the prompt must not imply it does.
-    "2. Zero imports, zero requires, zero external deps. Plain, fully-typed functions only. Declare every function with `function name(...)` — never write `module.exports`, `exports.`, or any import/export statement yourself: list the export names ONLY in the envelope's `exports` array and the build wires the bindings. Never use Math.random() (validator-enforced), and avoid any other non-deterministic primitive: ids and values must derive deterministically from the inputs so two identical runs produce identical results. When the prompt's TYPE DEFINITIONS block names shared types, the BUILD injects those aliases at the top of your file — you just use the names.",
+    "2. Zero imports, zero requires, zero external deps. Plain, fully-typed functions only. Declare every function with `function name(...)` â€” never write `module.exports`, `exports.`, or any import/export statement yourself: list the export names ONLY in the envelope's `exports` array and the build wires the bindings. Never use Math.random() (validator-enforced), and avoid any other non-deterministic primitive: ids and values must derive deterministically from the inputs so two identical runs produce identical results. When the prompt's TYPE DEFINITIONS block names shared types, the BUILD injects those aliases at the top of your file â€” you just use the names.",
     "3. Full JSDoc on every exported function.",
     `4. Never reference these forbidden primitives anywhere in the module (validator-enforced): ${FORBIDDEN_PRIMITIVE_NAMES.join(", ")}.`,
     "5. Mark each requirement you implement with a \"// req-N\" comment on the implementing function.",
     "6. Never test rejection paths inside the module; guards are behavior, not bugs.",
     "7. Do not invent features the brief does not state. Do not soften or drop a stated requirement.",
-    // 216f (T-09): the prose-in-code refusal is advertised too — the leaked
+    // 216f (T-09): the prose-in-code refusal is advertised too â€” the leaked
     // 23-line deliberation (F-04) shipped because nothing told the model that
     // planning prose in the module body is a refusal, not a style choice.
-    "8. Write CODE only — never emit planning prose, deliberation, or \"I'll write the code now\" into the module (validator-enforced): every line must be a real JavaScript statement.",
+    "8. Write CODE only â€” never emit planning prose, deliberation, or \"I'll write the code now\" into the module (validator-enforced): every line must be a real JavaScript statement.",
     // W46/332-1 (P1): the async-await rule, advertised because the validator
     // enforces it (215b drift-proof principle). The real keyed tree's
     // `src/jobs/rehab.ts` called an earlier file's async `getProperty` without
     // `await` and read `.ok` off the returned Promise (undefined), floating the
     // rejection past the test and reding the whole spec file.
     // W50/336-1: the enforcement claim is SCOPED to what the guard can actually
-    // see — a direct call, a `this` receiver inside the declaring class, and the
+    // see â€” a direct call, a `this` receiver inside the declaring class, and the
     // optional-call tail. A call through a named receiver, an indirect
     // invocation, or a Promise-returner not spelled `async` is outside the guard
     // (documented on `unawaitedAsyncValueUses`), so the prompt must not imply the
     // validator catches those (the same over-claim 335-1 4B corrected for rule 2).
-    "9. When you call a function that is ASYNCHRONOUS (declared `async` — whether an earlier file exports it or this module declares it), you MUST `await` the call before reading any property off its result or destructuring it: `const x = await getProperty(id); x.ok` — never `const x = getProperty(id); x.ok`. An un-awaited async call reads `undefined` off a Promise and leaks an unhandled rejection. The validator refuses this for direct calls, `this`-receiver calls inside the declaring class, and optional calls (`f?.(…)`); it cannot see a call through a named receiver (`obj.m()`), an indirect invocation (`f.call(…)` / `(f)(…)`), or a Promise-returner not spelled `async`, so the duty is yours in those cases.",
+    "9. When you call a function that is ASYNCHRONOUS (declared `async` â€” whether an earlier file exports it or this module declares it), you MUST `await` the call before reading any property off its result or destructuring it: `const x = await getProperty(id); x.ok` â€” never `const x = getProperty(id); x.ok`. An un-awaited async call reads `undefined` off a Promise and leaks an unhandled rejection. The validator refuses this for direct calls, `this`-receiver calls inside the declaring class, and optional calls (`f?.(â€¦)`); it cannot see a call through a named receiver (`obj.m()`), an indirect invocation (`f.call(â€¦)` / `(f)(â€¦)`), or a Promise-returner not spelled `async`, so the duty is yours in those cases.",
     // W52/338-1 follow-up: the emitted tree is compiled with `tsc --noEmit`
-    // under `strict: true` (scaffold.ts tsconfigJson) — an unannotated
+    // under `strict: true` (scaffold.ts tsconfigJson) â€” an unannotated
     // parameter is TS7006 (`noImplicitAny`) and an undeclared named type is
     // TS2304, so a module written in plain JS style fails the product's OWN
     // declared typecheck. The worked example above is annotated for the same
     // reason: the model imitates it (338-3's keyed run hit TS7006 on all 12
     // generated functions; 338-2 reproduced `dispatch.ts(11,21) TS7006`).
-    "10. TypeScript STRICT mode is on for the emitted tree (`noImplicitAny`): annotate EVERY function parameter and its return type. Use ONLY built-in types (string, number, boolean, unknown, any, object, `T[]`) or named types you DECLARE in this same module (`type X = {...};` / `interface X {...}`) — never reference a named domain type (e.g. `FlipProjectInput`) unless you declare it here, because an undeclared name fails the compile. Example: `function create(input: { id: string }): Promise<{ id: string }> { ... }`. An unannotated parameter fails the emitted tree's own `tsc --noEmit` compile (TS7006), which blocks the product. When the prompt carries a TYPE DEFINITIONS block, those are the project's shared domain types: the build injects those exact aliases at the top of your file, so reference them by name as-is and do NOT declare or redefine them — declare locally only a helper type the block does NOT list.",
+    "10. TypeScript STRICT mode is on for the emitted tree (`noImplicitAny`): annotate EVERY function parameter and its return type. Use ONLY built-in types (string, number, boolean, unknown, any, object, `T[]`) or named types you DECLARE in this same module (`type X = {...};` / `interface X {...}`) â€” never reference a named domain type (e.g. `FlipProjectInput`) unless you declare it here, because an undeclared name fails the compile. Example: `function create(input: { id: string }): Promise<{ id: string }> { ... }`. An unannotated parameter fails the emitted tree's own `tsc --noEmit` compile (TS7006), which blocks the product. When the prompt carries a TYPE DEFINITIONS block, those are the project's shared domain types: the build injects those exact aliases at the top of your file, so reference them by name as-is and do NOT declare or redefine them â€” declare locally only a helper type the block does NOT list.",
     // W56/342-1 (keyed P6 convergence): the measured strict-ts classes that stop
-    // keyed runs at P6 — TS2322 (a helper annotated `number` returning a
+    // keyed runs at P6 â€” TS2322 (a helper annotated `number` returning a
     // `Record<string, unknown>`), TS2749 (`TextDecoder` used as a type under a
     // value-only global) and TS2440 (a local declaration colliding with an
     // import). Rule 10 named only TS7006/TS2304, so the model was never told the
     // shapes a bounded repair had to correct. W57/343-1's keyed best-of-N probe
     // added a fourth, measured live: TS2323 (`Cannot redeclare exported
-    // variable`) — candidate 1 declared `resolvePort`/`validateOrderEvent`
+    // variable`) â€” candidate 1 declared `resolvePort`/`validateOrderEvent`
     // twice. Real `tsc` is the gate, not the validator, so the rule claims no
     // enforcement. The compiler report already rides the repair re-prompt; this
     // names the classes so the retry can act.
-    "11. The emitted tree is compiled by real `tsc --noEmit` under `strict: true`; a type error blocks the product. Four classes it refuses, with the required shape for each: (a) TS2322 ASSIGNMENT TYPE MISMATCH — an annotation must EXACTLY match the value it describes: never annotate a function as returning `number` (or a variable as `number`) while its body returns a structured value such as `Record<string, unknown>`, an object literal, or an array; type such a helper `Record<string, unknown>` (or a `type`/`interface` you declare), and if you mean one numeric field, return that field rather than the whole record. (b) TS2749 VALUE USED AS A TYPE — never put a runtime VALUE in a type position: the global `TextDecoder` is a value-only constructor here, so `: TextDecoder` on a parameter, return or variable fails; every type must be one of `string | number | boolean | unknown | any | object | T[]` (or a `type`/`interface` you DECLARE in this module) — use `number[]`/`Uint8Array` for bytes and `string` for decoded text, and construct `new TextDecoder()` only at runtime. (c) TS2440 IMPORT/LOCAL CONFLICT — never declare a name locally (`function`/`class`/`const`/`type`/`interface`) that is also imported or declared under the same name; the build injects the shared TYPE DEFINITIONS aliases AND imports each earlier file's exports, so declare each of your own helpers exactly ONCE, under a name no earlier file exports and none the TYPE DEFINITIONS block lists. (d) TS2323 DUPLICATE EXPORTED VARIABLE — `Cannot redeclare exported variable`: declare each exported variable exactly ONCE at top level. Never declare the same exported `const`/`let`/`var`/`function`/`class` name twice in one module, and never reuse a name an earlier file already exports; a second top-level declaration of an exported name fails the compile — emit ONE declaration and name the export in the envelope's `exports` array (never write `module.exports`/`exports.` yourself).",
+    "11. The emitted tree is compiled by real `tsc --noEmit` under `strict: true`; a type error blocks the product. Four classes it refuses, with the required shape for each: (a) TS2322 ASSIGNMENT TYPE MISMATCH â€” an annotation must EXACTLY match the value it describes: never annotate a function as returning `number` (or a variable as `number`) while its body returns a structured value such as `Record<string, unknown>`, an object literal, or an array; type such a helper `Record<string, unknown>` (or a `type`/`interface` you declare), and if you mean one numeric field, return that field rather than the whole record. (b) TS2749 VALUE USED AS A TYPE â€” never put a runtime VALUE in a type position: the global `TextDecoder` is a value-only constructor here, so `: TextDecoder` on a parameter, return or variable fails; every type must be one of `string | number | boolean | unknown | any | object | T[]` (or a `type`/`interface` you DECLARE in this module) â€” use `number[]`/`Uint8Array` for bytes and `string` for decoded text, and construct `new TextDecoder()` only at runtime. (c) TS2440 IMPORT/LOCAL CONFLICT â€” never declare a name locally (`function`/`class`/`const`/`type`/`interface`) that is also imported or declared under the same name; the build injects the shared TYPE DEFINITIONS aliases AND imports each earlier file's exports, so declare each of your own helpers exactly ONCE, under a name no earlier file exports and none the TYPE DEFINITIONS block lists. (d) TS2323 DUPLICATE EXPORTED VARIABLE â€” `Cannot redeclare exported variable`: declare each exported variable exactly ONCE at top level. Never declare the same exported `const`/`let`/`var`/`function`/`class` name twice in one module, and never reuse a name an earlier file already exports; a second top-level declaration of an exported name fails the compile â€” emit ONE declaration and name the export in the envelope's `exports` array (never write `module.exports`/`exports.` yourself).",
   ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
-// T-107.1 (216r · W7-L1): the patch (str_replace) repair level.
+// T-107.1 (216r Â· W7-L1): the patch (str_replace) repair level.
 //
 // `patch.ts` (W4 core, 391 lines) is the surgical edit primitive: ONE textual
 // replacement or a coded refusal (unique-match contract; opt-in graded fuzzy;
-// diff-as-result). This section is the INTEGRATION — a bounded patch repair
+// diff-as-result). This section is the INTEGRATION â€” a bounded patch repair
 // re-prompt for the LOCALIZED defect classes (soft forbidden primitive /
 // non-deterministic primitive / prose-in-code), parsed into a `PatchRequest`,
 // applied via `applyStrReplace` against the module the model just produced for
@@ -770,7 +777,7 @@ export function p6SynthesisSystemPrompt(): string {
 // existing deterministic validator (`validateSynthesisModule`) before
 // acceptance.
 //
-// Doctrine (restated from patch.ts, unchanged): refusal-default — a
+// Doctrine (restated from patch.ts, unchanged): refusal-default â€” a
 // multi-match, a no-match, a no-op or a malformed request REFUSES with its
 // code and the legacy full-rewrite repair path runs UNCHANGED (prompt bytes
 // included). Fuzzy is NOT enabled in this wire: the graded level is opt-in by
@@ -813,10 +820,10 @@ export function tokenLineNumbers(source: unknown, needle: unknown, cap = 6): num
 /**
  * Exact-source excerpt windows around 1-based line numbers: every hit line is
  * widened by `ctx` lines, adjacent/overlapping windows merge, and the result is
- * capped (≤ PATCH_REPAIR_MAX_WINDOWS windows; ≤ PATCH_REPAIR_WINDOW_MAX_LINES
- * lines and ≤ PATCH_REPAIR_WINDOW_MAX_CHARS chars each — whole lines only,
- * never a truncated line). `text` is the module's own lines joined verbatim —
- * never reflowed, never whitespace-collapsed — so a model can copy an exact
+ * capped (â‰¤ PATCH_REPAIR_MAX_WINDOWS windows; â‰¤ PATCH_REPAIR_WINDOW_MAX_LINES
+ * lines and â‰¤ PATCH_REPAIR_WINDOW_MAX_CHARS chars each â€” whole lines only,
+ * never a truncated line). `text` is the module's own lines joined verbatim â€”
+ * never reflowed, never whitespace-collapsed â€” so a model can copy an exact
  * `oldStr` from it. Pure and total: garbage line numbers are ignored and an
  * out-of-range line never fabricates text.
  */
@@ -860,16 +867,16 @@ export function patchExcerptWindows(
   return { windows, omittedLines: omitted };
 }
 
-// --- 217k (W12 LANE B · fixes/216y §2.3 G6): the coded unreadable-reply signal.
+// --- 217k (W12 LANE B Â· fixes/216y Â§2.3 G6): the coded unreadable-reply signal.
 // Before this block, BOTH envelope readers below (parseSynthesisPatchEnvelope /
 // parseSynthesisEnvelope) returned a bare `null` when a reply ARRIVED but could
-// not be READ (JSON.parse failure or the wrong shape) — no log, no code — so an
+// not be READ (JSON.parse failure or the wrong shape) â€” no log, no code â€” so an
 // unparseable model reply was indistinguishable from "the model said nothing"
 // and keyed repair/synthesis degraded silently. The readers now report every
 // such read failure through an optional sink while keeping their return
 // contract byte-identical (`null` still means "no envelope" to every caller);
 // an absent/blank reply stays SILENT, so "no output" remains its own state. The
-// signal carries the registry code (RT_E_LLM_REJECTED — the same code the
+// signal carries the registry code (RT_E_LLM_REJECTED â€” the same code the
 // callers' terminal refusals already use), a BOUNDED excerpt of what was
 // actually received, and which reader could not read it. It never claims "the
 // model refused": the truth recorded is "we could not read it".
@@ -883,14 +890,14 @@ export type EnvelopeReadFailure = {
   /** Which reader could not read the reply. */
   source: "parseSynthesisEnvelope" | "parseSynthesisPatchEnvelope";
   /** Where the read stopped: JSON.parse threw, the JSON was the wrong shape, or
-   *  the reply was CUT OFF mid-envelope (an unterminated string/brace — the
+   *  the reply was CUT OFF mid-envelope (an unterminated string/brace â€” the
    *  fixes/349-P6 truncated-envelope class, which gets a budget-aware re-prompt). */
   reason: "unreadable-json" | "unexpected-shape" | "truncated-json";
   /** First ENVELOPE_READ_EXCERPT_MAX chars of what was received, whitespace-collapsed. */
   excerpt: string;
   /** Total characters received (the excerpt is a bounded window of this). */
   receivedChars: number;
-  /** The coded human line (a log-detail body): reader · truth · bounded excerpt. */
+  /** The coded human line (a log-detail body): reader Â· truth Â· bounded excerpt. */
   message: string;
 };
 
@@ -899,8 +906,8 @@ export type EnvelopeReadSink = (failure: EnvelopeReadFailure) => void;
 
 /** Build the coded read-failure signal: RT_E_LLM_REJECTED + the reader + a
  *  bounded excerpt of the received bytes. `why` names the concrete read rule
- *  that failed ("JSON.parse failed: …", "the payload is not a JSON object", …)
- *  — never a story about the model's intent. Pure + total. */
+ *  that failed ("JSON.parse failed: â€¦", "the payload is not a JSON object", â€¦)
+ *  â€” never a story about the model's intent. Pure + total. */
 function readFailure(
   source: EnvelopeReadFailure["source"],
   text: string,
@@ -914,20 +921,20 @@ function readFailure(
     reason,
     excerpt,
     receivedChars: text.length,
-    message: `${source}: the reply was received but could not be read — ${why} (${text.length} chars; excerpt "${excerpt}")`,
+    message: `${source}: the reply was received but could not be read â€” ${why} (${text.length} chars; excerpt "${excerpt}")`,
   };
 }
 
-/** A parsed patch (delta) envelope — the model's bounded `str_replace` block.
+/** A parsed patch (delta) envelope â€” the model's bounded `str_replace` block.
  *  `fuzzy` rides through VERBATIM: `applyStrReplace` re-validates it at
  *  runtime (a malformed level refuses; it is never silently defaulted). */
 export type PatchRepairEnvelope = { oldStr: string; newStr: string; fuzzy?: unknown };
 
 /**
  * Parse a model reply into the patch (delta) envelope
- * `{"patch":{"oldStr":"…","newStr":"…"[,"fuzzy":{"threshold":n}]}}`. Tolerant
+ * `{"patch":{"oldStr":"â€¦","newStr":"â€¦"[,"fuzzy":{"threshold":n}]}}`. Tolerant
  * of ```json fences (parseSynthesisEnvelope precedent). Returns null when the
- * reply is NOT a patch envelope — the caller then keeps the legacy
+ * reply is NOT a patch envelope â€” the caller then keeps the legacy
  * module-envelope repair path. Total: non-strings, garbage JSON, a missing
  * block and a blank/empty `oldStr` are all null, never a throw.
  *
@@ -944,7 +951,7 @@ export function parseSynthesisPatchEnvelope(text: unknown, sink?: EnvelopeReadSi
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/, "")
     .trim();
-  if (cleaned.length === 0) return null; // blank reply — "no output", not a read failure
+  if (cleaned.length === 0) return null; // blank reply â€” "no output", not a read failure
   let obj: unknown;
   try {
     obj = JSON.parse(cleaned);
@@ -960,7 +967,7 @@ export function parseSynthesisPatchEnvelope(text: unknown, sink?: EnvelopeReadSi
   const block = (obj as Record<string, unknown>).patch;
   if (!block || typeof block !== "object" || Array.isArray(block)) {
     // A legacy module envelope is the DOCUMENTED non-delta continuation (the
-    // caller keeps the full-rewrite repair path) — readable, not a failure.
+    // caller keeps the full-rewrite repair path) â€” readable, not a failure.
     const legacyModule = (obj as Record<string, unknown>).module;
     if (typeof legacyModule === "string" && legacyModule.trim().length > 0) return null;
     sink?.(
@@ -1004,7 +1011,7 @@ export type PatchDeltaRecord = {
 
 /** The `p6.repair.delta` event (structured JSON detail). This is the ONE codec
  *  shared by the producer (this module) and the reader
- *  (`headless.ts repairPatchRecords`) — keep the two in step. */
+ *  (`headless.ts repairPatchRecords`) â€” keep the two in step. */
 export function patchDeltaLogEntry(record: PatchDeltaRecord): JsonLog {
   return {
     ts: Date.now(),
@@ -1015,7 +1022,7 @@ export function patchDeltaLogEntry(record: PatchDeltaRecord): JsonLog {
   };
 }
 
-/** The `p6.repair.patch.refused` event (coded + bounded) — logged whenever the
+/** The `p6.repair.patch.refused` event (coded + bounded) â€” logged whenever the
  *  delta path did not land and the legacy full-rewrite repair takes over. */
 export function patchRefusalLogEntry(detail: string, path?: string): JsonLog {
   const clean = typeof detail === "string" && detail.trim() ? detail.replace(/\s+/g, " ").trim() : "unknown";
@@ -1024,12 +1031,12 @@ export function patchRefusalLogEntry(detail: string, path?: string): JsonLog {
     phase: 6 as PhaseId,
     level: "warn",
     event: "p6.repair.patch.refused",
-    detail: `${path ? `${path} · ` : ""}${clean.slice(0, 400)}`,
+    detail: `${path ? `${path} Â· ` : ""}${clean.slice(0, 400)}`,
   };
 }
 
-/** 217k (W12 LANE B · fixes/216y §2.3 G6): the warn entry for a reply that
- *  ARRIVED but could not be read as a synthesis envelope — the visible half of
+/** 217k (W12 LANE B Â· fixes/216y Â§2.3 G6): the warn entry for a reply that
+ *  ARRIVED but could not be read as a synthesis envelope â€” the visible half of
  *  the silent-sink fix. Deliberately NOT `p6.synthesis.refused`: that event is
  *  the TERMINAL refusal census (read by headless's codegen-refusal detail,
  *  run-eval's failure check and judgment's risks), and a first reply a later
@@ -1047,7 +1054,7 @@ export function envelopeReadLogEntry(failure: EnvelopeReadFailure, path?: string
     phase: 6 as PhaseId,
     level: "warn",
     event: "p6.synthesis.envelope.unreadable",
-    detail: `${path ? `${path} · ` : ""}${code} · ${clean.slice(0, 400)}`,
+    detail: `${path ? `${path} Â· ` : ""}${code} Â· ${clean.slice(0, 400)}`,
   };
 }
 
@@ -1055,23 +1062,23 @@ export function envelopeReadLogEntry(failure: EnvelopeReadFailure, path?: string
 export type PatchRepairOptions = {
   /** The tree path this module will be emitted at (log records only). */
   path?: string;
-  /** Bounded log sink — the caller's attempt accumulator (200-entry cap). */
+  /** Bounded log sink â€” the caller's attempt accumulator (200-entry cap). */
   log?: (entry: JsonLog) => void;
 };
 
 /**
- * 216r (W9-L2 · DEFECT 1): raw-source line numbers carrying a CODE occurrence
- * of `token` — the masked↔raw line map the patch path needs.
+ * 216r (W9-L2 Â· DEFECT 1): raw-source line numbers carrying a CODE occurrence
+ * of `token` â€” the maskedâ†”raw line map the patch path needs.
  *
  * `maskLiteralsAndComments` replaces every masked span with SAME-LENGTH spaces,
- * so masked and raw CHARACTER offsets stay aligned — but the newlines inside a
+ * so masked and raw CHARACTER offsets stay aligned â€” but the newlines inside a
  * block comment (i.e. every JSDoc'd module, the system-prompt-mandated shape)
- * are destroyed (W9-L2 repro: raw 38 lines → masked 27). Masked line numbers
+ * are destroyed (W9-L2 repro: raw 38 lines â†’ masked 27). Masked line numbers
  * therefore named the wrong raw lines, `patchableDefect`'s raw-line filter
  * emptied, and the patch path never fired for the common case (the W8-L5
- * defect). This walks every masked occurrence of `token` — an occurrence
+ * defect). This walks every masked occurrence of `token` â€” an occurrence
  * exists in the masked text iff the token sits in CODE, never inside a masked
- * literal/comment — and maps its character offset onto the raw line that
+ * literal/comment â€” and maps its character offset onto the raw line that
  * offset falls on. A line is kept only when its raw text really carries the
  * token, so every excerpted window quotes a copyable occurrence. Capped at
  * `cap` line numbers, order kept, duplicates dropped. Pure and total: garbage
@@ -1093,7 +1100,7 @@ function codeTokenLineNumbers(source: unknown, masked: unknown, token: unknown, 
     const at = masked.indexOf(token, from);
     if (at === -1) break;
     from = at + 1;
-    // Greatest raw line start ≤ at (binary search; both strings share offsets).
+    // Greatest raw line start â‰¤ at (binary search; both strings share offsets).
     let lo = 0;
     let hi = rawLineStarts.length - 1;
     while (lo < hi) {
@@ -1124,8 +1131,8 @@ function patchableDefect(input: {
   if (input.unbound.length > 0) return null;
   if (input.softToken !== null) {
     const token = input.softToken;
-    // 216r (W9-L2 · DEFECT 1): RAW line numbers via the masked↔raw offset map
-    // — masked line numbers drift on any JSDoc'd module and used to empty this
+    // 216r (W9-L2 Â· DEFECT 1): RAW line numbers via the maskedâ†”raw offset map
+    // â€” masked line numbers drift on any JSDoc'd module and used to empty this
     // candidate list (the patch path never fired for the common case).
     const lines = codeTokenLineNumbers(input.source, input.masked, token);
     if (lines.length === 0) return null;
@@ -1137,7 +1144,7 @@ function patchableDefect(input: {
   if (input.missingSig.length > 0) return null;
   if (input.nondet !== null) {
     const token = input.nondet;
-    // 216r (W9-L2 · DEFECT 1): same raw-line map as the soft-token branch.
+    // 216r (W9-L2 Â· DEFECT 1): same raw-line map as the soft-token branch.
     const lines = codeTokenLineNumbers(input.source, input.masked, token);
     if (lines.length === 0) return null;
     return { defect: `the module uses a non-deterministic primitive: \`${token}\``, lines };
@@ -1153,14 +1160,14 @@ function patchableDefect(input: {
 }
 
 /**
- * T-107.1 (216r · W7-L1): ONE patch-repair attempt for one file. Offers the
+ * T-107.1 (216r Â· W7-L1): ONE patch-repair attempt for one file. Offers the
  * bounded delta first (`p6SynthesisPatchRepairPrompt` quotes the exact current
  * source), applies a returned delta via `applyStrReplace` against the module
  * the model just produced, and revalidates the patched module with the
  * EXISTING deterministic validator. Returns the patched envelope on a landed
  * delta, or null on every non-landing outcome (no excerpt, a non-delta reply,
  * a coded `applyStrReplace` refusal, a patched module that still fails
- * validation, a failed model call) — the caller's legacy full-rewrite repair
+ * validation, a failed model call) â€” the caller's legacy full-rewrite repair
  * then runs UNCHANGED. A landed delta and every refusal are logged through the
  * caller's bounded sink. Never throws on garbage replies.
  */
@@ -1181,17 +1188,17 @@ async function attemptPatchRepair(input: {
     p6SynthesisPatchRepairPrompt(input.defect, excerpt.windows, input.treeFailure),
     input.opts,
   );
-  // FM-03 (W37 Y1): the patch repair is a bounded repair call too — its spend
+  // FM-03 (W37 Y1): the patch repair is a bounded repair call too â€” its spend
   // is metered like the rest. A budget stop refuses the patch (recorded on the
   // caller's bounded sink); the caller's legacy repair path then surfaces the
   // coded stop through its own accounting. TODO(FM-03b): thread a terminal
   // stop through attemptPatchRepair's result shape so the follow-up call is
-  // skipped entirely (kept out of this window — two callers, byte-parity pins).
+  // skipped entirely (kept out of this window â€” two callers, byte-parity pins).
   const patchStop = accountRepairUsage(reply);
   if (patchStop) {
     input.log?.(
       patchRefusalLogEntry(
-        `RT_E_BUDGET_EXHAUSTED · ${patchStop.error ?? "session token budget exhausted during the patch repair call"}`,
+        `RT_E_BUDGET_EXHAUSTED Â· ${patchStop.error ?? "session token budget exhausted during the patch repair call"}`,
         input.path,
       ),
     );
@@ -1200,20 +1207,20 @@ async function attemptPatchRepair(input: {
   if (!reply.ok) {
     input.log?.(
       patchRefusalLogEntry(
-        `RT_E_LLM_REJECTED · the patch repair call did not succeed (${reply.error ?? reply.reason ?? "unknown"})`,
+        `RT_E_LLM_REJECTED Â· the patch repair call did not succeed (${reply.error ?? reply.reason ?? "unknown"})`,
         input.path,
       ),
     );
     return null;
   }
-  // 217k (W12 LANE B · G6): an ARRIVED-but-unreadable reply is recorded through
-  // the caller's bounded sink — the SAME `p6.repair.patch.refused` event the
+  // 217k (W12 LANE B Â· G6): an ARRIVED-but-unreadable reply is recorded through
+  // the caller's bounded sink â€” the SAME `p6.repair.patch.refused` event the
   // apply-validator refusals use (the delta did not land; the legacy
   // full-rewrite repair takes over, byte-identical).
   const delta = parseSynthesisPatchEnvelope(reply.text, (failure) => {
-    input.log?.(patchRefusalLogEntry(`${failure.code} · ${failure.message}`, input.path));
+    input.log?.(patchRefusalLogEntry(`${failure.code} Â· ${failure.message}`, input.path));
   });
-  if (delta === null) return null; // not a delta reply — the legacy full-rewrite repair follows
+  if (delta === null) return null; // not a delta reply â€” the legacy full-rewrite repair follows
   const request: PatchRequest = {
     oldStr: delta.oldStr,
     newStr: delta.newStr,
@@ -1221,14 +1228,14 @@ async function attemptPatchRepair(input: {
   };
   const applied = applyStrReplace(input.previous.module, request);
   if (!applied.ok) {
-    input.log?.(patchRefusalLogEntry(`${applied.code} · ${applied.error}`, input.path));
+    input.log?.(patchRefusalLogEntry(`${applied.code} Â· ${applied.error}`, input.path));
     return null;
   }
   const reValidated = validateSynthesisModule(applied.text, input.previous.exports, input.signatureNames);
   if (!reValidated.ok) {
     input.log?.(
       patchRefusalLogEntry(
-        `patched module still fails validation — ${reValidated.code} · ${reValidated.error}`,
+        `patched module still fails validation â€” ${reValidated.code} Â· ${reValidated.error}`,
         input.path,
       ),
     );
@@ -1260,10 +1267,10 @@ export const REPAIR_TREE_FAILURE_TAIL_MAX = 1500;
 /**
  * fixes/144 (M3-2): the optional tree-failure tail block for repair
  * re-prompts. When the caller supplies tree-run failure context (failing file
- * path + first not-ok tail — the M4 journey driver's synthesize-or-repair
+ * path + first not-ok tail â€” the M4 journey driver's synthesize-or-repair
  * cycle), append it as a deterministic, whitespace-collapsed, bounded block
  * so the model sees WHY the tree failed. Omitted (or blank) context returns
- * "" — the no-context repair prompt stays byte-identical to the legacy text.
+ * "" â€” the no-context repair prompt stays byte-identical to the legacy text.
  */
 function repairTreeFailureTail(treeFailure?: string): string {
   const t =
@@ -1273,26 +1280,26 @@ function repairTreeFailureTail(treeFailure?: string): string {
 }
 
 /** fixes/326 F1b PREP: bounded gate-repair context block for the PRIMARY
- *  synthesis prompt. Deterministic + whitespace-collapsed; absent/blank ⇒
+ *  synthesis prompt. Deterministic + whitespace-collapsed; absent/blank â‡’
  *  the prompt is byte-identical to the legacy text. */
 const REPAIR_GATE_CONTEXT_MAX = 700;
 function withGateRepairContext(user: string, gateRepair?: string): string {
   const t = typeof gateRepair === "string" ? gateRepair.replace(/\s+/g, " ").trim() : "";
   if (!t) return user;
   return user +
-    `\n\nP6 GATE REPAIR CONTEXT (the previous cycle's tree-run was GREEN; the P6 DoD gate weighed it and REFUSED — implement these recorded unmet requirements with real working code, not renames or padding):\n${t.slice(0, REPAIR_GATE_CONTEXT_MAX)}`;
+    `\n\nP6 GATE REPAIR CONTEXT (the previous cycle's tree-run was GREEN; the P6 DoD gate weighed it and REFUSED â€” implement these recorded unmet requirements with real working code, not renames or padding):\n${t.slice(0, REPAIR_GATE_CONTEXT_MAX)}`;
 }
 
 /** fixes/328 F1 (Ledger) PREP-2 READER: bounded previous-refusal context block
  *  for the PRIMARY synthesis prompt. `deps.synthesisRefusal` was produced by
  *  the journey's cycle mapping (headless `p6CycleLiveDeps`, fixes/153 P2) but
- *  read by NOTHING — a cycle that died on a refusal re-synthesized blind to
+ *  read by NOTHING â€” a cycle that died on a refusal re-synthesized blind to
  *  WHY. This is the reader. The block states honestly what it is: the previous
- *  cycle's refusal class (RT_E_* code) + the model's OWN recorded reason — NOT
+ *  cycle's refusal class (RT_E_* code) + the model's OWN recorded reason â€” NOT
  *  a new requirement, so the model corrects the stated cause rather than
- *  inventing scope. Deterministic + whitespace-collapsed; absent/blank ⇒ the
+ *  inventing scope. Deterministic + whitespace-collapsed; absent/blank â‡’ the
  *  prompt is byte-identical to the legacy text.
- *  W52/339-2: the reader cap was 200 — one TENTH of the refusal budget, so the
+ *  W52/339-2: the reader cap was 200 â€” one TENTH of the refusal budget, so the
  *  failing case + the harness/sanitizer's own reason (which ride past char 200
  *  of a multi-case verify evidence) never reached the next cycle. Raised to the
  *  documented P6_REFUSAL_DETAIL_MAX budget so cycle N+1 sees the same recorded
@@ -1302,47 +1309,47 @@ function withSynthesisRefusalContext(user: string, synthesisRefusal?: string): s
   const t = typeof synthesisRefusal === "string" ? synthesisRefusal.replace(/\s+/g, " ").trim() : "";
   if (!t) return user;
   return user +
-    `\n\nP6 PREVIOUS-REFUSAL CONTEXT (the previous synthesis cycle was REFUSED — this is the refusal class and the model's own recorded reason, NOT a new requirement; correct the stated cause and return a valid envelope):\n${t.slice(0, P6_SYNTHESIS_REFUSAL_CONTEXT_MAX)}`;
+    `\n\nP6 PREVIOUS-REFUSAL CONTEXT (the previous synthesis cycle was REFUSED â€” this is the refusal class and the model's own recorded reason, NOT a new requirement; correct the stated cause and return a valid envelope):\n${t.slice(0, P6_SYNTHESIS_REFUSAL_CONTEXT_MAX)}`;
 }
 
 /** W52/339-2 PREP-3 READER: the PRIMARY-prompt reader for `deps.treeFailure`.
  *  The journey already supplies the previous cycle's recorded failure on this
- *  seam — the tree-run failure tail on a red tree-run, or the codegen refusal
+ *  seam â€” the tree-run failure tail on a red tree-run, or the codegen refusal
  *  detail when a cycle produced no tree at all (headless driveP6Journey's
  *  `treeTail`). Until now that context reached only the bounded REPAIR
- *  re-prompts (repairTreeFailureTail), so a repair cycle's PRIMARY synthesis —
+ *  re-prompts (repairTreeFailureTail), so a repair cycle's PRIMARY synthesis â€”
  *  which re-emits the whole module/tree BEFORE any repair class is even
- *  detected — re-synthesized blind to the failure it was invoked to fix, and
+ *  detected â€” re-synthesized blind to the failure it was invoked to fix, and
  *  the bounded loop could repeat the same red cycle. This is the reader: the
  *  failure (failing file / failing oracle case + its first not-ok reason) rides
  *  the primary prompt as ONE bounded, whitespace-collapsed block. Recorded
- *  evidence only — it adds no requirement the brief never had. Absent/blank ⇒
+ *  evidence only â€” it adds no requirement the brief never had. Absent/blank â‡’
  *  the prompt stays byte-identical to the legacy text. */
 const P6_TREE_FAILURE_CONTEXT_MAX = 1200;
 function withTreeFailureContext(user: string, treeFailure?: string): string {
   const t = typeof treeFailure === "string" ? treeFailure.replace(/\s+/g, " ").trim() : "";
   if (!t) return user;
   return user +
-    `\n\nP6 PREVIOUS-CYCLE FAILURE CONTEXT (the prior cycle's recorded tree-run/oracle failure — the failing file or oracle case and its first not-ok reason; repair the stated cause with real working code; this is recorded evidence, NOT a new requirement):\n${t.slice(0, P6_TREE_FAILURE_CONTEXT_MAX)}`;
+    `\n\nP6 PREVIOUS-CYCLE FAILURE CONTEXT (the prior cycle's recorded tree-run/oracle failure â€” the failing file or oracle case and its first not-ok reason; repair the stated cause with real working code; this is recorded evidence, NOT a new requirement):\n${t.slice(0, P6_TREE_FAILURE_CONTEXT_MAX)}`;
 }
 
 /** fixes/343-1 follow-up (343-2 STOP-and-REPORT): the PRIMARY chunk prompt's
  *  reader for the persisted tree's deterministic repo map (`repo-map.ts`). A
  *  resumed/re-synthesized run then sees the ranked outline of the tree it is
- *  extending (`path: exported symbols · in-degree, size, role`) instead of
+ *  extending (`path: exported symbols Â· in-degree, size, role`) instead of
  *  re-deriving everything from the brief. Built from `project.generatedTree`
- *  ONLY — the keyless floor's placeholder `generatedSource` is not a tree the
+ *  ONLY â€” the keyless floor's placeholder `generatedSource` is not a tree the
  *  run is extending, so a tree-less project renders nothing and the prompt is
- *  byte-identical to the legacy text (empty `rendered` ⇒ this returns `user`).
- *  The map guarantees no guessed symbols; the render is already ≤ its budget. */
+ *  byte-identical to the legacy text (empty `rendered` â‡’ this returns `user`).
+ *  The map guarantees no guessed symbols; the render is already â‰¤ its budget. */
 function withRepoMapContext(user: string, rendered: string): string {
   if (!rendered) return user;
-  return `${user}\n\nREPO MAP (deterministic outline of the tree so far — path: exported symbols, ranked):\n${rendered}`;
+  return `${user}\n\nREPO MAP (deterministic outline of the tree so far â€” path: exported symbols, ranked):\n${rendered}`;
 }
 
 /**
  * PR-19 (A7): the DEDICATED repair-agent SYSTEM prompt is now the PURE contract
- * owned by `prompt-engine.ts` (PR-18) — one source of truth for the delta/full/
+ * owned by `prompt-engine.ts` (PR-18) â€” one source of truth for the delta/full/
  * refusal reply shapes, so the prompt and its parity test cannot drift from the
  * consumer. Kept as a named delegate for callers/tests pinned on this symbol.
  */
@@ -1382,13 +1389,13 @@ export function p6SynthesisExportRepairPrompt(
 
 /**
  * Repair re-prompt for a SOFT forbidden primitive (zero-dep/zero-IO contract
- * violation — NOT eval/Function/import). Names the exact offending token so
+ * violation â€” NOT eval/Function/import). Names the exact offending token so
  * the model can rewrite it to a plain function.
  */
 export function p6SynthesisForbiddenRepairPrompt(token: string, treeFailure?: string): string {
   return [
     `Your module used a forbidden primitive: \`${token}\`.`,
-    "Rewrite it with plain functions only — no process/require/globalThis/window/self/fetch/WebSocket/XMLHttpRequest/document/localStorage/indexedDB/eval/Function/import.",
+    "Rewrite it with plain functions only â€” no process/require/globalThis/window/self/fetch/WebSocket/XMLHttpRequest/document/localStorage/indexedDB/eval/Function/import.",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports, zero imports, JSDoc, // req-N markers, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
@@ -1403,7 +1410,7 @@ export function p6SynthesisForbiddenRepairPrompt(token: string, treeFailure?: st
 export function p6SynthesisNondeterministicRepairPrompt(token: string, treeFailure?: string): string {
   return [
     `Your module used a non-deterministic primitive: \`${token}\`.`,
-    "Rewrite it deterministically: derive ids/values from the inputs (caller-supplied ids, counters, stable hashes of input fields). Two identical runs must produce identical results — never mint randomness.",
+    "Rewrite it deterministically: derive ids/values from the inputs (caller-supplied ids, counters, stable hashes of input fields). Two identical runs must produce identical results â€” never mint randomness.",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
@@ -1411,7 +1418,7 @@ export function p6SynthesisNondeterministicRepairPrompt(token: string, treeFailu
 
 /**
  * 216f (T-09 / F-04): repair re-prompt for prose-in-code the validator refused
- * — the module body carried sentence-shaped English (LLM deliberation),
+ * â€” the module body carried sentence-shaped English (LLM deliberation),
  * not code. Names the offending 1-based line numbers + a bounded excerpt so
  * the model DELETES the prose rather than paraphrasing it into new prose. ONE
  * bounded attempt; a repeat is refused (RT_E_VALIDATION).
@@ -1427,19 +1434,19 @@ export function p6SynthesisProseRepairPrompt(hits: readonly ProseLineHit[], tree
   }
   const first = rows.find((h) => h && typeof h.text === "string" && h.text.trim() !== "");
   return [
-    "Your previous reply was not code: it contained English prose sentences written into the module body — planning/deliberation text, not JavaScript.",
-    `Prose was detected at line(s): ${lines.join(", ") || "(unknown)"}${first ? ` — e.g. ${JSON.stringify(first.text)}` : ""}.`,
-    "Rewrite the module as CODE ONLY: delete every prose sentence entirely — do not rephrase it, do not move it into a comment or a string, do not explain. Every line of the module must be a real JavaScript statement.",
+    "Your previous reply was not code: it contained English prose sentences written into the module body â€” planning/deliberation text, not JavaScript.",
+    `Prose was detected at line(s): ${lines.join(", ") || "(unknown)"}${first ? ` â€” e.g. ${JSON.stringify(first.text)}` : ""}.`,
+    "Rewrite the module as CODE ONLY: delete every prose sentence entirely â€” do not rephrase it, do not move it into a comment or a string, do not explain. Every line of the module must be a real JavaScript statement.",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
 }
 
 /**
- * T-107.1 (216r · W7-L1): the patch-first repair re-prompt. It carries the
+ * T-107.1 (216r Â· W7-L1): the patch-first repair re-prompt. It carries the
  * named defect plus the EXACT current source windows (whole lines, verbatim)
  * so a returned `oldStr` can be copied character-for-character, and it offers
- * the two legal reply shapes — the bounded str_replace delta first, the legacy
+ * the two legal reply shapes â€” the bounded str_replace delta first, the legacy
  * full corrected envelope as the alternative. Deterministic bytes for a given
  * (defect, windows, treeFailure); the quoted windows are captured source, so
  * unlike the sibling repair prompts this one is self-contained (the model
@@ -1455,29 +1462,29 @@ export function p6SynthesisPatchRepairPrompt(
   for (const w of Array.isArray(windows) ? windows : []) {
     if (!w || typeof w.text !== "string" || w.text.length === 0) continue;
     blocks.push(
-      `--- lines ${w.firstLine}-${w.lastLine} (line numbers are for orientation only — they are NOT part of the text) ---\n${w.text}\n--- end lines ${w.firstLine}-${w.lastLine} ---`,
+      `--- lines ${w.firstLine}-${w.lastLine} (line numbers are for orientation only â€” they are NOT part of the text) ---\n${w.text}\n--- end lines ${w.firstLine}-${w.lastLine} ---`,
     );
   }
   return [
     `Your previous module was refused by the deterministic validator: ${named || "(defect unnamed)"}.`,
-    "Fix it with ONE bounded replacement instead of rewriting the module. The exact current source is quoted below — a replacement's oldStr must be copied from it character-for-character (whole lines, no line numbers, no added or removed indentation):",
+    "Fix it with ONE bounded replacement instead of rewriting the module. The exact current source is quoted below â€” a replacement's oldStr must be copied from it character-for-character (whole lines, no line numbers, no added or removed indentation):",
     ...blocks,
-    // 325 A3: the FIRST FORM example used to end `"},}.` — a trailing comma
+    // 325 A3: the FIRST FORM example used to end `"},}.` â€” a trailing comma
     // inside the object. The prompt demands "JSON ONLY" twice, but its own
     // preferred example was INVALID JSON: a model copying it byte-for-byte
     // produced an unreadable reply (JSON.parse refuses trailing commas), the
     // delta was refused on a technicality and the legacy full-rewrite repair
-    // burned the extra call. The example must be parseable JSON — pinned.
-    'Return JSON ONLY, FIRST FORM (preferred): {"patch":{"oldStr":"<exact text copied from the quoted source — it must occur EXACTLY once in the module>","newStr":"<the replacement text; empty deletes the matched text>"}}.',
+    // burned the extra call. The example must be parseable JSON â€” pinned.
+    'Return JSON ONLY, FIRST FORM (preferred): {"patch":{"oldStr":"<exact text copied from the quoted source â€” it must occur EXACTLY once in the module>","newStr":"<the replacement text; empty deletes the matched text>"}}.',
     'SECOND FORM, only if one unique replacement cannot fix the defect: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
-    "Change ONLY the named defect — every other line of the module stays byte-identical.",
+    "Change ONLY the named defect â€” every other line of the module stays byte-identical.",
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no rejection-path tests, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
 }
 
 /**
  * Repair re-prompt for the missing-typeSignature failure class (make-4
- * delivery blocker — fixes/121): the module exported a SUBSET of the spec's
+ * delivery blocker â€” fixes/121): the module exported a SUBSET of the spec's
  * required functions. Re-prompt with the EXACT missing names so the model
  * implements + exports each, mirroring the existing unbound-export repair
  * instead of an instant refusal.
@@ -1524,10 +1531,10 @@ export function p6SynthesisContractTypeRepairPrompt(
     "Your previous module DECLARED a shared contract type that the emitted tree already provides.",
     `Redeclared type(s): ${detail}.`,
     ...(defLines.length > 0
-      ? ["The authoritative definition(s) — use these names as-is, do NOT redefine them:", ...defLines]
+      ? ["The authoritative definition(s) â€” use these names as-is, do NOT redefine them:", ...defLines]
       : []),
     "The build injects these aliases at the top of every chunk of this tree; a local declaration is a duplicate identifier (TS2440) and makes your type a DIFFERENT type from every sibling chunk's (cross-chunk drift).",
-    `DELETE every local declaration of ${names.join(", ") || "those names"} and use the type as-is everywhere it appears (parameters, returns, variables, casts). Do NOT re-declare it, do NOT rename it, and do NOT write any import yourself — the build injects the aliases.`,
+    `DELETE every local declaration of ${names.join(", ") || "those names"} and use the type as-is everywhere it appears (parameters, returns, variables, casts). Do NOT re-declare it, do NOT rename it, and do NOT write any import yourself â€” the build injects the aliases.`,
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
@@ -1535,10 +1542,10 @@ export function p6SynthesisContractTypeRepairPrompt(
 
 /**
  * W45/331-4 (Finding B): repair re-prompt for the cross-chunk duplicate-declaration
- * class — the module declares a top-level name an EARLIER chunk already exports, so
+ * class â€” the module declares a top-level name an EARLIER chunk already exports, so
  * the materialized ESM (which imports that export) would fail to load with
- * `SyntaxError: Identifier '…' has already been declared` (the real keyed tree:
- * `src/jobs/flip.ts` imported `estimateARV` from `…/list-line-items.ts` and declared
+ * `SyntaxError: Identifier 'â€¦' has already been declared` (the real keyed tree:
+ * `src/jobs/flip.ts` imported `estimateARV` from `â€¦/list-line-items.ts` and declared
  * it again at line 546). Names each conflicting identifier + its declaration line +
  * the exporting sibling file, so the model removes/renames its local binding and
  * calls the earlier export directly. ONE bounded attempt; a repeat is refused.
@@ -1549,13 +1556,13 @@ export function p6SynthesisDuplicateDeclRepairPrompt(
 ): string {
   const rows = (Array.isArray(duplicates) ? duplicates : []).filter((d) => d && typeof d.name === "string");
   const detail = rows
-    .map((d) => `- "${d.name}" — declared at line ${d.line}; already exported by ${d.priorPath}`)
+    .map((d) => `- "${d.name}" â€” declared at line ${d.line}; already exported by ${d.priorPath}`)
     .join("\n");
   const names = [...new Set(rows.map((d) => d.name))];
   return [
     "Your previous module declares top-level name(s) that an EARLIER file already exports:",
     detail || "(none listed)",
-    "The build imports an earlier file's exports into this file as plain bindings; declaring the same name here is a load-time SyntaxError (\"Identifier '…' has already been declared\").",
+    "The build imports an earlier file's exports into this file as plain bindings; declaring the same name here is a load-time SyntaxError (\"Identifier 'â€¦' has already been declared\").",
     `For each name above: DELETE your local declaration and call the earlier export BY NAME (it is already available in this file), or rename your own helper so it collides with no earlier file's exports${names.length ? ` (do NOT reuse ${names.join(", ")})` : ""}. Never import/require anything.`,
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
@@ -1574,7 +1581,7 @@ export function p6SynthesisAsyncAwaitRepairPrompt(
   treeFailure?: string,
 ): string {
   const rows = (Array.isArray(uses) ? uses : []).filter((u) => u && typeof u.name === "string" && Number.isFinite(u.line));
-  const detail = rows.map((u) => `- "${u.name}" at line ${u.line} — the call result is used as a value (${u.form}) without await`).join("\n");
+  const detail = rows.map((u) => `- "${u.name}" at line ${u.line} â€” the call result is used as a value (${u.form}) without await`).join("\n");
   const names = [...new Set(rows.map((u) => u.name))];
   return [
     "Your previous module calls an ASYNCHRONOUS function without `await` and then uses the returned Promise as if it were the resolved value:",
@@ -1594,9 +1601,9 @@ export function p6SynthesisAsyncAwaitRepairPrompt(
 export function p6SynthesisJsxRepairPrompt(hits: readonly number[], treeFailure?: string): string {
   const lines = [...new Set((Array.isArray(hits) ? hits : []).filter((n) => Number.isFinite(n)))].sort((a, b) => a - b);
   return [
-    "Your previous module contains raw JSX, but this module is a `.ts` file — the JSX transform applies to `.tsx` only, so raw elements are a syntax error (TS1005: '>' expected) and the tree cannot be loaded.",
+    "Your previous module contains raw JSX, but this module is a `.ts` file â€” the JSX transform applies to `.tsx` only, so raw elements are a syntax error (TS1005: '>' expected) and the tree cannot be loaded.",
     `Offending line(s): ${lines.slice(0, 12).join(", ") || "(unknown)"}.`,
-    "Rewrite the module as JSX-free plain TypeScript: return the data (a string, a plain object, a record) from the function and let the UI shell render it. Do NOT keep any `<Tag …>` / `</Tag>` element and do NOT re-export a component.",
+    "Rewrite the module as JSX-free plain TypeScript: return the data (a string, a plain object, a record) from the function and let the UI shell render it. Do NOT keep any `<Tag â€¦>` / `</Tag>` element and do NOT re-export a component.",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
@@ -1611,7 +1618,7 @@ export function p6SynthesisJsxRepairPrompt(hits: readonly number[], treeFailure?
 export function p6SynthesisJsxNamespaceRepairPrompt(hits: readonly number[], treeFailure?: string): string {
   const lines = [...new Set((Array.isArray(hits) ? hits : []).filter((n) => Number.isFinite(n)))].sort((a, b) => a - b);
   return [
-    "Your previous module references the JSX TYPE NAMESPACE (`JSX.Element`), but this is a `.ts` chunk — the namespace is not in scope, so the module fails its own `tsc` with TS2503: Cannot find namespace 'JSX'.",
+    "Your previous module references the JSX TYPE NAMESPACE (`JSX.Element`), but this is a `.ts` chunk â€” the namespace is not in scope, so the module fails its own `tsc` with TS2503: Cannot find namespace 'JSX'.",
     `Offending line(s): ${lines.slice(0, 12).join(", ") || "(unknown)"}.`,
     "Rewrite the module as JSX-free plain TypeScript: either type the value with your OWN local element/return type, or return a string/plain object/record and let the UI shell render it. Do NOT reference `JSX.Element` (or any `JSX.*` type) and do NOT rely on a global JSX namespace.",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
@@ -1620,18 +1627,18 @@ export function p6SynthesisJsxNamespaceRepairPrompt(hits: readonly number[], tre
 }
 
 /**
- * BF-5 (SYNTHSPEC A5): repair re-prompt for a money-semantics violation — a
+ * BF-5 (SYNTHSPEC A5): repair re-prompt for a money-semantics violation â€” a
  * money-named export that sums a QUANTITY field as if it were the amount
- * (the measured `computeCartTotalPence` returned `4` for 3×£2.50 + 1×£4.00).
+ * (the measured `computeCartTotalPence` returned `4` for 3Ã—Â£2.50 + 1Ã—Â£4.00).
  * Names the function, its line, and the offending operand, and demands the
- * price×quantity arithmetic. ONE bounded attempt; a repeat is refused.
+ * priceÃ—quantity arithmetic. ONE bounded attempt; a repeat is refused.
  */
 export function p6SynthesisMoneyRepairPrompt(
   hits: readonly MoneySemanticsHit[],
   treeFailure?: string,
 ): string {
   const rows = (Array.isArray(hits) ? hits : []).filter((h) => h && typeof h.name === "string");
-  const detail = rows.map((h) => `- "${h.name}" at line ${h.line} — accumulates only \`${h.operand}\``).join("\n");
+  const detail = rows.map((h) => `- "${h.name}" at line ${h.line} â€” accumulates only \`${h.operand}\``).join("\n");
   const first = rows[0];
   return [
     "Your previous module computes a MONEY amount incorrectly: a money-named function sums a QUANTITY as if it were the price, so the total is a count of items rather than an amount in minor units.",
@@ -1644,9 +1651,9 @@ export function p6SynthesisMoneyRepairPrompt(
 }
 
 /**
- * fixes/349-P6 (Fix 1 — size repair class): repair re-prompt for a module whose
+ * fixes/349-P6 (Fix 1 â€” size repair class): repair re-prompt for a module whose
  * `module` string exceeds {@link P6_MODULE_MAX_CHARS}. Before this class the
- * only outcome was an outright refusal — a valid 63 371-char candidate was
+ * only outcome was an outright refusal â€” a valid 63 371-char candidate was
  * refused with no recovery path. Names the measured size + the bound and asks
  * for the SAME module shrunk to fit (drop redundant comments/blank lines, keep
  * every export and every `// req-N` marker). ONE bounded attempt; a still-oversize
@@ -1661,16 +1668,16 @@ export function p6SynthesisSizeRepairPrompt(
   const over = Math.max(0, actual - maxChars);
   return [
     `Your previous module was too large: the \`module\` string was ${actual} characters, ${over} over the ${maxChars}-character bound.`,
-    "The bound exists because the JSON envelope is capped by the output budget — an over-size module arrives truncated or not at all.",
+    "The bound exists because the JSON envelope is capped by the output budget â€” an over-size module arrives truncated or not at all.",
     `Rewrite the SAME module to fit: keep EVERY required exported function and every \`// req-N\` marker, but remove redundant JSDoc/comment lines and blank lines so the \`module\` string is at most ${maxChars} characters.`,
-    "Do NOT drop an export, do NOT stub a function body, and do NOT shorten identifiers to single letters — only remove non-essential text.",
+    "Do NOT drop an export, do NOT stub a function body, and do NOT shorten identifiers to single letters â€” only remove non-essential text.",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
 }
 
 /**
- * fixes/349-P6 (Fix 3 — truncated-envelope repair): repair re-prompt when a
+ * fixes/349-P6 (Fix 3 â€” truncated-envelope repair): repair re-prompt when a
  * synthesis reply ARRIVED but its JSON envelope was CUT OFF (an unterminated
  * string / missing closing brace), so no envelope could be read after the one
  * deterministic recovery attempt. The prior behavior refused after one generic
@@ -1693,10 +1700,10 @@ export function p6SynthesisTruncationRepairPrompt(
 }
 
 /**
- * fixes/349-P6 (Fix 5 — non-ESM module body): repair re-prompt when the module
+ * fixes/349-P6 (Fix 5 â€” non-ESM module body): repair re-prompt when the module
  * carries CJS residue the ESM materializer cannot convert (a `module.exports` /
  * `exports` reference used as a VALUE, or a TypeScript `export =`). Such a body
- * was accepted and then refused at EMIT (`RT_E_VALIDATION · assembled generated
+ * was accepted and then refused at EMIT (`RT_E_VALIDATION Â· assembled generated
  * module body is CommonJS but the emitted package declares "type":"module"`),
  * producing no tree at all. The regression is caught at VALIDATION now and the
  * model gets one bounded rewrite to plain ESM-shaped declarations.
@@ -1709,14 +1716,14 @@ export function p6SynthesisEsmRepairPrompt(
   return [
     `Your previous module carries CommonJS syntax the emitted tree cannot load: ${names.join(", ") || "module/exports residue"}.`,
     "The emitted tenant declares \"type\":\"module\"; a `module`/`exports` reference (or a TypeScript `export =`) throws at import, so the product would not load at all.",
-    "Rewrite the module as plain ESM-shaped declarations: declare every function with `function name(...)`, annotate every parameter and return type, and list the export names ONLY in the envelope's `exports` array — do NOT write `module.exports`, `exports.`, or `export =` anywhere, and do NOT write any `import`/`export` statement yourself (the build wires the exports).",
+    "Rewrite the module as plain ESM-shaped declarations: declare every function with `function name(...)`, annotate every parameter and return type, and list the export names ONLY in the envelope's `exports` array â€” do NOT write `module.exports`, `exports.`, or `export =` anywhere, and do NOT write any `import`/`export` statement yourself (the build wires the exports).",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
 }
 
 /**
- * fixes/349-P6 (Fix 6 — TS7006): repair re-prompt for a function parameter with
+ * fixes/349-P6 (Fix 6 â€” TS7006): repair re-prompt for a function parameter with
  * no type annotation. The emitted tree compiles under `strict`/`noImplicitAny`,
  * so an unannotated parameter is TS7006 and reds the tree's own `tsc`. Names
  * each function+parameter so the model annotates it (built-in or an in-file/
@@ -1788,7 +1795,7 @@ export function injectMissingExports(
   return { source: `${source.replace(/\s*$/, "")}${tail}`, changed: true, injected };
 }
 
-/** fixes/121: brief-fit repair re-prompt — the module ignored the brief's own
+/** fixes/121: brief-fit repair re-prompt â€” the module ignored the brief's own
  *  vocabulary; one bounded re-prompt carrying the missing nouns. */
 export function p6SynthesisBriefFitRepairPrompt(
   missing: readonly string[],
@@ -1797,7 +1804,7 @@ export function p6SynthesisBriefFitRepairPrompt(
   const nouns = [...new Set(missing.filter((n) => typeof n === "string" && n.trim()))];
   return [
     "Your previous module does NOT implement the brief's product: it must expose the brief's domain through its identifiers.",
-    `The brief requires these concepts to appear in your module (as function/constant/property names or their camelCase parts — e.g. a "lease renewal reminder" needs a function whose name contains renewal/remind): ${nouns.join(", ") || "(none listed)"}.`,
+    `The brief requires these concepts to appear in your module (as function/constant/property names or their camelCase parts â€” e.g. a "lease renewal reminder" needs a function whose name contains renewal/remind): ${nouns.join(", ") || "(none listed)"}.`,
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Rewrite the module around the brief's real product vocabulary: every exported function should correspond to a brief requirement (// req-N markers), named from the brief's nouns.",
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, no forbidden primitives, no markdown fences.",
@@ -1805,19 +1812,19 @@ export function p6SynthesisBriefFitRepairPrompt(
 }
 
 /**
- * R10-f01 (W39 Z2 · G3's wire): render `project.contracts` — the persisted A6
- * `DataContract` (types.ts `:300`) — as a capped DATA CONTRACTS prompt block
+ * R10-f01 (W39 Z2 Â· G3's wire): render `project.contracts` â€” the persisted A6
+ * `DataContract` (types.ts `:300`) â€” as a capped DATA CONTRACTS prompt block
  * for the synthesis builders. Rows mirror the packet's own forms
- * (packet.ts `:567-570`): entities as `<name> (<field:type, …>)` under an
+ * (packet.ts `:567-570`): entities as `<name> (<field:type, â€¦>)` under an
  * `entities:` heading, endpoints as `<METHOD> <path> (<job>)` under
  * `endpoints:`. NON-EMPTY GATE (Y1's FM-08 precedent): a null/absent/
  * empty/wholly-unrenderable contract returns [] and both builders keep the
  * exact legacy prompt bytes (keyless byte-parity + the T-01 pins). Total rows
  * cap at P6_SYNTH_CONTRACTS_MAX_ROWS (entities first, declare order) with a
- * visible `…[CONTRACTS-ELIDED: …]` marker past the cap (R12-f01's marker
- * convention — never a silent cut). Values whitespace-collapse to single
+ * visible `â€¦[CONTRACTS-ELIDED: â€¦]` marker past the cap (R12-f01's marker
+ * convention â€” never a silent cut). Values whitespace-collapse to single
  * spaces so a malformed imported contract can never inject prompt line
- * structure; rows are plain ASCII bullets — no new raw tokens.
+ * structure; rows are plain ASCII bullets â€” no new raw tokens.
  */
 export function p6SynthesisContractsLines(contracts: DataContract | null | undefined): string[] {
   if (contracts === null || contracts === undefined || typeof contracts !== "object") return [];
@@ -1848,7 +1855,7 @@ export function p6SynthesisContractsLines(contracts: DataContract | null | undef
   const shown = rows.slice(0, P6_SYNTH_CONTRACTS_MAX_ROWS);
   const lines: string[] = [
     "",
-    "DATA CONTRACTS (the project's persisted A6 data contract — implement its entities and endpoints inside existing functions; do NOT add APIs for it):",
+    "DATA CONTRACTS (the project's persisted A6 data contract â€” implement its entities and endpoints inside existing functions; do NOT add APIs for it):",
   ];
   for (const kind of ["entity", "endpoint"] as const) {
     const group = shown.filter((r) => r.kind === kind);
@@ -1858,18 +1865,18 @@ export function p6SynthesisContractsLines(contracts: DataContract | null | undef
   }
   if (rows.length > shown.length) {
     lines.push(
-      `- …[CONTRACTS-ELIDED: ${rows.length - shown.length} row(s) beyond the ${P6_SYNTH_CONTRACTS_MAX_ROWS}-row render cap — the full data contract persists on project.contracts]`,
+      `- â€¦[CONTRACTS-ELIDED: ${rows.length - shown.length} row(s) beyond the ${P6_SYNTH_CONTRACTS_MAX_ROWS}-row render cap â€” the full data contract persists on project.contracts]`,
     );
   }
   return lines;
 }
 
 // ---------------------------------------------------------------------------
-// P6 chunked convergence — ONE shared interface contract for the emitted tree.
+// P6 chunked convergence â€” ONE shared interface contract for the emitted tree.
 //
 // The measured defect (keyed P6): a chunk prompt carried only signature TEXT,
 // so a demanded `runFlip(command: FlipCommand): Promise<Property>` named types
-// the model had no definition for; each emitted module — forbidden to import —
+// the model had no definition for; each emitted module â€” forbidden to import â€”
 // re-declared its own `FlipCommand`/`Property`/`OpenStatus`, and the tree's own
 // `tsc` refused on cross-chunk drift (TS2322), duplicate re-export (TS2308) and
 // duplicate declaration (TS2440 / TS2323). The fix is a DETERMINISTIC interface
@@ -1877,17 +1884,17 @@ export function p6SynthesisContractsLines(contracts: DataContract | null | undef
 // type from the plan's signatures + the A6 data contract, the materializer
 // prepends the SAME canonical aliases (byte-identical text, one derivation) to
 // every chunk that references them, and the validator refuses any local
-// redeclaration — so every chunk shares one type identity and no module can
+// redeclaration â€” so every chunk shares one type identity and no module can
 // drift. The prepend keeps the emitted tree's file set (and the barrel) exactly
-// as before, and needs no import — the forbidden-primitive contract is
-// unchanged. Pure + deterministic: identical signatures + contracts ⇒ identical
+// as before, and needs no import â€” the forbidden-primitive contract is
+// unchanged. Pure + deterministic: identical signatures + contracts â‡’ identical
 // definitions.
 // ---------------------------------------------------------------------------
 
 /** Render cap on the derived interface-type-definitions block (visible marker past it). */
 export const P6_SYNTH_TYPE_DEFS_MAX = 40;
 
-/** One derived shared type: the bare name + its full `type <name> = …;` line. */
+/** One derived shared type: the bare name + its full `type <name> = â€¦;` line. */
 export type InterfaceTypeDefinition = { name: string; declaration: string };
 
 /**
@@ -1931,8 +1938,8 @@ const TS_TYPE_ALLOWLIST: ReadonlySet<string> = new Set([
   "SubtleCrypto", "Navigator", "Location", "History", "Worker", "MessagePort",
   "WritableStream", "ReadableStream", "BufferSource", "ArrayBufferView",
   // fixes/354: lib NAMESPACES that expose nested types (`Intl.DateTimeFormatOptions`,
-  // `WebAssembly.Module`). Never derive a flat alias for one — a module-scoped
-  // `type Intl = {…}` would shadow the global namespace and red the tree on the
+  // `WebAssembly.Module`). Never derive a flat alias for one â€” a module-scoped
+  // `type Intl = {â€¦}` would shadow the global namespace and red the tree on the
   // very next `Intl.X` reference (TS2694), the opposite of the self-sufficiency goal.
   "Intl", "Temporal", "Atomics", "WebAssembly", "Reflect", "Proxy", "NodeJS", "JSX",
 ]);
@@ -1940,7 +1947,7 @@ const TS_TYPE_ALLOWLIST: ReadonlySet<string> = new Set([
 /**
  * PascalCase type identifiers a signature text references, in first-occurrence
  * order, deduped, with the allowlist removed. A declarative generic parameter
- * list (`foo<T>(`) is stripped first — a usage application (`Promise<Foo>`,
+ * list (`foo<T>(`) is stripped first â€” a usage application (`Promise<Foo>`,
  * `Foo[]`) is never followed by `(`. Pure, deterministic, no LLM.
  */
 export function signatureTypeNames(typeSignatures: readonly string[]): string[] {
@@ -1960,7 +1967,7 @@ export function signatureTypeNames(typeSignatures: readonly string[]): string[] 
   return out;
 }
 
-/** Deterministic TS type for one A6 contract field type (`ulid?`, `int`, `datetime`, …). */
+/** Deterministic TS type for one A6 contract field type (`ulid?`, `int`, `datetime`, â€¦). */
 function contractFieldTsType(raw: unknown): string {
   const t = String(raw ?? "").trim();
   const nullable = t.endsWith("?");
@@ -1979,7 +1986,7 @@ function contractFieldTsType(raw: unknown): string {
 }
 
 /**
- * `{ field?: T; … [key: string]: unknown }` — the named fields keep their A6
+ * `{ field?: T; â€¦ [key: string]: unknown }` â€” the named fields keep their A6
  * contract type; the index signature admits any extra field an implementation
  * adds, so the task is convergence (one shared identity per name) rather than a
  * shape police force that would refuse a legitimate product. Deterministic.
@@ -2026,7 +2033,7 @@ function matchContractEntity(
  * domain type any plan signature references, plus every A6 contract entity.
  * Order = first occurrence across the signatures, then the contract entities;
  * deduped by name. The bodies come from the deterministic A6 contract when the
- * name matches an entity (with the `Command`/`Run`/… suffix), else a permissive
+ * name matches an entity (with the `Command`/`Run`/â€¦ suffix), else a permissive
  * `{ [key: string]: unknown }` so an otherwise-inexpressible model-invented
  * name still RESOLVES to one shared identity instead of an undefined name that
  * fails the tree's own tsc. Pure + deterministic.
@@ -2070,12 +2077,12 @@ export function interfaceTypeDefinitionLines(
   const shown = all.slice(0, P6_SYNTH_TYPE_DEFS_MAX);
   const lines = [
     "",
-    "TYPE DEFINITIONS (AUTHORITATIVE — the build places these exact aliases at the TOP of THIS file; annotate with these names, use their declared fields, and do NOT redeclare, redefine, or import them yourself):",
+    "TYPE DEFINITIONS (AUTHORITATIVE â€” the build places these exact aliases at the TOP of THIS file; annotate with these names, use their declared fields, and do NOT redeclare, redefine, or import them yourself):",
   ];
   for (const d of shown) lines.push(`- ${d.declaration}`);
   if (all.length > shown.length) {
     lines.push(
-      `- …[TYPES-ELIDED: ${all.length - shown.length} type definition(s) beyond the ${P6_SYNTH_TYPE_DEFS_MAX}-type render cap — the build still injects them into the file]`,
+      `- â€¦[TYPES-ELIDED: ${all.length - shown.length} type definition(s) beyond the ${P6_SYNTH_TYPE_DEFS_MAX}-type render cap â€” the build still injects them into the file]`,
     );
   }
   return lines;
@@ -2099,7 +2106,7 @@ export function contractTypeDefinitionsForSource(
 }
 
 /**
- * fixes/349-P6 (Fix 6 — TS2304): the type-position names a module references but
+ * fixes/349-P6 (Fix 6 â€” TS2304): the type-position names a module references but
  * neither declares locally nor finds in the injected contract. The materializer
  * uses this to prepend a permissive `type X = { [key: string]: unknown };` for
  * each, so a referenced name is ALWAYS defined in the file (or the injected
@@ -2107,8 +2114,8 @@ export function contractTypeDefinitionsForSource(
  *
  * fixes/354 (measured TS2304, 4/10 keyed runs): the original scan covered only
  * UNAMBIGUOUS positions (generic `<T>`, `as T`, `extends`/`implements T`), so a
- * domain type used in a plain annotation — `input: NoteInput`, `board:
- * InputState`, `: Difficulty`, `: CustomSoftwareRecord` — was never injected and
+ * domain type used in a plain annotation â€” `input: NoteInput`, `board:
+ * InputState`, `: Difficulty`, `: CustomSoftwareRecord` â€” was never injected and
  * the emitted tree reded its own tsc. The scan now also recognises bare
  * annotation (`name: Type` / `name?: Type`), return (`): Type`), union/
  * intersection member, `satisfies` and array-element positions. Injecting a
@@ -2130,7 +2137,7 @@ export function missingTypeNamesForSource(
   for (const name of localBindingLines(source).keys()) defined.add(name);
   // fixes/354: `namespace X` / `declare module X` bind a name that does NOT
   // collide cross-file (localBindingLines omits them by design), but a local
-  // `type X` injected beside one is a duplicate identifier — so they are
+  // `type X` injected beside one is a duplicate identifier â€” so they are
   // "defined" for this scan only.
   for (const m of code.matchAll(/^[ \t]*(?:export\s+)?(?:declare\s+)?(?:namespace|module)\s+([A-Za-z_$][\w$]*)/gm)) {
     defined.add(m[1]!);
@@ -2167,7 +2174,7 @@ export function missingTypeNamesForSource(
  * fixes/349-P6 (Fix 6): the permissive definitions the materializer prepends for
  * the names {@link missingTypeNamesForSource} reports. fixes/354 (measured): a
  * fallback that is NOT a contract entity is emitted as `type X = any;` rather
- * than `{[key:string]:unknown}` — the object shape turned a bridged TS2304 into
+ * than `{[key:string]:unknown}` â€” the object shape turned a bridged TS2304 into
  * fresh errors (TS2367 on `format === "json"`, TS2719 on the lib global
  * `RegExpMatchArray` it shadowed). `any` is the most permissive definition, so a
  * name the model referenced but never declared can never red the tree with a
@@ -2192,9 +2199,9 @@ export function missingTypeDefinitionsForSource(
 
 /**
  * The deterministic shared-contract prelude the materializer prepends to a
- * chunk that references contract types: one canonical `type …` line per
+ * chunk that references contract types: one canonical `type â€¦` line per
  * referenced definition, with a header naming it generated. Byte-identical for
- * every chunk that references the same type ⇒ one shared identity. `[]` when
+ * every chunk that references the same type â‡’ one shared identity. `[]` when
  * nothing is referenced (legacy bytes).
  */
 export function contractTypePreludeLines(
@@ -2202,27 +2209,89 @@ export function contractTypePreludeLines(
   defs: readonly InterfaceTypeDefinition[] | null | undefined,
 ): string[] {
   const referenced = contractTypeDefinitionsForSource(source, defs);
-  // fixes/354: dedupe by name (first wins) so two entries for one name — a
-  // contract def plus a fallback — can never emit TWO declarations (TS2300).
+  // fixes/354: dedupe by name (first wins) so two entries for one name â€” a
+  // contract def plus a fallback â€” can never emit TWO declarations (TS2300).
   const byName = new Map<string, InterfaceTypeDefinition>();
   for (const d of referenced) if (!byName.has(d.name)) byName.set(d.name, d);
   const unique = [...byName.values()];
   if (unique.length === 0) return [];
   return [
-    "// Generated shared interface contract (single source of truth — the build injects",
+    "// Generated shared interface contract (single source of truth â€” the build injects",
     "// these exact aliases; do not redeclare or redefine them).",
     ...unique.map((d) => d.declaration),
   ];
 }
 
 /**
+ * W359 (kind fidelity): the DELIVERY KIND contract â€” one imperative variant per
+ * `DeliveryKind`. No synthesis prompt used to carry the kind, so the model
+ * re-inferred it from the brief's prose and a `game` brief could come back as a
+ * CRUD app with tables, forms and no loop. The block is project-STABLE (a
+ * function of the resolved kind, never of the chunk), so it belongs in the
+ * cacheable prefix right after `BRIEF:` (see the D5/A8 order note in
+ * p6SynthesisChunkUserPrompt) â€” the prefix a vendor prompt cache keys on
+ * (`prompt_cache_hit_tokens`, research/deepseek-api.md Â§5).
+ *
+ * Rendered ONLY for a resolved kind; absent/null â‡’ the legacy prompt bytes.
+ */
+export const DELIVERY_KIND_BLOCK: Record<DeliveryKind, string> = {
+  app: [
+    "DELIVERY KIND: app (an end-user web application).",
+    "This project is a browser-delivered WEB APP â€” the whole tree must honour it.",
+    "- Surface (mandatory): an index.html entry plus src/main.tsx, and the pages/screens the spec names reachable through a router or explicit navigation.",
+    "- State is app state (loading/empty/error per surface) â€” do NOT plan a requestAnimationFrame loop or a <canvas>.",
+    "- Every page renders real content from the app's own data model; never ship a placeholder page.",
+  ].join("\n"),
+  tool: [
+    "DELIVERY KIND: tool (a command-line utility).",
+    "This project is a CLI â€” a deliverable, not an option. The whole tree must honour it.",
+    "- Surface (mandatory): one program entry exported as `main(argv: string[]): Promise<number>`.",
+    "- No DOM, no React, no browser globals, no `.tsx` file anywhere in this tree.",
+    "- A usage line, â‰¥2 documented non-zero exit codes, and an honest failure message per exit.",
+    "- Deterministic output for a fixed input; never a random id or a wall-clock timestamp in the output.",
+  ].join("\n"),
+  game: [
+    "DELIVERY KIND: game (a playable game).",
+    "This project is a GAME â€” the whole tree must honour it: a game is not a CRUD app and not a static site.",
+    "- Surface (mandatory): keyboard AND pointer input, a requestAnimationFrame game loop, and a <canvas> the loop renders into.",
+    "- Win/lose (or pause/restart) states are required behaviours, each reachable and testable.",
+    "- Score/level state is advanced by the loop; never ship a form-over-tables page instead of the game surface.",
+  ].join("\n"),
+  library: [
+    "DELIVERY KIND: library (an importable package).",
+    "This project is a LIBRARY â€” the whole tree must honour it.",
+    "- Surface (mandatory): side-effect-free named exports a consumer imports directly; importing the package MUST NOT start a server, a loop, or any I/O.",
+    "- No `.tsx` file, no JSX, no DOM â€” a browser component is not a library API.",
+    "- One shared `type` for the public data shape, exported beside the functions that take and return it; every export declares its parameter and return types.",
+  ].join("\n"),
+  service: [
+    "DELIVERY KIND: service (a hosted API/worker process).",
+    "This project is a SERVICE â€” the whole tree must honour it.",
+    "- Surface (mandatory): a long-running entry that reads its configuration (e.g. `PORT`) and listens â€” a start/listen signature must exist.",
+    "- Readiness and shutdown are explicit: an unready start refuses honestly instead of reporting success.",
+    "- No DOM, no React, no `.tsx`: the deliverable is a process, never a web page.",
+    "- Every inbound request path has an honest failure response; never fabricate a 200.",
+  ].join("\n"),
+};
+
+/** The `DELIVERY KIND` lines for a resolved kind, or `[]` for an absent/unknown
+ *  one â€” the legacy-byte contract every optional block in this module keeps. */
+function deliveryKindLines(kind: DeliveryKind | null | undefined): string[] {
+  if (typeof kind !== "string" || !Object.prototype.hasOwnProperty.call(DELIVERY_KIND_BLOCK, kind)) return [];
+  return ["", DELIVERY_KIND_BLOCK[kind as DeliveryKind]];
+}
+
+/**
  * Synthesis user prompt: brief + spec, deterministic and capped. The
  * typeSignatures are the interface definitions the module MUST export
- * (MetaGPT Engineer evidence, [W-META] fixes/97 §W). fixes/144 (M2): thin
+ * (MetaGPT Engineer evidence, [W-META] fixes/97 Â§W). fixes/144 (M2): thin
  * delegate of the chunked builder with the FULL signature list and no prior
- * files — byte-identical output to the pre-M2 prompt (the ≤8-signature,
+ * files â€” byte-identical output to the pre-M2 prompt (the â‰¤8-signature,
  * single-chunk legacy contract; regression-tested). R10-f01 (W39 Z2):
  * forwards the optional contracts argument (gated in the chunk builder).
+ * W359: forwards the resolved kind (the single-module lane serves the
+ * single-entry kinds â€” `library`/`service` â€” so this is where their contract
+ * rides; absent â‡’ the legacy bytes).
  */
 export function p6SynthesisUserPrompt(
   brief: string,
@@ -2236,16 +2305,21 @@ export function p6SynthesisUserPrompt(
   },
   lessons: readonly string[] = [],
 
-  /** R10-f01 (W39 Z2): project.contracts — rendered by the chunk builder
-   *  behind a non-empty gate; absent/null/empty ⇒ byte-identical legacy. */
+  /** R10-f01 (W39 Z2): project.contracts â€” rendered by the chunk builder
+   *  behind a non-empty gate; absent/null/empty â‡’ byte-identical legacy. */
   contracts?: DataContract | null,
 
-  /** fixes/349 (P6 convergence): the deterministic interface contract — the
+  /** fixes/349 (P6 convergence): the deterministic interface contract â€” the
    *  full alias bodies of every domain type the signatures reference (see
-   *  deriveInterfaceTypeDefinitions). Absent/empty ⇒ byte-identical legacy. */
+   *  deriveInterfaceTypeDefinitions). Absent/empty â‡’ byte-identical legacy. */
   typeDefinitions?: readonly InterfaceTypeDefinition[] | null,
+
+  /** W359: `engine.deliveryKindOf(project)` â€” the ONE resolved kind. Trailing
+   *  and optional so every existing caller keeps compiling and every kind-less
+   *  call keeps the legacy prompt bytes. */
+  kind?: DeliveryKind | null,
 ): string {
-  return p6SynthesisChunkUserPrompt(brief, spec, spec.typeSignatures, [], lessons, contracts, typeDefinitions);
+  return p6SynthesisChunkUserPrompt(brief, spec, spec.typeSignatures, [], lessons, contracts, typeDefinitions, kind);
 }
 
 /** One already-accepted earlier file of a chunked synthesis run (its exports
@@ -2255,30 +2329,30 @@ export type ChunkPriorFile = {
   path: string;
   /** Exported top-level names of the earlier file. */
   exports: readonly string[];
-  /** The earlier file's envelope reqTrace (req-N → exported name). */
+  /** The earlier file's envelope reqTrace (req-N â†’ exported name). */
   reqTrace: Readonly<Record<string, string>>;
   /** W46/332-1 (P1): the subset of `exports` the earlier file declares `async`.
    *  A later chunk must `await` these before reading a property off the result;
-   *  absent ⇒ the export is treated as synchronous (legacy byte-identity). */
+   *  absent â‡’ the export is treated as synchronous (legacy byte-identity). */
   asyncExports?: readonly string[];
-  /** fixes/349-P6 (Fix 6 — TS2554): the earlier file's own typeSignature lines.
+  /** fixes/349-P6 (Fix 6 â€” TS2554): the earlier file's own typeSignature lines.
    *  Rendering them lets a later chunk call an earlier export with the RIGHT
    *  arity/types instead of guessing, which is the measured wrong-arity class.
-   *  Absent/empty ⇒ the legacy render bytes (byte-identity preserved). */
+   *  Absent/empty â‡’ the legacy render bytes (byte-identity preserved). */
   signatures?: readonly string[];
 };
 
 /**
  * fixes/144 (M2 / S-01 T2): chunked-sequential-synthesis user prompt. The
- * prefix (BRIEF → ERROR HANDLING) renders byte-identically to the legacy
+ * prefix (BRIEF â†’ ERROR HANDLING) renders byte-identically to the legacy
  * single-module prompt for THIS chunk's signature list (FM-08 renders the
- * dataFlow/errorHandling blocks in both — the parity is between the builders);
+ * dataFlow/errorHandling blocks in both â€” the parity is between the builders);
  * chunks after the
  * first APPEND an "earlier files" context block carrying the earlier chunks'
  * exported top-level names + covered requirements, so a later file can call
  * an earlier export by name in the assembled bundle (never redeclare, never
- * import — the forbidden-primitive contract is unchanged per file). Empty
- * prior files + full signature list ⇒ byte-identical to the legacy prompt
+ * import â€” the forbidden-primitive contract is unchanged per file). Empty
+ * prior files + full signature list â‡’ byte-identical to the legacy prompt
  * (p6SynthesisUserPrompt delegates here). R10-f01 (W39 Z2): the optional
  * contracts argument adds the capped DATA CONTRACTS block (see
  * p6SynthesisContractsLines); absent/empty keeps the legacy-byte contract.
@@ -2297,22 +2371,28 @@ export function p6SynthesisChunkUserPrompt(
   priorFiles: readonly ChunkPriorFile[] = [],
   lessons: readonly string[] = [],
 
-  /** R10-f01 (W39 Z2): project.contracts — the capped DATA CONTRACTS block
+  /** R10-f01 (W39 Z2): project.contracts â€” the capped DATA CONTRACTS block
    *  renders only when at least one entity/endpoint row survives
    *  normalization (non-empty gate, FM-08's precedent). */
   contracts?: DataContract | null,
 
   /** fixes/349 (P6 convergence): the full alias bodies of the project's shared
-   *  domain types — every chunk sees them as AUTHORITATIVE (one deterministic
+   *  domain types â€” every chunk sees them as AUTHORITATIVE (one deterministic
    *  derivation; the build injects the aliases, the model never declares them).
-   *  Absent/empty ⇒ byte-identical legacy. */
+   *  Absent/empty â‡’ byte-identical legacy. */
   typeDefinitions?: readonly InterfaceTypeDefinition[] | null,
+
+  /** W359 (kind fidelity): `engine.deliveryKindOf(project)` â€” the ONE resolved
+   *  delivery kind, rendered as the project-stable `DELIVERY KIND` block.
+   *  Trailing + optional: absent/null â‡’ the legacy prompt bytes, and every
+   *  pre-W359 caller (and test seam) keeps compiling unchanged. */
+  kind?: DeliveryKind | null,
 ): string {
   const raw = typeof brief === "string" ? brief.trim() : "";
-  // fixes/348: the FULL gated brief (see P6_BRIEF_MAX_CHARS) — no silent 2 000-char slice.
+  // fixes/348: the FULL gated brief (see P6_BRIEF_MAX_CHARS) â€” no silent 2 000-char slice.
   const capped = compactBriefForPrompt(raw);
   const sigs = Array.isArray(chunkSignatures) ? chunkSignatures.filter((s): s is string => typeof s === "string") : [];
-  // FM-08 (W37 Y1): the two spec fields this prompt used to drop — filtered
+  // FM-08 (W37 Y1): the two spec fields this prompt used to drop â€” filtered
   // non-empty rows only, so a spec without them keeps the exact legacy bytes.
   const dataFlowEntries = (Array.isArray(spec.dataFlow) ? spec.dataFlow : [])
     .filter((c): c is string => typeof c === "string" && c.trim() !== "")
@@ -2320,26 +2400,33 @@ export function p6SynthesisChunkUserPrompt(
   const errorHandlingEntries = (Array.isArray(spec.errorHandling) ? spec.errorHandling : [])
     .filter((c): c is string => typeof c === "string" && c.trim() !== "")
     .map((c) => `- ${c}`);
-  // R10-f01 (W39 Z2): the A6 data contract render — [] unless the project
+  // R10-f01 (W39 Z2): the A6 data contract render â€” [] unless the project
   // carries at least one renderable entity/endpoint row (the FM-08 non-empty
   // gate, mirrored); a contract-less project keeps the exact legacy bytes.
   const contractLines = p6SynthesisContractsLines(contracts);
   // W61 lane D (D5 / R2 Row 1 / A8): CACHE-AWARE BLOCK ORDER. All
-  // project-stable blocks lead (BRIEF → REQUIREMENTS → NEGATIVE CONSTRAINTS →
-  // EDGE CASES → DATA FLOW → ERROR HANDLING → DATA CONTRACTS); the PER-CHUNK
+  // project-stable blocks lead (BRIEF â†’ REQUIREMENTS â†’ NEGATIVE CONSTRAINTS â†’
+  // EDGE CASES â†’ DATA FLOW â†’ ERROR HANDLING â†’ DATA CONTRACTS); the PER-CHUNK
   // volatile TYPE SIGNATURES block trails them, so every chunk of one project
   // shares one byte-stable cacheable prefix (vendor prefix caching keys on the
   // leading bytes; the old order put TYPE SIGNATURES third and cachedPromptTokens
-  // was 0 on all 212 calls — FINDINGS O-02). The literal marker
+  // was 0 on all 212 calls â€” FINDINGS O-02). The literal marker
   // "TYPE SIGNATURES (must export" is unchanged (test-internal detector).
   const lines = [
     "BRIEF:",
-    capped || "(empty brief — implement the spec requirements only)",
+    capped || "(empty brief â€” implement the spec requirements only)",
+    // W359 (kind fidelity): the resolved delivery kind, in the cacheable
+    // prefix (a function of the project, never of the chunk). Pushed INTO
+    // `lines` so the prior-files byte budget at the bottom of this function
+    // accounts for it â€” a block appended after `join` would make the
+    // [PRIOR-ELIDED] marker fire early and elide a file that fits.
+    // Absent kind â‡’ no lines â‡’ the legacy prompt bytes.
+    ...deliveryKindLines(kind),
     "",
     // 216f (T-10 / F-08): scope the requirement duty to THIS file's signatures.
     // "implement every one" read against a per-chunk signature list was the
     // unsatisfiable half of the contradiction (chunk-0.ts:350).
-    "REQUIREMENTS (the project's complete list — implemented across ALL of its files; this file implements every one its TYPE SIGNATURES below cover, marking each implementing function with its // req-N comment. A requirement owned by another file is implemented THERE behind that file's own signatures — never hide its logic behind non-exported helpers here):",
+    "REQUIREMENTS (the project's complete list â€” implemented across ALL of its files; this file implements every one its TYPE SIGNATURES below cover, marking each implementing function with its // req-N comment. A requirement owned by another file is implemented THERE behind that file's own signatures â€” never hide its logic behind non-exported helpers here):",
     ...spec.requirements.map((r, i) => `${i + 1}. ${r}`),
     "",
     "NEGATIVE CONSTRAINTS (all mandatory):",
@@ -2349,7 +2436,7 @@ export function p6SynthesisChunkUserPrompt(
     ...spec.edgeCases.map((c) => `- ${c}`),
     // FM-08 (W37 Y1): prompt-engine expands SIX spec fields and this module
     // persists all six (requirements/edgeCases/errorHandling/typeSignatures/
-    // dataFlow/negativeConstraints), but this builder rendered only four —
+    // dataFlow/negativeConstraints), but this builder rendered only four â€”
     // requirements about data ordering and failure handling were generated,
     // persisted, displayed downstream, and NEVER reached the generator (a
     // silent spec-to-code loss on every keyed run). Additive rendering behind
@@ -2370,32 +2457,32 @@ export function p6SynthesisChunkUserPrompt(
           ...errorHandlingEntries,
         ]
       : []),
-    // R10-f01 (W39 Z2): the persisted A6 contract's entity/endpoint rows —
+    // R10-f01 (W39 Z2): the persisted A6 contract's entity/endpoint rows â€”
     // capped at P6_SYNTH_CONTRACTS_MAX_ROWS with a visible elision marker;
     // the empty list keeps the legacy prompt bytes (keyless byte-parity).
     ...contractLines,
     // fixes/349 (P6 convergence): the full TYPE DEFINITIONS for the project's
-    // shared domain types — project-stable (derived from the whole signature
+    // shared domain types â€” project-stable (derived from the whole signature
     // set), so it rides the cacheable prefix BEFORE the per-chunk volatile
-    // TYPE SIGNATURES block. Empty ⇒ the legacy prompt bytes unchanged.
+    // TYPE SIGNATURES block. Empty â‡’ the legacy prompt bytes unchanged.
     ...interfaceTypeDefinitionLines(typeDefinitions),
     // The PER-CHUNK volatile block trails every stable block (D5/A8).
     "",
-    "TYPE SIGNATURES (must export — exactly these names, nothing more, nothing less; THIS file's share of the project — the project's other files export the remaining signatures):",
+    "TYPE SIGNATURES (must export â€” exactly these names, nothing more, nothing less; THIS file's share of the project â€” the project's other files export the remaining signatures):",
     ...sigs.map((s) => `- ${s}`),
   ];
   if (Array.isArray(priorFiles) && priorFiles.length > 0) {
     lines.push(
       "",
       "EARLIER FILES ALREADY GENERATED (this project is synthesized as several files in sequence; each earlier file's",
-      "exports below are bound as plain parameters of THIS file's scope in the assembled module — call them directly",
+      "exports below are bound as plain parameters of THIS file's scope in the assembled module â€” call them directly",
       "by name when this file needs their behavior. Do NOT redeclare them, do NOT import/require them, do NOT",
       "re-implement what they already cover, and give this file's own non-exported helpers names no earlier file used.",
-      "An earlier export marked asynchronous (`async function`) returns a Promise: you MUST `await` it before reading any property off the result (`const x = await getProperty(id); x.ok`) or destructuring it (`const { ok } = await getProperty(id)`) — a non-awaited async call reads `undefined` off a Promise and leaks an unhandled rejection the validator refuses.",
+      "An earlier export marked asynchronous (`async function`) returns a Promise: you MUST `await` it before reading any property off the result (`const x = await getProperty(id); x.ok`) or destructuring it (`const { ok } = await getProperty(id)`) â€” a non-awaited async call reads `undefined` off a Promise and leaks an unhandled rejection the validator refuses.",
       "Implement ONLY the type signatures listed above in THIS file.):",
     );
     // R12-f01: cap the prior render (last N files) + enforce the byte budget
-    // as lines are appended. Both cuts carry a visible …[PRIOR-ELIDED…] marker
+    // as lines are appended. Both cuts carry a visible â€¦[PRIOR-ELIDEDâ€¦] marker
     // naming what was left out and why; the assembled module still binds every
     // prior export as a parameter, so nothing callable is lost by the cut.
     const shown =
@@ -2405,7 +2492,7 @@ export function p6SynthesisChunkUserPrompt(
     const overCap = priorFiles.length - shown.length;
     if (overCap > 0) {
       lines.push(
-        `- …[PRIOR-ELIDED: ${overCap} earlier file(s) beyond the ${P6_SYNTH_PRIOR_MAX_FILES}-file render cap — their exports remain bound in the assembled module]`,
+        `- â€¦[PRIOR-ELIDED: ${overCap} earlier file(s) beyond the ${P6_SYNTH_PRIOR_MAX_FILES}-file render cap â€” their exports remain bound in the assembled module]`,
       );
     }
     let budgetLeft = P6_SYNTH_PROMPT_MAX_CHARS - lines.join("\n").length;
@@ -2415,17 +2502,17 @@ export function p6SynthesisChunkUserPrompt(
         .filter(([, name]) => (Array.isArray(f.exports) ? f.exports.includes(name) : false))
         .map(([req]) => req)
         .sort();
-      const reqPart = covered.length > 0 ? ` · covers ${covered.join(", ")}` : "";
+      const reqPart = covered.length > 0 ? ` Â· covers ${covered.join(", ")}` : "";
       const asyncNamed = (Array.isArray(f.asyncExports) ? f.asyncExports : []).filter(
         (n: string) => typeof n === "string" && (f.exports ?? []).includes(n),
       );
-      const asyncPart = asyncNamed.length > 0 ? ` · asynchronous (must await): ${asyncNamed.join(", ")}` : "";
+      const asyncPart = asyncNamed.length > 0 ? ` Â· asynchronous (must await): ${asyncNamed.join(", ")}` : "";
       // fixes/349-P6 (Fix 6): render the earlier file's OWN signature lines so a
       // later chunk calls those exports with the correct arity/types (the measured
-      // TS2554 class). Empty/absent ⇒ no suffix, so the legacy bytes are preserved.
+      // TS2554 class). Empty/absent â‡’ no suffix, so the legacy bytes are preserved.
       const sigPart =
         Array.isArray(f.signatures) && f.signatures.length > 0
-          ? ` · signatures: ${f.signatures
+          ? ` Â· signatures: ${f.signatures
               .filter((s: string) => typeof s === "string" && s.trim() !== "")
               .map((s: string) => s.trim())
               .join(" ; ")}`
@@ -2433,7 +2520,7 @@ export function p6SynthesisChunkUserPrompt(
       const line = `- ${f.path} exports: ${(f.exports ?? []).join(", ") || "(none)"}${reqPart}${asyncPart}${sigPart}`;
       if (line.length + 1 > budgetLeft) {
         lines.push(
-          `- …[PRIOR-ELIDED: ${shown.length - rendered} file(s) beyond the ${P6_SYNTH_PROMPT_MAX_CHARS.toLocaleString("en-US")}-char prompt budget — their exports remain bound in the assembled module]`,
+          `- â€¦[PRIOR-ELIDED: ${shown.length - rendered} file(s) beyond the ${P6_SYNTH_PROMPT_MAX_CHARS.toLocaleString("en-US")}-char prompt budget â€” their exports remain bound in the assembled module]`,
         );
         break;
       }
@@ -2445,7 +2532,7 @@ export function p6SynthesisChunkUserPrompt(
   if (Array.isArray(lessons) && lessons.length > 0) {
     lines.push(
       "",
-      "PRIOR LESSONS (advisory — obey the spec first; do not invent APIs from these):",
+      "PRIOR LESSONS (advisory â€” obey the spec first; do not invent APIs from these):",
       ...lessons.filter((l): l is string => typeof l === "string" && l.trim() !== "").map((l) => `- ${l}`),
     );
   }
@@ -2454,15 +2541,15 @@ export function p6SynthesisChunkUserPrompt(
 
 // --- fixes/144 (M2 / S-01 T2) chunked-sequential-synthesis core --------------
 
-/** MetaGPT-style decomposition bound (fixes/134 §4 S-01): ≤8 signatures per
- *  synthesis call — the rotating-failure-class root cause was ONE 60k-envelope
- *  pro call (121: expansion → brief-fit → runtime-binding → oracle). */
+/** MetaGPT-style decomposition bound (fixes/134 Â§4 S-01): â‰¤8 signatures per
+ *  synthesis call â€” the rotating-failure-class root cause was ONE 60k-envelope
+ *  pro call (121: expansion â†’ brief-fit â†’ runtime-binding â†’ oracle). */
 export const P6_SYNTH_CHUNK_SIZE = 8;
 
 /**
  * A1 (SYNTHSPEC P1): the brief-driven minimum file set. The plan used to be a
  * pure function of the model's emitted `typeSignatures`, so a brief whose model
- * spec carried two signatures planned 1–2 chunks and dropped the brief's
+ * spec carried two signatures planned 1â€“2 chunks and dropped the brief's
  * nouns. These constants bound the deterministic floor derived from the brief
  * itself (never the model): one required module per ~N core nouns, and never
  * fewer than two.
@@ -2473,9 +2560,9 @@ export const P6_MIN_TREE_MODULES = 2;
 export const P6_MIN_BRIEF_MODULES_MAX = 8;
 /**
  * The brief-noun floor only engages when the brief is genuinely noun-rich
- * (≥N required nouns). A short brief whose model plan is one chunk keeps that
- * plan — the floor targets the measured under-production (a ~20-noun website
- * brief planning 1–2 chunks), not every small fixture.
+ * (â‰¥N required nouns). A short brief whose model plan is one chunk keeps that
+ * plan â€” the floor targets the measured under-production (a ~20-noun website
+ * brief planning 1â€“2 chunks), not every small fixture.
  */
 export const P6_FLOOR_MIN_NOUNS = 8;
 
@@ -2488,7 +2575,7 @@ function isRequiredModulePath(p: unknown): p is string {
 }
 
 /** Entry-file tree path. `materializeImportableTree` writes the ESM barrel
- *  (every tree, one chunk or many) here — parity with scaffold's
+ *  (every tree, one chunk or many) here â€” parity with scaffold's
  *  generatedSource fallback host path (scaffold.ts `src/generated.ts`). A
  *  planned chunk whose own path IS this one is relocated to
  *  `src/generated/chunk-0.ts` so the barrel can own the entry path.
@@ -2496,10 +2583,10 @@ function isRequiredModulePath(p: unknown): p is string {
 export const TREE_ENTRY_PATH = "src/generated.ts";
 
 /**
- * Deterministic pure chunking: typeSignatures in expand order, ≤ perChunk per
+ * Deterministic pure chunking: typeSignatures in expand order, â‰¤ perChunk per
  * chunk (default P6_SYNTH_CHUNK_SIZE). Duplicate lines are dropped (first
  * occurrence wins) so a repeated signature can never fork a chunk or an
- * export. Non-string entries are skipped. Order preserved ⇒ assembly order is
+ * export. Non-string entries are skipped. Order preserved â‡’ assembly order is
  * the dependency-safe expand order.
  */
 export function chunkTypeSignatures(
@@ -2520,7 +2607,7 @@ export function chunkTypeSignatures(
 }
 
 /** Lowercase-hyphen slug of a camelCase/PascalCase identifier: `createBoard`
- *  → "create-board", `getTenantById` → "get-tenant-by-id". Pure, stable. */
+ *  â†’ "create-board", `getTenantById` â†’ "get-tenant-by-id". Pure, stable. */
 export function pathSlugFromNames(names: readonly string[]): string {
   for (const raw of names ?? []) {
     if (typeof raw !== "string" || !raw.trim()) continue;
@@ -2540,7 +2627,7 @@ export function pathSlugFromNames(names: readonly string[]): string {
  * Deterministic tree path for one chunk. Chunk 0 (the entry file) is always
  * TREE_ENTRY_PATH (single-module host parity); later chunks are slugged from
  * their first signature name under src/generated/. Collisions (two chunks
- * whose leading names slug identically) get a deterministic `-2/-3` suffix —
+ * whose leading names slug identically) get a deterministic `-2/-3` suffix â€”
  * every tree path is unique within a run.
  */
 export function treePathForChunk(
@@ -2553,7 +2640,7 @@ export function treePathForChunk(
 }
 
 /** fixes/216k (105 TA-15): slugged src/generated/ chunk path with a
- *  deterministic `-2/-3` de-dupe walk — the index-independent half of
+ *  deterministic `-2/-3` de-dupe walk â€” the index-independent half of
  *  treePathForChunk, reused by the job-keyed plan for its leftover chunks
  *  (which must never claim TREE_ENTRY_PATH: in a job-keyed tree that path is
  *  the ESM barrel `materializeImportableTree` writes). */
@@ -2569,22 +2656,22 @@ function genericTreePath(
 }
 
 // ---------------------------------------------------------------------------
-// fixes/216k (105 TA-15 / 106 F-03 F-06 F-10, P0-04) — REAL per-job modules.
+// fixes/216k (105 TA-15 / 106 F-03 F-06 F-10, P0-04) â€” REAL per-job modules.
 //
-// The chunk→file mapping used to be index-keyed only: chunk 0 landed at
+// The chunkâ†’file mapping used to be index-keyed only: chunk 0 landed at
 // src/generated.ts and later chunks under src/generated/<slug>.ts, so the
-// spec-graph job paths (src/jobs/flip.ts …) were NEVER written by the tree
-// pass and every job node degraded to a re-export bridge of the tree entry —
-// ONE module wearing five filenames (`doctor --tree` → reexports:5, real:0).
+// spec-graph job paths (src/jobs/flip.ts â€¦) were NEVER written by the tree
+// pass and every job node degraded to a re-export bridge of the tree entry â€”
+// ONE module wearing five filenames (`doctor --tree` â†’ reexports:5, real:0).
 //
 // The mapping below keys each chunk to the spec-graph node it implements: a
 // job node's file path IS the chunk's tree path, so the scaffold's tree pass
 // emits the real synthesized module there and the bridge is reserved for
-// genuinely unmapped nodes (which the scaffold counts and prints — fixes/216k
+// genuinely unmapped nodes (which the scaffold counts and prints â€” fixes/216k
 // also made bridged nodes visible, never a silent substitute).
 //
 // Binding is deterministic and evidence-based: a typeSignature binds to the
-// FIRST job node (graph order) whose label names it (`runFlip(…)` ← “flip”;
+// FIRST job node (graph order) whose label names it (`runFlip(â€¦)` â† â€œflipâ€;
 // labels shorter than 3 chars never match). No LLM, no guessing: signatures
 // that bind to no node keep the legacy src/generated/ family, and a graph
 // with no keyable job node keeps the pre-216k mapping byte-for-byte.
@@ -2593,9 +2680,9 @@ function genericTreePath(
 /** One spec-graph job node the tree must materialise as a REAL module. */
 export type SpecGraphJobTarget = { id: string; label: string; path: string };
 
-/** Job label a spec-graph node purpose declares (`Implement job “flip” …`). */
+/** Job label a spec-graph node purpose declares (`Implement job â€œflipâ€ â€¦`). */
 export function jobLabelFromPurpose(purpose: unknown): string | null {
-  const m = /[“"]([^”"]+)[”"]/.exec(typeof purpose === "string" ? purpose : "");
+  const m = /[â€œ"]([^â€"]+)[â€"]/.exec(typeof purpose === "string" ? purpose : "");
   const label = m ? m[1].replace(/\s+/g, " ").trim() : "";
   return label.length > 0 ? label : null;
 }
@@ -2610,7 +2697,7 @@ function isJobTreeNodePath(p: unknown): p is string {
 }
 
 /**
- * Ordered spec-graph job nodes (id, label, path) — the file map the chunk plan
+ * Ordered spec-graph job nodes (id, label, path) â€” the file map the chunk plan
  * keys on. A node without a parseable label or with a path outside src/jobs/
  * is skipped (it cannot be keyed deterministically; never guess a path). The
  * spec graph is the engine's own A5 output (planSpecGraph, algorithms.ts).
@@ -2639,7 +2726,7 @@ export function specGraphJobTargets(
 }
 
 /**
- * W52/338-1: label/fn comparison form — lowercase alphanumerics only. The old
+ * W52/338-1: label/fn comparison form â€” lowercase alphanumerics only. The old
  * `name.toLowerCase().includes(label.toLowerCase())` could never bind a
  * HYPHENATED label: `runFollowUp` (from `deriveTypeSignatures`) does not
  * contain the substring `follow-up`, so the declared job `follow-up`
@@ -2651,9 +2738,9 @@ function normalizedLabelForm(s: string): string {
 }
 
 /**
- * Deterministic signature→job binding. Each signature binds to the FIRST job
+ * Deterministic signatureâ†’job binding. Each signature binds to the FIRST job
  * target (graph order) whose label appears in the signature's function name
- * (case- and separator-insensitive — see `normalizedLabelForm`); a signature
+ * (case- and separator-insensitive â€” see `normalizedLabelForm`); a signature
  * with no parseable function name or no label hit stays in `leftover` (expand
  * order kept end-to-end). `bound[i]` holds target i's own signatures in expand
  * order.
@@ -2685,8 +2772,8 @@ export type TreeChunk = {
   label?: string;
 };
 
-/** `src/jobs/flip.ts` → `src/jobs/flip-2.ts` (second chunk of the same job),
- *  colliding further chunks walk `-3/-4…` deterministically. */
+/** `src/jobs/flip.ts` â†’ `src/jobs/flip-2.ts` (second chunk of the same job),
+ *  colliding further chunks walk `-3/-4â€¦` deterministically. */
 function jobSiblingPath(nodePath: string, k: number, taken: ReadonlySet<string>): string {
   const dot = nodePath.lastIndexOf(".");
   const stem = dot > 0 ? nodePath.slice(0, dot) : nodePath;
@@ -2701,16 +2788,16 @@ function jobSiblingPath(nodePath: string, k: number, taken: ReadonlySet<string>)
 }
 
 /**
- * The chunk→file plan (fixes/216k TA-15, P0-04). Job-keyed chunks come first
+ * The chunkâ†’file plan (fixes/216k TA-15, P0-04). Job-keyed chunks come first
  * (graph order: the node's own file is its first chunk, `-2/-3` siblings carry
  * the overflow), then the unbound signatures keep the legacy src/generated/
  * family. When NO signature binds to a job node the plan is byte-identical to
  * the pre-216k index-keyed mapping (chunk 0 = TREE_ENTRY_PATH, later chunks
- * slugged under src/generated/) — every job-less spec graph is unaffected.
- * Pure + deterministic: same project + signatures ⇒ same plan.
+ * slugged under src/generated/) â€” every job-less spec graph is unaffected.
+ * Pure + deterministic: same project + signatures â‡’ same plan.
  *
  * This is the MAP, not the consumption order: the driver consumes the plan via
- * orderTreeChunks (below) — see its doc for the forward-call rule.
+ * orderTreeChunks (below) â€” see its doc for the forward-call rule.
  */
 export function treeChunkPlan(
   project:
@@ -2752,7 +2839,7 @@ export function treeChunkPlan(
 
 /**
  * fixes/216k (TA-15, W5-L1 subtlety 1): the order the driver CONSUMES a plan
- * in — the forward-call rule.
+ * in â€” the forward-call rule.
  *
  * The chunk-prompt contract is "a later file may call an earlier file's
  * exports by name" (assembled entry: earlier exports bound as IIFE
@@ -2763,20 +2850,20 @@ export function treeChunkPlan(
  * Job binding is label-keyed, not contiguity-keyed: in the corpus fixture
  * `record` owns signatures at expand indices [0,7,14,21,23] while the
  * leftover chunks hold [1..13] and [15..24]. The plan's graph order would
- * synthesize `src/jobs/record.ts` FIRST — with an EMPTY prior list — and
+ * synthesize `src/jobs/record.ts` FIRST â€” with an EMPTY prior list â€” and
  * materialize the leftover chunks AFTER it, so a call from record's job
- * functions into the ledger helpers (indices 1..13, earlier in expand order —
+ * functions into the ledger helpers (indices 1..13, earlier in expand order â€”
  * the natural call direction) would be a FORWARD CALL: not imported by
  * record.ts, a ReferenceError the moment the oracle row calls the real
  * function.
  *
  * Rule: in a job-keyed plan, consume the unbound LEFTOVER chunks first (their
  * plan/expand order kept), then the job chunks in REVERSE PLAN ORDER
- * (latest-bound target first … earliest last) so the widest-spanning job
+ * (latest-bound target first â€¦ earliest last) so the widest-spanning job
  * module is synthesized last, with every earlier-signature chunk already in
  * its prior context. Within one job, sibling chunks stay in signature order
- * (k=0 → `-2` → `-3`): that is the order in which "sibling chunks import
- * earlier files IN ORDER" holds — as with the pre-job plan, a chunk never
+ * (k=0 â†’ `-2` â†’ `-3`): that is the order in which "sibling chunks import
+ * earlier files IN ORDER" holds â€” as with the pre-job plan, a chunk never
  * needs a forward import for its own sibling overflow.
  *
  * Zero-job plans are returned in EXACT plan order (pre-216k byte parity: the
@@ -2791,12 +2878,12 @@ export function orderTreeChunks(plan: readonly TreeChunk[]): TreeChunk[] {
   if (jobChunks.length === 0) return [...rows];
   const leftover = rows.filter((c) => !(typeof c.nodeId === "string" && c.nodeId.length > 0));
   // W6-L1 correction (the landed W5 body reversed the FLAT list, which also
-  // reversed one job's own sibling overflow — contradicting the rule above):
+  // reversed one job's own sibling overflow â€” contradicting the rule above):
   // reverse the job GROUPS (targets) and keep each group's chunks in plan
-  // order, so a >8-signature job is still consumed `…ts` → `…-2.ts` → `…-3.ts`
+  // order, so a >8-signature job is still consumed `â€¦ts` â†’ `â€¦-2.ts` â†’ `â€¦-3.ts`
   // and a later sibling's prompt carries the earlier sibling's exports (the
   // pre-job sibling contract). Blocks are grouped by nodeId in first-seen
-  // order — treeChunkPlan emits one contiguous block per target.
+  // order â€” treeChunkPlan emits one contiguous block per target.
   const order: string[] = [];
   const byNode = new Map<string, TreeChunk[]>();
   for (const c of jobChunks) {
@@ -2828,9 +2915,9 @@ const CORE_SENTINEL_JOB = "deliver-core-workflow";
  * W45/331-4: the counted declared-vs-planned job census for the tree plan. The plan
  * (`treeChunkPlan`) materialises a chunk/file only for a job node whose label a
  * typeSignature's function name contains; a declared job with no bound signature gets
- * NO chunk and NO file — silently, until now. This is the ONE derivation of the
+ * NO chunk and NO file â€” silently, until now. This is the ONE derivation of the
  * plan-side shortfall: `declared` (spec-graph job labels, sentinel excluded),
- * `planned` (labels that got ≥1 chunk), `unbound` (the counted shortfall — labels with
+ * `planned` (labels that got â‰¥1 chunk), `unbound` (the counted shortfall â€” labels with
  * no bound signature), `paths` (plan chunk paths) and `legacy` (the plan fell to the
  * non-job src/generated mapping). Pure + deterministic; derived FROM `treeChunkPlan`
  * (no second path rule to drift).
@@ -2864,7 +2951,7 @@ export function treeChunkPlanCensus(
   const declared = [...new Set(declaredAll)];
   return {
     // `planned`/`unbound` are complementary filters of `declared`, so the
-    // partition holds BY CONSTRUCTION — no runtime "does not reconcile" guard is
+    // partition holds BY CONSTRUCTION â€” no runtime "does not reconcile" guard is
     // kept (it could never fire; 333-1 F-2). `paths` is the plan's own file list.
     declared,
     planned: declared.filter((l) => plannedLabels.has(l)),
@@ -2888,8 +2975,8 @@ function floorEntityPascal(name: string): string {
 /**
  * fixes/349: never let a deterministic floor signature demand a NAME that
  * collides with a TS builtin. The vague-lattice entity pool is
- * `["operator", "record"]`, and `record` → PascalCase `Record` — so the floor
- * emitted `run<Job>(…): Promise<Record>`, which is NOT a valid type (the TS
+ * `["operator", "record"]`, and `record` â†’ PascalCase `Record` â€” so the floor
+ * emitted `run<Job>(â€¦): Promise<Record>`, which is NOT a valid type (the TS
  * `Record` utility needs a type argument) and could never be given a definition
  * without shadowing the global. Map any such entity to the neutral
  * `recordEntry` (`RecordEntry`) so every demanded signature is a real type.
@@ -2898,7 +2985,7 @@ function sanitizeFloorEntities(entities: readonly string[]): string[] {
   const safe = (entities.length > 0 ? entities : ["recordEntry"]).map((e) =>
     TS_TYPE_ALLOWLIST.has(floorEntityPascal(e)) ? "recordEntry" : e,
   );
-  // Dedupe after the substitution (operator, record → operator, recordEntry).
+  // Dedupe after the substitution (operator, record â†’ operator, recordEntry).
   const out: string[] = [];
   const seen = new Set<string>();
   for (const e of safe) {
@@ -2910,22 +2997,22 @@ function sanitizeFloorEntities(entities: readonly string[]): string[] {
 }
 
 /**
- * W52/338-1 — THE spec-driven coverage rule. The keyed P6 plan used to be built
+ * W52/338-1 â€” THE spec-driven coverage rule. The keyed P6 plan used to be built
  * from the model's emitted `typeSignatures` alone, so a declared spec-graph job
  * the model happened not to name got NO `src/jobs/<label>.ts` file at all: the
  * same brief could emit 7 modules on one run and 5 on the next (`fixes/337_0_parent.md`
- * §5; run B's unbound `["track"]`, `codegen.server.test.ts:4400-4412`). This
+ * Â§5; run B's unbound `["track"]`, `codegen.server.test.ts:4400-4412`). This
  * reconciles the model spec with the DETERMINISTIC capability floor:
  *
  *   - the declared job targets come from `project.specGraph` (pure A5 output);
  *   - each target is already bound when any model signature binds to its label;
  *   - a target no model signature binds gets `deriveTypeSignatures`' own pair
- *     (`algorithms.ts` — the lattice capability floor), APPENDED after the model
+ *     (`algorithms.ts` â€” the lattice capability floor), APPENDED after the model
  *     signatures so the model's own chunks and order are never disturbed.
  *
  * Because `lattice`/`specGraph` are pure functions of the brief, the planned
  * `src/jobs/*.ts` SET is now a function of the brief, not of the model's
- * emission. Pure + deterministic; no spec graph (or no declared job) ⇒ the input
+ * emission. Pure + deterministic; no spec graph (or no declared job) â‡’ the input
  * list is returned unchanged (byte-identity for the legacy/no-job paths).
  */
 export function reconcilePlanTypeSignatures(
@@ -2952,7 +3039,7 @@ export function reconcilePlanTypeSignatures(
   // payload that carries a spec graph but no lattice, derive it from the
   // declared labels so the rule still holds (neutral return entity).
   // fixes/349: the neutral fallback is `recordEntry` (PascalCase `RecordEntry`),
-  // NOT the bare `record` whose PascalCase is the TS utility type `Record` —
+  // NOT the bare `record` whose PascalCase is the TS utility type `Record` â€”
   // `Promise<Record>` is not a valid type (a generic with no argument) and the
   // floor must never demand a signature the tree's own tsc cannot parse.
   const latticeJobs = Array.isArray(project?.lattice?.jobs) ? project.lattice.jobs : [];
@@ -2967,7 +3054,7 @@ export function reconcilePlanTypeSignatures(
   targets.forEach((t, i) => {
     if ((bound[i] ?? []).length > 0) return; // the model already covered this declared job
     const fill = floorBound[i] ?? [];
-    if (fill.length === 0) return; // no floor exists (e.g. the sentinel job) — nothing to add
+    if (fill.length === 0) return; // no floor exists (e.g. the sentinel job) â€” nothing to add
     addedLabels.push(t.label);
     for (const s of fill) {
       if (seen.has(s)) continue;
@@ -2979,10 +3066,10 @@ export function reconcilePlanTypeSignatures(
 }
 
 // ---------------------------------------------------------------------------
-// A1 (SYNTHSPEC P1) — BRIEF-DRIVEN MINIMUM FILE SET.
+// A1 (SYNTHSPEC P1) â€” BRIEF-DRIVEN MINIMUM FILE SET.
 //
 // The plan below is derived from the brief's declared capabilities (spec-graph
-// job nodes, contract entities, lattice jobs) and a brief-noun floor — never
+// job nodes, contract entities, lattice jobs) and a brief-noun floor â€” never
 // from the model's emitted signatures alone. `mergeMinimumPlan` is ADD-ONLY: it
 // never drops a plan row and never claims the entry path, so a model plan that
 // already covers a capability keeps its exact bytes.
@@ -2994,7 +3081,7 @@ export type RequiredModule = {
   key: string;
   /** Planned tree path. */
   path: string;
-  /** ≥1 signature whose function name the chunk must export. */
+  /** â‰¥1 signature whose function name the chunk must export. */
   signatures: string[];
   source: "spec" | "job" | "entity" | "lattice" | "brief";
   /** Display label (job/lattice label, entity name, noun) for logs. */
@@ -3002,7 +3089,7 @@ export type RequiredModule = {
 };
 
 /** Deterministic floor signatures for one label (the lattice capability pair).
- *  fixes/349: the entity fallback is `recordEntry` → `RecordEntry`, never the
+ *  fixes/349: the entity fallback is `recordEntry` â†’ `RecordEntry`, never the
  *  bare `record` whose PascalCase `Record` is a TS utility type (see
  *  reconcilePlanTypeSignatures). */
 function floorSignaturesForLabel(label: string, entities: readonly string[]): string[] {
@@ -3013,12 +3100,12 @@ function floorSignaturesForLabel(label: string, entities: readonly string[]): st
  * Deterministic union of every DECLARED capability the brief must materialise as
  * a file (A1):
  *   1. spec-graph job nodes with a parseable label + `src/jobs/*.ts` path;
- *   2. EVERY OTHER declared `job-*` node (C1-04) — no parseable label, a path
+ *   2. EVERY OTHER declared `job-*` node (C1-04) â€” no parseable label, a path
  *      outside the emitted roots, or no path at all still becomes a required
  *      module at a deterministic `src/jobs/<id>.ts` path, so the capability
  *      floor counts every declared job and a below-floor refusal can name it.
  *      The `ui` family is scaffold-owned (A4), never a synthesized chunk.
- * Each entry carries ≥1 floor signature so `mergeMinimumPlan` can always add a
+ * Each entry carries â‰¥1 floor signature so `mergeMinimumPlan` can always add a
  * real chunk. The brief-noun floor + domain fallback that force a minimum plan
  * size live in `briefModuleFloor` / `minimumTreeFileCount` / `mergeMinimumPlan`
  * (applied only when the plan is BELOW the floor). Pure + deterministic.
@@ -3106,7 +3193,7 @@ export function deriveRequiredModules(
   return out;
 }
 
-/** A1/SYNTHSPEC P1: the brief-noun module floor — 0 for a noun-thin brief, else ≥2, one per ~P6_NOUNS_PER_MODULE nouns, capped. */
+/** A1/SYNTHSPEC P1: the brief-noun module floor â€” 0 for a noun-thin brief, else â‰¥2, one per ~P6_NOUNS_PER_MODULE nouns, capped. */
 export function briefModuleFloor(project: { brief?: string | null } | null | undefined): number {
   const required = briefNounHits(typeof project?.brief === "string" ? project.brief : "").required;
   if (required.length < P6_FLOOR_MIN_NOUNS) return 0;
@@ -3120,7 +3207,7 @@ export function briefModuleFloor(project: { brief?: string | null } | null | und
  * Lower bound on the emitted `generatedTree` rows for THIS project (the barrel
  * is not a module): the declared capabilities, but never fewer than the
  * brief-noun floor. fixes/348: the brief's PAGE modules are added to the PLAN
- * (see `mergeMinimumPlan`) but are not folded into this capability+noun floor —
+ * (see `mergeMinimumPlan`) but are not folded into this capability+noun floor â€”
  * the recorded C1-01 fixture calibration is unchanged.
  */
 export function minimumTreeFileCount(
@@ -3139,10 +3226,10 @@ export type UnderProducedRefusal = {
 };
 
 /**
- * C1-01 (BF-1) — THE under-production predicate. A partial tree whose accepted
+ * C1-01 (BF-1) â€” THE under-production predicate. A partial tree whose accepted
  * set is below `minimumTreeFileCount` is not a validation failure of one chunk:
  * it is an under-produced plan, and the artifact must carry the registered
- * `RT_E_PLAN_UNDERPRODUCED` and NAME the declared modules that never landed —
+ * `RT_E_PLAN_UNDERPRODUCED` and NAME the declared modules that never landed â€”
  * never the generic `RT_E_VALIDATION`, and never a silent partial. Pure: a
  * below-floor set returns the coded refusal + its missing-module list, else
  * null. `acceptedPaths` is the accepted CHUNK set (the barrel is not a module).
@@ -3157,7 +3244,7 @@ export function underProducedRefusal(
   const minimum = Math.max(required.length, briefModuleFloor(project));
   if (accepted.length >= minimum) return null;
   const have = new Set(accepted);
-  // fixes/347/348: the refusal reproduction must match the driver's plan — pass
+  // fixes/347/348: the refusal reproduction must match the driver's plan â€” pass
   // the same model-signature avoidance so a briefed-page plan module the driver
   // skipped is named here, not silently dropped. `mergeMinimumPlan` below adds
   // the brief's PAGE modules to the plan, so a missing page is named too.
@@ -3191,19 +3278,19 @@ export function underProducedRefusal(
       : `${minimum - accepted.length} further module(s) to reach the floor`;
   return {
     code: "RT_E_PLAN_UNDERPRODUCED",
-    detail: `accepted tree has ${accepted.length} module(s) but the brief demands >= ${minimum} — the plan is under-produced; missing module(s): ${named}`,
+    detail: `accepted tree has ${accepted.length} module(s) but the brief demands >= ${minimum} â€” the plan is under-produced; missing module(s): ${named}`,
     missing: missing.map((m) => ({ path: m.path, label: m.label, source: m.source })),
   };
 }
 
 /** fixes/347 + fixes/348 (raise the generator): the page/section titles a
- *  marketing/app brief declares — the numbered bold list items (`1. **Menu** —
- *  …`) under its own pages/sections/screens heading, PLUS the natural-language
- *  bullet page labels (`- Home page: …`) the bakery-shaped briefs use. Bullets
+ *  marketing/app brief declares â€” the numbered bold list items (`1. **Menu** â€”
+ *  â€¦`) under its own pages/sections/screens heading, PLUS the natural-language
+ *  bullet page labels (`- Home page: â€¦`) the bakery-shaped briefs use. Bullets
  *  are scoped to a pages/sections/storefront region so a facts or functional
  *  list is never misread as the page set. Pure + deterministic; labels are kept
  *  verbatim (the suffix is outside the bold run), deduped, capped. Empty when
- *  the brief declares no such region (⇒ legacy floor). */
+ *  the brief declares no such region (â‡’ legacy floor). */
 function briefedPageTitles(brief: string): string[] {
   const text = String(brief ?? "");
   const out: string[] = [];
@@ -3236,7 +3323,7 @@ function briefedPageTitles(brief: string): string[] {
   return out.slice(0, P6_MIN_BRIEF_MODULES_MAX);
 }
 
-/** fixes/348: every region (heading body → next heading) whose heading names a
+/** fixes/348: every region (heading body â†’ next heading) whose heading names a
  *  page/section/screen/surface family. Used to scope bullet page-label mining. */
 function pagesRegions(text: string): string[] {
   const out: string[] = [];
@@ -3255,13 +3342,13 @@ function pagesRegions(text: string): string[] {
   return out;
 }
 
-/** fixes/348: the page label a bullet declares (`- Home page: hero` → `Home page`), or null. */
+/** fixes/348: the page label a bullet declares (`- Home page: hero` â†’ `Home page`), or null. */
 function bulletPageLabel(raw: string): string | null {
   let text = String(raw ?? "").trim();
   const bold = /^\*\*([^*\n]+)\*\*/.exec(text);
   if (bold !== null) text = bold[1]!.trim();
   else {
-    const sep = text.search(/[:—–]|\s+-\s+/);
+    const sep = text.search(/[:â€”â€“]|\s+-\s+/);
     if (sep > 0) text = text.slice(0, sep).trim();
   }
   text = text.replace(/^(?:a|an|the)\s+/i, "").trim();
@@ -3274,8 +3361,8 @@ function bulletPageLabel(raw: string): string | null {
   return words.length <= 2 && words.every((w) => /^[A-Z][a-z0-9]+$/.test(w)) ? text : null;
 }
 
-/** PascalCase identifier stem from a page title (`Hours & Location` →
- *  `HoursLocation`, `Home page` → `Home` → `renderHomePage`); "" when none. */
+/** PascalCase identifier stem from a page title (`Hours & Location` â†’
+ *  `HoursLocation`, `Home page` â†’ `Home` â†’ `renderHomePage`); "" when none. */
 function pageIdentifierStem(title: string): string {
   const parts = String(title ?? "")
     .replace(/[^A-Za-z0-9]+/g, " ")
@@ -3297,9 +3384,9 @@ function pageIdentifierStem(title: string): string {
  * `get*Screen` callable, and whether the expansion model emitted one is
  * stochastic (the measured bakery campaign carried none on one sample, two on
  * another). This derives one zero-arg `render<Page>Page(): string` per page the
- * BRIEF itself names — so the emitted tree carries the page surface by
+ * BRIEF itself names â€” so the emitted tree carries the page surface by
  * construction and the brief's page nouns land as real identifiers. Scoped to
- * `kind:"app"` (the engine-stamped webapp kind) with ≥2 named pages, so a
+ * `kind:"app"` (the engine-stamped webapp kind) with â‰¥2 named pages, so a
  * library/service/undeclared payload keeps the legacy floor byte-for-byte. A
  * page whose exact renderer the model already named is never duplicated (the
  * frozen cross-chunk registry would otherwise refuse the collision).
@@ -3342,9 +3429,9 @@ function floorFallbackModules(
     contracts?: { entities?: readonly { name?: string }[] } | null;
   } | null
   | undefined,
-  /** fixes/347: signature function names the model plan already carries — a
+  /** fixes/347: signature function names the model plan already carries â€” a
    *  briefed-page renderer colliding with one of them is skipped (see
-   *  `briefedPageModules`). Empty ⇒ the pre-fixes/347 behavior. */
+   *  `briefedPageModules`). Empty â‡’ the pre-fixes/347 behavior. */
   avoidNames: ReadonlySet<string> = new Set<string>(),
 ): RequiredModule[] {
   const entities = (Array.isArray(project?.lattice?.entities) ? project!.lattice!.entities! : []).filter(
@@ -3366,7 +3453,7 @@ function floorFallbackModules(
       source: "entity",
       label: domainName,
     },
-    // fixes/347: briefed page renderers OUTRANK the proper-noun stub modules —
+    // fixes/347: briefed page renderers OUTRANK the proper-noun stub modules â€”
     // they are product-relevant, satisfy the emitter's `render*Page` contract,
     // and carry signatures the model can implement with no declared types.
     ...briefedPageModules(project, avoidNames),
@@ -3388,7 +3475,7 @@ function floorFallbackModules(
  * adds one chunk per uncovered `RequiredModule` (a declared capability the model
  * plan missed); then, ONLY when the total is still below `options.minimum`, it
  * adds synthetic floor modules (one `src/domain/<domain>.ts` then brief-noun
- * modules) so a noun-rich / capability-thin brief cannot plan 1–2 chunks. The
+ * modules) so a noun-rich / capability-thin brief cannot plan 1â€“2 chunks. The
  * plan is never reordered or dropped here (the caller applies `orderTreeChunks`),
  * and the entry path is never claimed.
  */
@@ -3423,7 +3510,7 @@ export function mergeMinimumPlan(
     push(r.path, r.signatures, r.source === "job" && r.key.startsWith("job:") ? r.key.slice(4) : undefined, r.label);
   }
   // fixes/348: a website/app brief's PAGE modules are part of the plan, not a
-  // last-resort floor — a website brief must plan its pages even when the job
+  // last-resort floor â€” a website brief must plan its pages even when the job
   // register already meets the minimum. `avoidNames` skips a page whose exact
   // renderer the model already named (the frozen registry would refuse it).
   if (options.project !== undefined) {
@@ -3442,17 +3529,17 @@ export function mergeMinimumPlan(
 }
 
 /**
- * Assemble the ENTRY module from the accepted tree files — the
+ * Assemble the ENTRY module from the accepted tree files â€” the
  * concatenation-safe form of the tree (used for brief-fit vocabulary scan
  * and as generatedSource on the SINGLE-chunk legacy path). Each file's
  * source is wrapped in an IIFE `(function (module, exports, <prior
- * exports…>) { … })(module, module.exports, module.exports.<prior>…)`:
+ * exportsâ€¦>) { â€¦ })(module, module.exports, module.exports.<prior>â€¦)`:
  *   - top-level names can never collide across files;
  *   - later files may call earlier exports BY NAME (chunk-prompt contract);
- *   - `module.exports.<name> = …` reaches the shared outer exports object.
- * Pure + deterministic: identical files ⇒ identical entry bytes.
+ *   - `module.exports.<name> = â€¦` reaches the shared outer exports object.
+ * Pure + deterministic: identical files â‡’ identical entry bytes.
  *
- * A0 (fixes/162) + W21-258: this concatenation is NOT what hits disk —
+ * A0 (fixes/162) + W21-258: this concatenation is NOT what hits disk â€”
  * `materializeImportableTree` rewrites EVERY tree (N=1 included) into real ESM
  * files with cross-file `import`/`export`. The IIFE lives only on the
  * brief-fit vocabulary scan input and on the single-module-legacy path. */
@@ -3479,7 +3566,7 @@ export function assembleTreeEntry(files: readonly { source: string; exports?: re
   return parts.join("\n");
 }
 
-/** Deterministic content-addressed tree record (integrity, not crypto —
+/** Deterministic content-addressed tree record (integrity, not crypto â€”
  *  fnv1a parity with every other evidence hash in the repo). attempt is the
  *  synthesis attempt that produced the file (0 = first pass). */
 export function toGeneratedTreeFile(path: string, source: string, attempt = 0): GeneratedTreeFile {
@@ -3521,9 +3608,9 @@ function isIdent(n: string): boolean {
  *
  *  325 A3: the char-walk this replaced ignored REGEX literals, so a brace
  *  inside one (`s.replace(/}/g, "")`) shifted the depth walk inside a dropped
- *  `module.exports = {…}` construct: the construct closed early and a dangling
+ *  `module.exports = {â€¦}` construct: the construct closed early and a dangling
  *  `};` was left in the emitted ESM (SyntaxError at import), or opened one
- *  level too deep and SWALLOWED the rest of the file — leaving only
+ *  level too deep and SWALLOWED the rest of the file â€” leaving only
  *  `export { keep };` with no binding (`Export 'keep' is not defined`).
  *  REUSE of the masker keeps literals/comments/regex in ONE place.
  */
@@ -3539,8 +3626,8 @@ function bracketDelta(line: string): number {
 }
 
 /** JS keywords that are valid property names but never legal binding
- *  identifiers — `module.exports.default = …` can therefore not become
- *  `const default = …`. */
+ *  identifiers â€” `module.exports.default = â€¦` can therefore not become
+ *  `const default = â€¦`. */
 const RESERVED_BINDING_WORDS = new Set([
   "await", "break", "case", "catch", "class", "const", "continue", "debugger",
   "default", "delete", "do", "else", "enum", "export", "extends", "false",
@@ -3552,9 +3639,9 @@ const RESERVED_BINDING_WORDS = new Set([
 
 /** Net `{`/`[`/`(` depth of one line, counting on the MASKED line only
  *  (string/regex/comment bodies blanked to same-length spaces, indices
- *  preserved) — same shape as `bracketDelta`, parens included: the skip/keep
+ *  preserved) â€” same shape as `bracketDelta`, parens included: the skip/keep
  *  consumer for residual CJS statements must follow a multi-line call value to
- *  its close. 325 A3: see bracketDelta — un-masked regex bodies shifted the
+ *  its close. 325 A3: see bracketDelta â€” un-masked regex bodies shifted the
  *  depth (a `/[{]/` inside a dropped assign swallowed the rest of the file). */
 function cjsStatementDelta(line: string): number {
   const code = maskLiteralsAndComments(typeof line === "string" ? line : "");
@@ -3568,18 +3655,18 @@ function cjsStatementDelta(line: string): number {
 }
 
 /** Top-level binding names the file already declares (function / class /
- *  const / let / var) — the same shapes `declaredNames` scans, minus its
+ *  const / let / var) â€” the same shapes `declaredNames` scans, minus its
  *  `module.exports.NAME =` rule: a residual CJS assignment must never mint a
  *  SECOND declaration of a name the file already binds.
  *
  *  325 A3: the `const|let|var NAME =` shape alone MISSED the bare and
- *  destructured declarations — `let cache;`, `const { id } = input;`,
+ *  destructured declarations â€” `let cache;`, `const { id } = input;`,
  *  `const a = 0, b = 1;`. A residual `module.exports.cache = cache ||
- *  compute();` then converted to `const cache = …` beside the file's own
- *  `let cache;` (duplicate declaration — the whole emitted tree died at
+ *  compute();` then converted to `const cache = â€¦` beside the file's own
+ *  `let cache;` (duplicate declaration â€” the whole emitted tree died at
  *  import), and a self-referencing RHS became a TDZ crash. Every added form
  *  binds a name at column 0; over-detection here is the SAFE direction (the
- *  statement is dropped, never double-declared) — an inner-scope declaration
+ *  statement is dropped, never double-declared) â€” an inner-scope declaration
  *  is still deliberately NOT a top-level binding (the `^` anchor stays). */
 function localBindingNames(source: string): Set<string> {
   const code = stripComments(String(source ?? ""));
@@ -3587,10 +3674,10 @@ function localBindingNames(source: string): Set<string> {
   for (const m of code.matchAll(/^(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) names.add(m[1]!);
   for (const m of code.matchAll(/^(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]!);
   for (const m of code.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/gm)) names.add(m[1]!);
-  // 325 A3: bare declarations (no initializer) …
+  // 325 A3: bare declarations (no initializer) â€¦
   for (const m of code.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?=[;,]|$)/gm)) names.add(m[1]!);
-  // … and destructuring patterns: every identifier the pattern names is bound
-  // (`const { id, name } = row;` — `id`, `name`; `const [first] = rows;`).
+  // â€¦ and destructuring patterns: every identifier the pattern names is bound
+  // (`const { id, name } = row;` â€” `id`, `name`; `const [first] = rows;`).
   for (const m of code.matchAll(/^(?:const|let|var)\s*[{[]([^}\]\n]*)[}\]]\s*=/gm)) {
     for (const t of m[1]!.matchAll(/[A-Za-z_$][\w$]*/g)) names.add(t[0]!);
   }
@@ -3599,7 +3686,7 @@ function localBindingNames(source: string): Set<string> {
 
 /** Blank string/template/comment spans in ONE line, carrying cross-line block
  *  and template state (indices preserved, like `maskLiteralsAndComments`). Best-effort
- *  lexical mask — `localBindingLines` scans declarations at column 0 only. */
+ *  lexical mask â€” `localBindingLines` scans declarations at column 0 only. */
 function maskCodeLine(line: string, state: { block: boolean; template: boolean }): string {
   let out = "";
   let j = 0;
@@ -3698,17 +3785,17 @@ function maskCodeLine(line: string, state: { block: boolean; template: boolean }
  * W45/331-4 (Finding B): top-level binding names a module declares, mapped to the
  * 1-based line numbers of their declarations. A SUPERSET of `localBindingNames`
  * (function/class/const/let/var incl. bare + destructured): it also reports the
- * type-space, ambient and enum/class-modifier shapes — `type X`, `interface X`,
+ * type-space, ambient and enum/class-modifier shapes â€” `type X`, `interface X`,
  * `enum X` / `const enum X` / `declare enum X`, `declare class X`,
- * `abstract class X`, `declare function X`, `export default class X` — because
+ * `abstract class X`, `declare function X`, `export default class X` â€” because
  * `materializeImportableTree` emits `import { X }` for EVERY earlier file's
  * exports, and each of those later declarations collides with that import as
  * TS2440 (W56/342-1; the enum/class forms verified against the real compiler in
  * the 342-1 resume). NOT in the set: `namespace X` / `declare namespace X` /
- * `declare module X` — real tsc is silent on those (no TS2440), so flagging them
+ * `declare module X` â€” real tsc is silent on those (no TS2440), so flagging them
  * would over-refuse. `localBindingNames` stays runtime-only for export binding,
  * so the two detectors legitimately differ here. Line-preserving (a comment- or
- * string-only line never reports) and returned as a name→lines map so a refusal
+ * string-only line never reports) and returned as a nameâ†’lines map so a refusal
  * can name WHERE the redeclaration is. Deterministic.
  */
 export function localBindingLines(module: string): Map<string, number[]> {
@@ -3743,12 +3830,12 @@ export function localBindingLines(module: string): Map<string, number[]> {
 
 /**
  * A2 (SYNTHSPEC P2): the top-level binding surface a materialized module can
- * collide on — `localBindingLines` PLUS the residual CJS assignments
- * (`module.exports.NAME = …` / `exports.NAME = …`) that
+ * collide on â€” `localBindingLines` PLUS the residual CJS assignments
+ * (`module.exports.NAME = â€¦` / `exports.NAME = â€¦`) that
  * `neutralizeResidualCjsExports` converts into a real binding. `localBindingLines`
  * deliberately omits that shape, so a later chunk redeclaring a name a prior
  * chunk exports ONLY through residual CJS was invisible to the duplicate
- * detector — the exact `getDailyRevenueByCategory` (TS2308) escape.
+ * detector â€” the exact `getDailyRevenueByCategory` (TS2308) escape.
  * Deterministic, line-based, same masking as `localBindingLines`.
  */
 export function bindingLinesForCollision(module: string): Map<string, number[]> {
@@ -3780,8 +3867,8 @@ export type CrossChunkDuplicate = { name: string; line: number; priorPath: strin
  * W45/331-4 (Finding B): the cross-chunk duplicate-declaration census. `materializeImportableTree`
  * imports EVERY earlier chunk's exports into a later file, so a later chunk that declares a
  * top-level name an earlier chunk exports yields a file with both an `import { x }` and a local
- * `x` — a load-time `SyntaxError: Identifier 'x' has already been declared` (the real keyed tree:
- * `src/jobs/flip.ts` imported `estimateARV` from `…/list-line-items.ts` and declared it again at
+ * `x` â€” a load-time `SyntaxError: Identifier 'x' has already been declared` (the real keyed tree:
+ * `src/jobs/flip.ts` imported `estimateARV` from `â€¦/list-line-items.ts` and declared it again at
  * line 546). This is the ONE detector of that class: names in prior exports that are also local
  * top-level bindings, with the declaration line and the exporting sibling. Deterministic, pure.
  */
@@ -3794,7 +3881,7 @@ export function crossChunkDuplicateDeclarations(
   );
   if (chunks.length === 0) return [];
   // A2: the collision surface includes residual-CJS assignment bindings, so a
-  // name a prior chunk exports only via `module.exports.NAME = …` is caught.
+  // name a prior chunk exports only via `module.exports.NAME = â€¦` is caught.
   const lines = bindingLinesForCollision(String(module ?? ""));
   const out: CrossChunkDuplicate[] = [];
   const seen = new Set<string>();
@@ -3812,20 +3899,20 @@ export function crossChunkDuplicateDeclarations(
 }
 
 // ---------------------------------------------------------------------------
-// A2 (SYNTHSPEC P2) — FROZEN CROSS-CHUNK EXPORT REGISTRY.
+// A2 (SYNTHSPEC P2) â€” FROZEN CROSS-CHUNK EXPORT REGISTRY.
 //
 // The validator read the prior chunk's ENVELOPE CLAIM (`synth.envelope.exports`)
-// while the materializer imported the prior chunk's MATERIALIZED union (claim ∪
+// while the materializer imported the prior chunk's MATERIALIZED union (claim âˆª
 // residual-CJS conversions). A name exported only through residual CJS was
 // therefore invisible to the duplicate detector but imported into the later
-// file — the TS2308/SyntaxError class. The registry freezes one immutable
+// file â€” the TS2308/SyntaxError class. The registry freezes one immutable
 // inventory immediately after a chunk is accepted and is the single source the
 // validator, the prompt and the materializer read.
 // ---------------------------------------------------------------------------
 
 /**
  * The real top-level bindings the materializer exports for ONE file:
- * the envelope claim ∪ the residual-CJS conversions the materializer will make.
+ * the envelope claim âˆª the residual-CJS conversions the materializer will make.
  * Mirrors `materializeImportableTree`'s own `exportNames` computation exactly.
  */
 export function materializedExportNames(source: string, claimed: readonly string[]): string[] {
@@ -3844,7 +3931,7 @@ export type FrozenExportRegistry = {
   files: Map<string, FrozenExport[]>;
 };
 
-/** The names a later file must import from `path` — EXACTLY the materialized surface. */
+/** The names a later file must import from `path` â€” EXACTLY the materialized surface. */
 export function registryNamesFor(reg: FrozenExportRegistry, path: string): string[] {
   const entries = reg?.files?.get(path);
   return entries === undefined ? [] : entries.map((e) => e.name);
@@ -3853,7 +3940,7 @@ export function registryNamesFor(reg: FrozenExportRegistry, path: string): strin
 /**
  * Immutable append: freeze one accepted file's materialized surface. A name
  * already owned by an earlier path is a collision (returned, never silently
- * dropped) — the caller refuses rather than emitting a colliding barrel.
+ * dropped) â€” the caller refuses rather than emitting a colliding barrel.
  */
 export function freezeFileExports(
   reg: FrozenExportRegistry,
@@ -3878,7 +3965,7 @@ export function freezeFileExports(
 }
 
 /**
- * A2 (SYNTHSPEC §5 trap 1): a gate, not a lint nit — refuse a generated module
+ * A2 (SYNTHSPEC Â§5 trap 1): a gate, not a lint nit â€” refuse a generated module
  * that injects a compiler/linter suppression pragma. Returns the offending
  * token, or null. Enforced by `validateSynthesisModule`.
  */
@@ -3888,18 +3975,18 @@ export function suppressionPragmaHit(module: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// A12 (SYNTHSPEC F5/P5a) — the generated-chunk module contract: a planned chunk
+// A12 (SYNTHSPEC F5/P5a) â€” the generated-chunk module contract: a planned chunk
 // path is a `.ts` file (`genericTreePath`), where raw JSX is a syntax error
 // (TS1005) even with `"jsx":"react-jsx"` (that applies to `.tsx` only). The
 // detector refuses a `.ts` module carrying JSX with one bounded repair. It
-// never strips `<…>` tags (data loss).
+// never strips `<â€¦>` tags (data loss).
 // ---------------------------------------------------------------------------
 
 /**
  * Line numbers carrying raw JSX in a module (1-based). Conservative lexical
  * detection on literal/comment-masked lines: a closing tag (`</Tag>`), a
- * self-closing tag (`<Tag … />`), or an opening tag carrying at least one
- * attribute (`<Tag attr=…`) or a text child. TypeScript generics
+ * self-closing tag (`<Tag â€¦ />`), or an opening tag carrying at least one
+ * attribute (`<Tag attr=â€¦`) or a text child. TypeScript generics
  * (`Array<Foo>`) and comparisons (`a < b`) do not carry `</`, `/>`, or an
  * attribute, so they never trip. Pure + deterministic.
  */
@@ -3930,10 +4017,10 @@ export function jsxHits(module: string): number[] {
  * R2-03 (TS2503): line numbers referencing the `JSX` TYPE NAMESPACE in a module
  * that never binds it (1-based). `jsxHits` catches raw elements (TS1005/TS2503
  * on a raw node), but a `.ts` module can reference `JSX.Element` as a return
- * type with no element at all — the measured bakery-website chunk did
+ * type with no element at all â€” the measured bakery-website chunk did
  * (`: JSX.Element` on nine renderers) and red its own `tsc` with TS2503 even
  * though the console shell was JSX-free. A module that DECLARES the namespace
- * in the same file (`namespace JSX` / `declare namespace JSX` — the compiling
+ * in the same file (`namespace JSX` / `declare namespace JSX` â€” the compiling
  * shape the historical `render-tab-bar.ts` used) or imports it
  * (`import type { JSX } from "react"`) is bound and is not flagged. Lexical +
  * comment/literal-masked, so a JSDoc mention never trips. Pure + deterministic.
@@ -3961,11 +4048,11 @@ export function jsxNamespaceHits(module: string): number[] {
 }
 
 // ---------------------------------------------------------------------------
-// BF-5 (SYNTHSPEC A5) — MONEY SEMANTICS.
+// BF-5 (SYNTHSPEC A5) â€” MONEY SEMANTICS.
 //
 // The measured defect: `computeCartTotalPence` documented "cart total in integer
 // pence" but its body summed each line's `quantity` (never `pricePence`) and
-// returned 4 for 3×£2.50 + 1×£4.00 — a real product bug every deterministic
+// returned 4 for 3Ã—Â£2.50 + 1Ã—Â£4.00 â€” a real product bug every deterministic
 // validator accepted, because none measured arithmetic MEANING. The guard is
 // lexical + name-scoped: a money-named export whose only accumulated operand is
 // a quantity field (no price/unit-cost operand and no multiplication of the two)
@@ -3975,7 +4062,7 @@ export function jsxNamespaceHits(module: string): number[] {
 /** A money-named export whose accumulation ignores price. */
 export type MoneySemanticsHit = { name: string; line: number; operand: string };
 
-/** Unambiguous money tokens (a bare `total` is deliberately NOT enough — a
+/** Unambiguous money tokens (a bare `total` is deliberately NOT enough â€” a
  *  `computeTotalCount` must not be flagged). */
 const MONEY_NAME_HINT = /(pence|price|cost|amount|currency|revenue|subtotal|grandtotal|carttotal|ordertotal|billtotal|invoicetotal|paymenttotal|salestotal|totaldue|amountdue)/i;
 /** An operand that makes a sum money-shaped (price/unit cost/rate/currency). */
@@ -4008,11 +4095,11 @@ export function moneySemanticsHits(module: string): MoneySemanticsHit[] {
     for (const acc of body.matchAll(accRe)) {
       const rhs = (acc[2] ?? acc[3] ?? "").trim();
       if (!rhs) continue;
-      if (MONEY_PRICE_OPERAND.test(rhs)) continue; // price/unit cost present — money-shaped
-      if (/\*/.test(rhs)) continue; // a product (qty × price, literal or field) — money-shaped
-      if (!MONEY_QTY_OPERAND.test(rhs)) continue; // not a bare quantity sum — not this defect
+      if (MONEY_PRICE_OPERAND.test(rhs)) continue; // price/unit cost present â€” money-shaped
+      if (/\*/.test(rhs)) continue; // a product (qty Ã— price, literal or field) â€” money-shaped
+      if (!MONEY_QTY_OPERAND.test(rhs)) continue; // not a bare quantity sum â€” not this defect
       // Masking preserves length, so the masked index aligns with the raw
-      // source — count the line off the RAW bytes (block-comment newlines are
+      // source â€” count the line off the RAW bytes (block-comment newlines are
       // spaces in the mask and would undercount).
       const line = src.slice(0, braceStart + 1 + (acc.index ?? 0)).split("\n").length;
       hits.push({ name, line, operand: rhs.replace(/\s+/g, " ").slice(0, 80) });
@@ -4038,7 +4125,7 @@ function matchingBraceEnd(masked: string, openIndex: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// A3 (SYNTHSPEC P3) — DETERMINISTIC TREE NORMALIZER.
+// A3 (SYNTHSPEC P3) â€” DETERMINISTIC TREE NORMALIZER.
 //
 // A pure post-assembly pass over the raw accepted modules (and the materialized
 // files). It only reorders PROVABLY-PURE top-level initializers, deletes
@@ -4073,7 +4160,7 @@ function referencedIdents(maskedLine: string): string[] {
 
 /**
  * Normalize one tree file's source. Returns the new source plus the changes
- * applied and the unresolved defects (a duplicate whose two bodies differ — the
+ * applied and the unresolved defects (a duplicate whose two bodies differ â€” the
  * normalizer refuses to guess which is correct).
  */
 function normalizeOneFile(
@@ -4176,7 +4263,7 @@ function normalizeOneFile(
   // 3. Drop byte-identical duplicate declarations (TS2393). `localBindingLines`
   //    reports every top-level declaration line (functions/classes/types too);
   //    identical declaration LINES are safe to dedupe. A differing redeclaration
-  //    is surfaced in `unresolved` — never guess which body is right.
+  //    is surfaced in `unresolved` â€” never guess which body is right.
   {
     const declLines = localBindingLines(lines.join("\n"));
     const drop = new Set<number>();
@@ -4238,14 +4325,14 @@ export function normalizeTreeFiles(
  * Top-level `async` callable names a module declares (masked per line, so a
  * comment/string mentioning one never reports). Covers the lexical shapes an
  * emitted module actually uses:
- *   • `async function NAME(...)`
- *   • `const|let|var NAME = async (...) =>` / `= async function (...)` / `= async x =>`
- *   • `(module.)?exports.NAME = async (...) =>` / `= async function (...)`
- *   • `async NAME(...)` / `async *NAME(...)` class (or object-literal) methods
+ *   â€¢ `async function NAME(...)`
+ *   â€¢ `const|let|var NAME = async (...) =>` / `= async function (...)` / `= async x =>`
+ *   â€¢ `(module.)?exports.NAME = async (...) =>` / `= async function (...)`
+ *   â€¢ `async NAME(...)` / `async *NAME(...)` class (or object-literal) methods
  * LIMIT (stated, not implied): discovery is LEXICAL, not a parser. A callable
  * whose Promise-returning nature is not spelled `async` (e.g. `function f() {
  * return new Promise(...) }`, a re-export, or a method invoked through a
- * receiver `obj.m()` rather than by bare name) is NOT discovered here — those
+ * receiver `obj.m()` rather than by bare name) is NOT discovered here â€” those
  * shapes are undecidable from the bare name alone.
  */
 function declaredAsyncFunctionNames(module: string): string[] {
@@ -4268,7 +4355,7 @@ function declaredAsyncFunctionNames(module: string): string[] {
     )) {
       out.push(m[1]!);
     }
-    // async NAME(...) / async *NAME(...) — a class/object method (the `(?!function)`
+    // async NAME(...) / async *NAME(...) â€” a class/object method (the `(?!function)`
     // guard keeps the anonymous `async function (...)` expression out of this arm).
     for (const m of code.matchAll(/^\s*(?:static\s+)?async\s*\*?\s*(?!function\b)([A-Za-z_$][\w$]*)\s*\(/gm)) out.push(m[1]!);
   }
@@ -4277,7 +4364,7 @@ function declaredAsyncFunctionNames(module: string): string[] {
 
 /**
  * W46/332-1 (P1): the declared names of `exports` that an earlier file declares
- * `async` — the set a later chunk must `await` before reading any property off
+ * `async` â€” the set a later chunk must `await` before reading any property off
  * the resolved value. The materializer imports every earlier chunk's exports as
  * plain ESM bindings, so an async export is callable by bare name; the real
  * keyed tree's `src/jobs/rehab.ts` called the async `getProperty(propertyId)`
@@ -4316,7 +4403,7 @@ export type AsyncUnawaitedUse = {
   form: "property-read" | "computed-read" | "destructure" | "bound-then-read" | "floating-in-then";
 };
 
-/** `Promise.then/catch/finally` ARE the legal way to consume a promise — reading
+/** `Promise.then/catch/finally` ARE the legal way to consume a promise â€” reading
  *  one off an un-awaited call is not the defect this detector refuses. */
 const PROMISE_CONSUMER_METHODS = new Set(["then", "catch", "finally"]);
 
@@ -4337,7 +4424,7 @@ function matchParenClose(text: string, open: number): number {
 }
 
 /**
- * The member access starting at `start`, if any — the tail a Promise would be
+ * The member access starting at `start`, if any â€” the tail a Promise would be
  * read through. Accepts the four lexical forms an emitted module uses:
  * `.name`, `?.name`, `["name"]`, `?.["name"]`, plus a computed key bound to a
  * top-level const string literal (`[K]` where `const K = "then"`). `masked` and
@@ -4345,7 +4432,7 @@ function matchParenClose(text: string, open: number): number {
  * a computed key's literal text is read from `raw` while the structure is read
  * from `masked`. `literals` resolves an identifier key when the value is
  * statically known; an unresolvable key stays a computed read with no name
- * (conservative — 333-1 F-1). Returns null when the next token is not a member
+ * (conservative â€” 333-1 F-1). Returns null when the next token is not a member
  * access. Pure.
  */
 function memberAccessAfter(
@@ -4396,7 +4483,7 @@ function matchBraceClose(text: string, open: number): number {
 /** Top-level `const NAME = "literal"` values in a module, used to resolve a
  *  computed member key lexically (`fn(id)[K]` with `const K = "then"`). The raw
  *  line carries the value (masking blanks literal bodies); the masked line must
- *  still be the declaration head, so a `// const K = "…"` comment never binds.
+ *  still be the declaration head, so a `// const K = "â€¦"` comment never binds.
  *  A `let`/`var` or a reassigned binding is not resolved (conservative). Pure. */
 function constStringLiterals(src: string): Map<string, string> {
   const out = new Map<string, string>();
@@ -4410,9 +4497,9 @@ function constStringLiterals(src: string): Map<string, string> {
   return out;
 }
 
-/** Body ranges of every `async NAME(…) { … }` method declared in the module —
- *  the receiver (`this.NAME(…)`) a bare-name scan cannot see. The range is the
- *  enclosing class/object-literal body, so a `this.NAME(…)` is tied to the very
+/** Body ranges of every `async NAME(â€¦) { â€¦ }` method declared in the module â€”
+ *  the receiver (`this.NAME(â€¦)`) a bare-name scan cannot see. The range is the
+ *  enclosing class/object-literal body, so a `this.NAME(â€¦)` is tied to the very
  *  declaration that owns it: a same-named method on a *different* receiver is
  *  not matched (it may be synchronous). Pure. */
 function asyncMethodBodyRanges(masked: string): { name: string; start: number; end: number }[] {
@@ -4448,28 +4535,28 @@ type AsyncCallSite = { name: string; calleeStart: number; openParen: number };
  * are the callable names known to return a Promise (a sibling chunk's async export
  * or the module's own `async function`). A call that is NOT preceded by `await` is
  * refused when its result is consumed as a value:
- *   • `getProperty(id).ok` / `?.ok`   → property-read (a Promise has no `.ok`)
- *   • `getProperty(id)["ok"]`         → computed-read (same, through a key; a key
+ *   â€¢ `getProperty(id).ok` / `?.ok`   â†’ property-read (a Promise has no `.ok`)
+ *   â€¢ `getProperty(id)["ok"]`         â†’ computed-read (same, through a key; a key
  *     bound to a const string that resolves to `then`/`catch`/`finally` is a legal
  *     consumer and stays accepted)
- *   • `const { ok } = getProperty(id)`→ destructure (same, off the Promise)
- *   • `const p = getProperty(id); p.ok` / `p?.ok` / `p["ok"]` → bound-then-read (the
- *     promise stored, a member read off it later — the real `src/jobs/rehab.ts` shape)
- *   • `this.getProperty(id).ok` inside the declaring class → the same shapes through
+ *   â€¢ `const { ok } = getProperty(id)`â†’ destructure (same, off the Promise)
+ *   â€¢ `const p = getProperty(id); p.ok` / `p?.ok` / `p["ok"]` â†’ bound-then-read (the
+ *     promise stored, a member read off it later â€” the real `src/jobs/rehab.ts` shape)
+ *   â€¢ `this.getProperty(id).ok` inside the declaring class â†’ the same shapes through
  *     a `this` receiver (a same-named member on another receiver is not matched)
- *   • a var bound to one inside a `Promise.resolve().then(…)` body → floating-in-then
+ *   â€¢ a var bound to one inside a `Promise.resolve().then(â€¦)` body â†’ floating-in-then
  *     (that callback is not `async`, so the promise can never be awaited later).
  * The optional call `getProperty?.(id)` (and `this.getProperty?.(id)`) is the SAME
- * call — it only guards a null/undefined callee, never the returned Promise — so its
+ * call â€” it only guards a null/undefined callee, never the returned Promise â€” so its
  * result is classified through the identical value-position tails (W49/335-1).
  * `await getProperty(id)` and `.then/.catch/.finally` consumers (including via a
  * computed key: `["then"]`) are accepted. `asyncNames` discovery is lexical (see
  * `declaredAsyncFunctionNames`); a Promise-returning callable not spelled `async`,
- * a named receiver (`obj.m()`), an indirect invocation (`fn.call(…)`/`fn.apply(…)`,
+ * a named receiver (`obj.m()`), an indirect invocation (`fn.call(â€¦)`/`fn.apply(â€¦)`,
  * or a parenthesized/comma-discarded callee `(fn)(id)` / `(0, fn)(id)`), and an
  * unresolvable dynamic computed key stay outside this guard (their receiver/value
  * cannot be tied to a bare declaration). The `this`-receiver arm additionally
- * needs the `async NAME(` declaration to begin its own line — `asyncMethodBodyRanges`
+ * needs the `async NAME(` declaration to begin its own line â€” `asyncMethodBodyRanges`
  * is line-anchored, so a method declared mid-line is not discoverable. Pure.
  */
 export function unawaitedAsyncValueUses(module: string, asyncNames: readonly string[]): AsyncUnawaitedUse[] {
@@ -4496,7 +4583,7 @@ export function unawaitedAsyncValueUses(module: string, asyncNames: readonly str
   const sites: AsyncCallSite[] = [];
   for (const name of wanted) {
     // W49/335-1: the optional-call tail `?.(` calls the same async function and
-    // returns the same Promise — a plausible defensive emission that must not
+    // returns the same Promise â€” a plausible defensive emission that must not
     // bypass the guard (the property-read/computed-read/`?.(` forms are one class).
     const re = new RegExp(`(?<![\\w.$])${name}\\s*(?:\\?\\.\\s*)?\\(`, "g");
     let m: RegExpExecArray | null;
@@ -4504,8 +4591,8 @@ export function unawaitedAsyncValueUses(module: string, asyncNames: readonly str
       sites.push({ name, calleeStart: m.index, openParen: m.index + m[0].lastIndexOf("(") });
     }
   }
-  // A `this.NAME(…)`/`this.NAME?.(…)` receiver call is matched only inside the
-  // body that declares the async method NAME — a same-named member on another
+  // A `this.NAME(â€¦)`/`this.NAME?.(â€¦)` receiver call is matched only inside the
+  // body that declares the async method NAME â€” a same-named member on another
   // receiver stays out.
   for (const r of asyncMethodBodyRanges(masked)) {
     if (!wanted.includes(r.name)) continue;
@@ -4560,8 +4647,8 @@ export function unawaitedAsyncValueUses(module: string, asyncNames: readonly str
       break;
     }
   }
-  // A `Promise.resolve().then(…)` body is not an `async` callback, so a promise
-  // bound to a var there can never be awaited later — it is consumed as a value.
+  // A `Promise.resolve().then(â€¦)` body is not an `async` callback, so a promise
+  // bound to a var there can never be awaited later â€” it is consumed as a value.
   if (/Promise\s*\.\s*resolve\s*\(\s*\)\s*\.\s*then\s*\(/.test(masked)) {
     for (const b of bound) {
       if (!readVars.has(b.varName)) push({ name: b.name, line: b.line, form: "floating-in-then" });
@@ -4575,27 +4662,27 @@ export function unawaitedAsyncValueUses(module: string, asyncNames: readonly str
  * `stripCjsExportAssignments` leaves behind, so a file rewritten to ESM is
  * valid ESM and never references `module`/`exports` at all.
  *
- * Why this exists (proven on run #2's emitted tree, fixes/255 §1): the P6
+ * Why this exists (proven on run #2's emitted tree, fixes/255 Â§1): the P6
  * envelope's `exports` list is the DECLARED surface, but an accepted module may
- * carry extra CJS surface the model wrote on its own — run #2's
+ * carry extra CJS surface the model wrote on its own â€” run #2's
  * `src/generated/get-property.ts` ends
- * `module.exports._internals = { LEDGER: …, DEALS: … };`. The declared-name
+ * `module.exports._internals = { LEDGER: â€¦, DEALS: â€¦ };`. The declared-name
  * strip left that line in place, so even a fully materialized tree still died
  * at import in the `"type":"module"` tenant (`ReferenceError: module is not
- * defined in ES module scope` — zero spec assertions ever ran).
+ * defined in ES module scope` â€” zero spec assertions ever ran).
  *
  * Rules (deterministic, line-based; comments can never match because a CJS
- * statement must START with its prefix — `// module.exports.x = x` is inert):
- *   • `module.exports.NAME = EXPR` / `exports.NAME = EXPR` where NAME is
- *     already a top-level binding of the file → drop the statement (the binding
- *     stays); NAME is reported so the ESM `export { … }` line keeps the surface.
- *   • … where NAME is NOT bound → rewritten as `const NAME = EXPR` (value kept,
+ * statement must START with its prefix â€” `// module.exports.x = x` is inert):
+ *   â€¢ `module.exports.NAME = EXPR` / `exports.NAME = EXPR` where NAME is
+ *     already a top-level binding of the file â†’ drop the statement (the binding
+ *     stays); NAME is reported so the ESM `export { â€¦ }` line keeps the surface.
+ *   â€¢ â€¦ where NAME is NOT bound â†’ rewritten as `const NAME = EXPR` (value kept,
  *     multi-line values included) and reported as exported.
- *   • NAME that cannot be a binding identifier (a reserved word) → dropped, not
+ *   â€¢ NAME that cannot be a binding identifier (a reserved word) â†’ dropped, not
  *     reported (a contract-violating extra the ESM conversion cannot carry).
- *   • bare `module.exports = …` / `exports = …` and computed
- *     `module.exports[…]/exports[…] = …` → dropped whole (depth-consumed).
- * Pure + deterministic: identical input ⇒ identical output + name order.
+ *   â€¢ bare `module.exports = â€¦` / `exports = â€¦` and computed
+ *     `module.exports[â€¦]/exports[â€¦] = â€¦` â†’ dropped whole (depth-consumed).
+ * Pure + deterministic: identical input â‡’ identical output + name order.
  */
 export function neutralizeResidualCjsExports(source: string): { source: string; exported: string[] } {
   const text = String(source ?? "");
@@ -4622,7 +4709,7 @@ export function neutralizeResidualCjsExports(source: string): { source: string; 
       const name = assign[1] ?? assign[2] ?? assign[3] ?? "";
       const reserved = RESERVED_BINDING_WORDS.has(name);
       if (reserved || bound.has(name)) {
-        // The binding already exists (or can never be an ESM binding) — only
+        // The binding already exists (or can never be an ESM binding) â€” only
         // the CJS assignment statement itself goes.
         skipDepth = Math.max(0, cjsStatementDelta(line));
       } else {
@@ -4636,7 +4723,7 @@ export function neutralizeResidualCjsExports(source: string): { source: string; 
       continue;
     }
     if (t.startsWith("module.exports") || t.startsWith("exports[") || t.startsWith("exports =")) {
-      // Bare/computed CJS surface — nothing to bind: drop the statement whole.
+      // Bare/computed CJS surface â€” nothing to bind: drop the statement whole.
       skipDepth = Math.max(0, cjsStatementDelta(line));
       continue;
     }
@@ -4649,19 +4736,19 @@ export function neutralizeResidualCjsExports(source: string): { source: string; 
  *
  *  216 (T-01): a whole-object assign is now removed as a COMPLETE CONSTRUCT. The previous
  *  implementation dropped only the line that *starts* with `module.exports =` and kept the
- *  object literal's body, leaving a dangling `};` plus bare identifiers — so the stripped
+ *  object literal's body, leaving a dangling `};` plus bare identifiers â€” so the stripped
  *  module did not parse (`new Function(out)` throws), which is the corruption that traced to
  *  431 tsc errors in the emitted tree. The brace depth opened by the assign is now followed to
  *  its matching close, so the whole literal goes with it.
  *
  *  216 (T-16): the regression test feeds the MULTI-LINE form and asserts the output still
- *  parses — the old test only fed `module.exports = { a };` (single line), which the old code
+ *  parses â€” the old test only fed `module.exports = { a };` (single line), which the old code
  *  happened to handle, so a green suite could never see the bug. */
 export function stripCjsExportAssignments(source: string, names: readonly string[]): string {
   const want = new Set((names ?? []).filter((n) => typeof n === "string" && isIdent(n)));
   const lines = String(source ?? "").split("\n");
   const kept: string[] = [];
-  // >0 while consuming a multi-line `module.exports = {…}` construct.
+  // >0 while consuming a multi-line `module.exports = {â€¦}` construct.
   let skipDepth = 0;
   for (const line of lines) {
     const t = line.trim();
@@ -4672,7 +4759,7 @@ export function stripCjsExportAssignments(source: string, names: readonly string
     if (t.startsWith("module.exports =")) {
       const delta = bracketDelta(line);
       // Multi-line object literal: keep consuming until the literal closes.
-      // Single-line (delta <= 0): the one line IS the whole construct — dropped here.
+      // Single-line (delta <= 0): the one line IS the whole construct â€” dropped here.
       if (delta > 0) skipDepth = delta;
       continue;
     }
@@ -4697,8 +4784,8 @@ export type ImportableTreeFile = {
 
 /**
  * fixes/349 (P6 convergence): the deterministic interface contract a chunked
- * tree materializes with (see `deriveInterfaceTypeDefinitions`). Absent/empty ⇒
- * byte-identical legacy output; present ⇒ each chunk that references one of the
+ * tree materializes with (see `deriveInterfaceTypeDefinitions`). Absent/empty â‡’
+ * byte-identical legacy output; present â‡’ each chunk that references one of the
  * definitions gets the canonical aliases prepended (no import, no extra file).
  */
 export type TreeTypeDefinitions = readonly InterfaceTypeDefinition[] | null;
@@ -4708,11 +4795,11 @@ export type TreeTypeDefinitions = readonly InterfaceTypeDefinition[] | null;
  * imports. Chunk 0 moves off TREE_ENTRY_PATH so that path can be an `export *`
  * barrel the oracle/job-bridge/treeRun entry already import.
  *
- * W21-258: EVERY tree goes through this rewrite — single-chunk trees included.
+ * W21-258: EVERY tree goes through this rewrite â€” single-chunk trees included.
  * They used to be returned unchanged ("legacy disk bytes", fixes/175), which
  * put raw P6 CommonJS into the emitted `"type":"module"` tenant and killed the
  * tenant's own spec at IMPORT (`ReferenceError: module is not defined in ES
- * module scope` → zero assertions → treeRunOk:false). A one-chunk tree now
+ * module scope` â†’ zero assertions â†’ treeRunOk:false). A one-chunk tree now
  * materializes exactly like an N-chunk one: the chunk file (relocated off the
  * entry path when its planned path IS the entry path) + an ESM barrel at
  * TREE_ENTRY_PATH. `neutralizeResidualCjsExports` additionally removes the
@@ -4722,7 +4809,7 @@ export type TreeTypeDefinitions = readonly InterfaceTypeDefinition[] | null;
  * Later files import prior files (acyclic). The barrel imports every chunk
  * (does not get imported by them). Named exports are the envelope `exports`
  * list plus any extra CJS surface the chunk itself wrote. Deterministic:
- * identical input ⇒ identical files + barrel.
+ * identical input â‡’ identical files + barrel.
  */
 export function materializeImportableTree(
   files: readonly {
@@ -4733,8 +4820,8 @@ export function materializeImportableTree(
   }[],
   /** fixes/349: the deterministic shared interface contract. When present, every
    *  chunk that references one of its definitions gets the canonical aliases
-   *  prepended (byte-identical text across chunks — one shared identity).
-   *  Absent ⇒ byte-identical legacy output (the single-module path never passes one). */
+   *  prepended (byte-identical text across chunks â€” one shared identity).
+   *  Absent â‡’ byte-identical legacy output (the single-module path never passes one). */
   typeDefinitions?: TreeTypeDefinitions,
 ): { files: ImportableTreeFile[]; entrySource: string } {
   const raw = (files ?? [])
@@ -4765,10 +4852,10 @@ export function materializeImportableTree(
   for (let i = 0; i < raw.length; i++) {
     // fixes/354 (A1-F1): strip a legal-ESM `typeof module`/`typeof exports`
     // runtime guard (with its body) BEFORE materialization, so the emitted
-    // `"type":"module"` chunk carries no `module` reference at all — the guard
+    // `"type":"module"` chunk carries no `module` reference at all â€” the guard
     // short-circuits under ESM, so its body never runs.
     const f = { ...raw[i]!, source: stripCjsRuntimeGuards(raw[i]!.source) };
-    // A2/A3: never import a name THIS file itself binds — that is the
+    // A2/A3: never import a name THIS file itself binds â€” that is the
     // import/local conflict (TS2440) / load-time `Identifier already declared`.
     // The later file's own declaration is authoritative.
     const selfBound = localBindingLines(f.source);
@@ -4779,7 +4866,7 @@ export function materializeImportableTree(
       if (names.length === 0) continue;
       importLines.push(`import { ${names.join(", ")} } from ${JSON.stringify(relTsImport(f.path, prior.path))};`);
     }
-    // fixes/349-P6 (Fix 6 — TS2304): a name the file references in a TYPE
+    // fixes/349-P6 (Fix 6 â€” TS2304): a name the file references in a TYPE
     // position but does not declare and the plan contract does not cover would
     // be an undefined name in the emitted tree (`tsc` TS2304). Give it a
     // permissive definition here so a referenced name is ALWAYS defined in the
@@ -4792,7 +4879,7 @@ export function materializeImportableTree(
     // fixes/354 (measured TS2300): a name the contract INJECTS that THIS file also
     // declares locally must not become a second declaration. The validator refuses
     // that redeclaration on the normal path, but the resume/reuse branch and a
-    // cross-cycle plan change can reach materialization without it — strip the
+    // cross-cycle plan change can reach materialization without it â€” strip the
     // local copy here, then inject the canonical alias (fail-closed: the emitted
     // tree can never carry `Duplicate identifier`).
     const defsAll = [...(typeDefinitions ?? []), ...injectedMissing];
@@ -4800,13 +4887,13 @@ export function materializeImportableTree(
     const localInjectedRedecl = [...selfBound.keys()].filter((n) => injectedNames.has(n));
     const baseSource = localInjectedRedecl.length > 0 ? stripLocalTypeDeclarations(f.source, localInjectedRedecl) : f.source;
     // fixes/349 (P6 convergence): the shared interface contract. A chunk that
-    // references a contract type gets the canonical alias body prepended — the
+    // references a contract type gets the canonical alias body prepended â€” the
     // SAME byte-identical text every sibling referencing it gets, so all chunks
     // share one type identity and cannot drift. The local declaration (if any) is
     // removed above so this is the ONLY definition of the name in the file.
     const contractPrelude = contractTypePreludeLines(baseSource, defsAll);
     // W21-258: strip the declared-name CJS assigns, THEN neutralize whatever
-    // CJS surface remains (a chunk's own extra exports) — the union of the
+    // CJS surface remains (a chunk's own extra exports) â€” the union of the
     // envelope exports and the converted names is the file's real ESM surface.
     const residual = neutralizeResidualCjsExports(stripCjsExportAssignments(baseSource, f.exports));
     const body = residual.source.replace(/^\n+/, "").replace(/\n+$/, "");
@@ -4949,11 +5036,11 @@ function tryCloseTruncatedJson(text: string, scan?: JsonScan): Record<string, un
  * Parse a DeepSeek JSON reply into the synthesis envelope. Tolerant of
  * ```json fences (parseOracleJson precedent); requires a non-empty module
  * string. Never throws. Returns null for anything that is not a synthesis
- * envelope — callers keep their existing "no envelope" control flow.
+ * envelope â€” callers keep their existing "no envelope" control flow.
  *
  * 217k (G6): a NON-BLANK reply that cannot be READ (JSON.parse failure, a
  * non-object payload, or a missing/blank `module`) reports the coded
- * EnvelopeReadFailure through the optional `sink` — an unreadable model reply
+ * EnvelopeReadFailure through the optional `sink` â€” an unreadable model reply
  * is no longer indistinguishable from "no output" (an absent/blank reply
  * stays silent: nothing was received, so there is nothing to report).
  */
@@ -4964,7 +5051,7 @@ export function parseSynthesisEnvelope(text: unknown, sink?: EnvelopeReadSink): 
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/, "")
     .trim();
-  if (cleaned.length === 0) return null; // blank reply — "no output", not a read failure
+  if (cleaned.length === 0) return null; // blank reply â€” "no output", not a read failure
   let obj: unknown;
   try {
     obj = JSON.parse(cleaned);
@@ -4973,7 +5060,7 @@ export function parseSynthesisEnvelope(text: unknown, sink?: EnvelopeReadSink): 
     // fixes/349-P6 (Fix 3): a reply that merely ran OUT of output budget (an
     // unterminated string / an unclosed object) is recovered by CLOSING it, so a
     // truncation after the essential fields is still readable. A truncation that
-    // cut INTO the `module` string cannot yield a usable module — it is reported
+    // cut INTO the `module` string cannot yield a usable module â€” it is reported
     // as the coded `truncated-json` read failure, and the caller re-asks with an
     // explicit byte budget instead of refusing after one generic attempt.
     const scan = jsonScan(cleaned);
@@ -5000,7 +5087,7 @@ export function parseSynthesisEnvelope(text: unknown, sink?: EnvelopeReadSink): 
     return null;
   }
   const rec = obj as Record<string, unknown>;
-  // W61 lane D (D1): a legal `{"refusal":…}` reply is NOT an unreadable reply —
+  // W61 lane D (D1): a legal `{"refusal":â€¦}` reply is NOT an unreadable reply â€”
   // return null WITHOUT the read-failure sink; the caller checks
   // parseSynthesisRefusal() and records the coded refusal, skipping repair.
   if (typeof rec.refusal === "string" && rec.refusal.trim()) return null;
@@ -5022,8 +5109,8 @@ export function parseSynthesisEnvelope(text: unknown, sink?: EnvelopeReadSink): 
 }
 
 /**
- * W61 lane D (D1 / R2 §2.2/§2.3): the LEGAL refusal envelope a synthesizer or
- * repair agent may return instead of a module — `{"refusal":"…","reason":"…"}`.
+ * W61 lane D (D1 / R2 Â§2.2/Â§2.3): the LEGAL refusal envelope a synthesizer or
+ * repair agent may return instead of a module â€” `{"refusal":"â€¦","reason":"â€¦"}`.
  * `reason` is optional; a non-empty `refusal` string is required. Pure; tolerant
  * of ```json fences; never throws; null for anything else.
  */
@@ -5061,7 +5148,7 @@ export function synthesisRefusalDetail(refusal: SynthesisRefusal): string {
 /**
  * Function names a typeSignature line demands: `function name(`, `export
  * (declare )?function name(` or a leading `name(args)` prefix. Lines without
- * a parseable function name (type/interface/class signatures) are skipped —
+ * a parseable function name (type/interface/class signatures) are skipped â€”
  * not enforceable as exports. Deduped, order kept. Deterministic, no LLM.
  */
 export function signatureFunctionNames(typeSignatures: readonly string[]): string[] {
@@ -5096,7 +5183,7 @@ function declaredNames(module: string): Set<string> {
   return names;
 }
 
-/** Claimed exports the module never bound (declaredNames miss) — the exact
+/** Claimed exports the module never bound (declaredNames miss) â€” the exact
  *  names the export-binding repair re-prompt must carry. Pure, deterministic. */
 export function unboundExportNames(module: string, claimedExports: readonly string[]): string[] {
   if (typeof module !== "string") return [...new Set(claimedExports.filter((e): e is string => typeof e === "string"))];
@@ -5104,7 +5191,7 @@ export function unboundExportNames(module: string, claimedExports: readonly stri
   return [...new Set(claimedExports)].filter((e) => !names.has(e));
 }
 
-/** TypeSignature function names absent from the claimed exports — the exact
+/** TypeSignature function names absent from the claimed exports â€” the exact
  *  names the signature-missing repair re-prompt must carry (make-4 blocker:
  *  a module that exports a subset of the spec's functions is repairable, not
  *  an instant refusal). Pure, deterministic, order kept. */
@@ -5125,7 +5212,7 @@ export type ContractTypeRedeclaration = { name: string; line: number };
 
 /**
  * fixes/349 (P6 convergence): the shared contract type names a module declares
- * at top level (`type`/`interface`/`class`/`enum`/`const`/`function` — the full
+ * at top level (`type`/`interface`/`class`/`enum`/`const`/`function` â€” the full
  * `localBindingLines` shape). These are refused by `validateSynthesisModule`:
  * the materializer injects the canonical aliases, so a local declaration is a
  * duplicate identifier and a divergent identity across chunks.
@@ -5157,15 +5244,15 @@ export function contractTypeRedeclarations(
  * gate grades against that same list; passing the PLANNED names let the
  * generated cases name identifiers the emitted module never binds (the keyed
  * run's `case-2: error ReferenceError: computeMean is not defined`). This is
- * the measured inventory — `exportedNamesOf` reads the actual export syntax of
- * the module bytes (ESM exports, `module.exports.x =`, `module.exports = {…}`)
- * — so the oracle is grounded on what really exists. Deterministic, no LLM,
+ * the measured inventory â€” `exportedNamesOf` reads the actual export syntax of
+ * the module bytes (ESM exports, `module.exports.x =`, `module.exports = {â€¦}`)
+ * â€” so the oracle is grounded on what really exists. Deterministic, no LLM,
  * sorted/deduped by the helper; an unreadable/empty surface falls back to the
  * validated claimed exports (never a fabricated name).
  *
  * NOTE (honest scope): grounding the CONTRACT removes one source of invented
  * names but cannot by itself prevent a model from inventing one from the
- * brief's nouns — the enforcement ("validate every called identifier against
+ * brief's nouns â€” the enforcement ("validate every called identifier against
  * the inventory BEFORE the case set is committed") lives in
  * verify.server.ts generateCases/runCases, which this lane does not own; the
  * exact shape is STOP-and-REPORTed in fixes/339_2_oracle-generation.md.
@@ -5186,7 +5273,7 @@ export function oracleContractNames(module: string, claimedExports: readonly str
  * fixes/354 (A1-F1): remove a LEGAL-ESM `typeof module` / `typeof exports`
  * runtime guard WITH ITS BODY. In the emitted `"type":"module"` tenant
  * `typeof module === "undefined"`, so the guard short-circuits and its body
- * never runs — a guarded `module.exports` reference is legal ESM, not a
+ * never runs â€” a guarded `module.exports` reference is legal ESM, not a
  * CommonJS dependency, and must never be refused as residue. Removing the guard
  * also removes the guarded body's CJS surface from the EMITTED bytes, so the
  * materialized chunk carries no `module` reference at all (the emit-time
@@ -5194,7 +5281,7 @@ export function oracleContractNames(module: string, claimedExports: readonly str
  *
  * Only a guard STATEMENT is removed: an `if` whose condition tests
  * `typeof module`/`typeof exports` (block body brace-balanced; a blockless body
- * removed through its `;`), or a bare `typeof module … && …module…` expression
+ * removed through its `;`), or a bare `typeof module â€¦ && â€¦moduleâ€¦` expression
  * statement. An UNGUARDED value-position `module.exports` read is untouched and
  * is still refused. Pure + deterministic.
  */
@@ -5233,9 +5320,9 @@ export function stripCjsRuntimeGuards(source: string): string {
     }
     spans.push({ start, end });
   }
-  // Bare expression guards (`typeof module !== "…" && …module.exports…;`) — a
+  // Bare expression guards (`typeof module !== "â€¦" && â€¦module.exportsâ€¦;`) â€” a
   // statement that STARTS with `typeof module`/`typeof exports`. A declaration
-  // that merely reads the test (`const x = typeof module …`) is untouched.
+  // that merely reads the test (`const x = typeof module â€¦`) is untouched.
   const bareRe = /(?:^|\n)[ \t]*typeof\s+(?:module|exports)\b/g;
   while ((m = bareRe.exec(masked)) !== null) {
     const start = m.index + m[0].indexOf("typeof");
@@ -5266,18 +5353,18 @@ export function stripCjsRuntimeGuards(source: string): string {
 }
 
 /**
- * fixes/349-P6 (Fix 5 — never emit an unloadable tree): the CJS residue a module
+ * fixes/349-P6 (Fix 5 â€” never emit an unloadable tree): the CJS residue a module
  * would still carry AFTER the ESM materializer's conversion, i.e. what the
  * emit-time guard in scaffold.ts refuses with `assembled generated module body
  * is CommonJS but the emitted package declares "type":"module"`. The materializer
- * converts the whole-statement forms (`module.exports.NAME = …`, a bare
- * `module.exports = …`) and strips the declared-name assigns; anything that
+ * converts the whole-statement forms (`module.exports.NAME = â€¦`, a bare
+ * `module.exports = â€¦`) and strips the declared-name assigns; anything that
  * SURVIVES that pass is a `module`/`exports` reference used as a VALUE (a read or
  * an argument) or a TypeScript `export =`, and cannot be converted
- * deterministically — so it is refused at VALIDATION instead of at emit.
+ * deterministically â€” so it is refused at VALIDATION instead of at emit.
  *
  * fixes/354 (A1-F1): a legal-ESM `typeof module`/`typeof exports` runtime guard
- * is removed (with its body) BEFORE this scan — the guard short-circuits under
+ * is removed (with its body) BEFORE this scan â€” the guard short-circuits under
  * `"type":"module"`, so a `module.exports` reference inside it is not residue.
  * An unprotected value-position reference still hits. Token list is deduped +
  * ordered; `[]` means the converted file is clean ESM. Pure + deterministic.
@@ -5293,11 +5380,11 @@ export function materializedCjsResidueHits(module: string, claimedExports: reado
   return hits;
 }
 
-/** One unannotated (implicit-any) function parameter — the TS7006 class. */
+/** One unannotated (implicit-any) function parameter â€” the TS7006 class. */
 export type ImplicitAnyParam = { fn: string; param: string; line: number };
 
 /**
- * fixes/349-P6 (Fix 6 — TS7006): top-level `function` declarations whose simple
+ * fixes/349-P6 (Fix 6 â€” TS7006): top-level `function` declarations whose simple
  * identifier parameter carries no type annotation. The emitted tree compiles
  * under `strict`/`noImplicitAny`, so such a parameter is TS7006. Conservative by
  * construction: only single-line, paren-free parameter lists are inspected; a
@@ -5339,11 +5426,11 @@ export function implicitAnyParameters(source: string): ImplicitAnyParam[] {
       consider(m[1] ?? "(anonymous)", m[2] ?? "", i + 1);
     }
   }
-  // Pass 2 (fixes/354 — TS7006): a DECLARATION whose parameter list spans lines
+  // Pass 2 (fixes/354 â€” TS7006): a DECLARATION whose parameter list spans lines
   // (`function name(\n  a,\n  b\n) {`), which pass 1 cannot see. Only a
   // line-leading `function` (optionally export/declare/async) is a declaration;
   // an inline function expression keeps the legacy pass-1 behavior, so a
-  // contextually-typed `items.map(function (x) …)` is never newly flagged.
+  // contextually-typed `items.map(function (x) â€¦)` is never newly flagged.
   const declRe = /^[ \t]*(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)?\s*\(/gm;
   for (const m of masked.matchAll(declRe)) {
     const open = m.index + m[0].length - 1;
@@ -5383,7 +5470,7 @@ export type SiblingArityBounds = { name: string; min: number; max: number };
  * not `this`, not a rest marker); `max` is the parameter count unless a rest
  * parameter makes it unbounded (`Infinity`). A name declared by MORE THAN ONE
  * line (an overload set the lexical parser cannot resolve) is dropped entirely,
- * and an unparseable line yields no entry — the detector never guesses.
+ * and an unparseable line yields no entry â€” the detector never guesses.
  * Deterministic, pure.
  */
 export function signatureArityBounds(typeSignatures: readonly string[]): Map<string, SiblingArityBounds> {
@@ -5468,7 +5555,7 @@ function countCallArguments(rawArgs: string): number {
  * fixes/354 (TS2554): direct calls in `module` to a name among `typeSignatures`
  * whose argument count falls outside that sibling's own accepted range
  * (the measured class: a job export declared with two parameters called with
- * one). Conservative by construction — a name locally declared here is skipped
+ * one). Conservative by construction â€” a name locally declared here is skipped
  * (the cross-chunk duplicate detector owns it), a `new`/`function`/`class`/
  * `extends` head is skipped, a spread argument makes the count unknowable and
  * is skipped, and an unparseable signature yields no bound. Returns the first
@@ -5487,7 +5574,7 @@ export function siblingCallArityMismatches(
   const out: SiblingArityMismatch[] = [];
   const seen = new Set<string>();
   for (const [name, b] of bounds) {
-    if (local.has(name)) continue; // the module declares its own — not a sibling call
+    if (local.has(name)) continue; // the module declares its own â€” not a sibling call
     const esc = name.replace(/\$/g, "\\$");
     const re = new RegExp(`(^|[^\\w$.])(${esc})\\s*\\(`, "g");
     for (const m of masked.matchAll(re)) {
@@ -5498,7 +5585,7 @@ export function siblingCallArityMismatches(
       const close = open < 0 ? -1 : matchParenClose(masked, open);
       if (close < 0) continue;
       const argsText = masked.slice(open + 1, close);
-      if (/(?:^|[^.\w$])\.\.\./.test(argsText)) continue; // spread — arity unknowable
+      if (/(?:^|[^.\w$])\.\.\./.test(argsText)) continue; // spread â€” arity unknowable
       // Count on the RAW span (see countCallArguments): masking would read a
       // single string argument as zero arguments and mis-refuse a legal call.
       const got = countCallArguments(src.slice(open + 1, close));
@@ -5550,9 +5637,9 @@ export function p6SynthesisArityRepairPrompt(
     "Your previous module calls an export from an EARLIER file with the WRONG number of arguments (TS2554).",
     ...(lines.length > 0 ? lines : ["(no call detail available)"]),
     ...(sigLines.length > 0
-      ? ["The earlier export's authoritative signature line(s) — call them with the matching arguments:", ...sigLines]
+      ? ["The earlier export's authoritative signature line(s) â€” call them with the matching arguments:", ...sigLines]
       : []),
-    "Fix every call to match that signature: pass exactly the required arguments (and, if YOU own the function, keep its parameter list exactly as its typeSignature declares). Never import/require anything — the earlier exports are already bound by name in this file.",
+    "Fix every call to match that signature: pass exactly the required arguments (and, if YOU own the function, keep its parameter list exactly as its typeSignature declares). Never import/require anything â€” the earlier exports are already bound by name in this file.",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
@@ -5560,12 +5647,12 @@ export function p6SynthesisArityRepairPrompt(
 
 
 /**
- * fixes/349-P6 (Fix 4 — redeclaration convergence): delete a module's LOCAL
+ * fixes/349-P6 (Fix 4 â€” redeclaration convergence): delete a module's LOCAL
  * declaration of each shared-contract type name so the materializer's canonical
  * injected alias is the only one left. The model's bounded rewrite did not
- * converge, so the strip is deterministic: for `type X = …` the construct runs
- * to the `;` that closes it at depth 0; for `interface X { … }` / `class X { … }`
- * / `enum X { … }` it runs to the brace-balanced close (plus an optional `;`).
+ * converge, so the strip is deterministic: for `type X = â€¦` the construct runs
+ * to the `;` that closes it at depth 0; for `interface X { â€¦ }` / `class X { â€¦ }`
+ * / `enum X { â€¦ }` it runs to the brace-balanced close (plus an optional `;`).
  * Only a whole top-level declaration on its own line(s) is removed; a
  * same-named local binding of a DIFFERENT kind is left for the validator to
  * refuse. Returns the input string unchanged when nothing matched (so callers
@@ -5587,8 +5674,8 @@ export function stripLocalTypeDeclarations(source: string, names: readonly strin
     const kind = m[1];
     let end = i;
     if (kind === "type") {
-      // `type X = …` — the construct closes at the first line whose bracket
-      // balance is back to ≤ 0 AND which does not end on a continuation token
+      // `type X = â€¦` â€” the construct closes at the first line whose bracket
+      // balance is back to â‰¤ 0 AND which does not end on a continuation token
       // (`| & , ( [ { = =>`). That handles both the `;`-terminated form and the
       // ASI form (`type Board = { id: string }`, fixes/354) without ever
       // swallowing the lines after the declaration.
@@ -5603,8 +5690,8 @@ export function stripLocalTypeDeclarations(source: string, names: readonly strin
         }
       }
     } else {
-      // `interface`/`class`/`enum X { … }` — closes when the brace balance
-      // returns to ≤ 0 (plus an optional trailing `;` line).
+      // `interface`/`class`/`enum X { â€¦ }` â€” closes when the brace balance
+      // returns to â‰¤ 0 (plus an optional trailing `;` line).
       let d = bracketDelta(lines[i]!);
       end = d <= 0 ? i : -1;
       if (d > 0) {
@@ -5617,7 +5704,7 @@ export function stripLocalTypeDeclarations(source: string, names: readonly strin
       }
     }
     if (end < 0) {
-      // Could not bound the construct safely — leave it for the validator.
+      // Could not bound the construct safely â€” leave it for the validator.
       kept.push(lines[i]!);
       continue;
     }
@@ -5628,7 +5715,7 @@ export function stripLocalTypeDeclarations(source: string, names: readonly strin
 
 /**
  * fixes/349-P6 (Fix 1): shrink an over-bound module deterministically by
- * removing comments and collapsing blank lines — a semantics-preserving edit
+ * removing comments and collapsing blank lines â€” a semantics-preserving edit
  * (every validator masks comments; the emitted `tsc` ignores them). Returns the
  * compacted source ONLY when it is strictly under `maxChars` and non-empty;
  * otherwise `null` (the caller keeps its refusal). Pure + deterministic.
@@ -5666,16 +5753,16 @@ export type ModuleValidationOptions = {
   /** fixes/354 (TS2554): the earlier chunks' OWN typeSignature lines. When
    *  present, a direct call to one of those exports with an argument count the
    *  sibling's signature can never accept is refused (the measured wrong-arity
-   *  class). Absent/empty ⇒ the legacy validation, byte-identical. */
+   *  class). Absent/empty â‡’ the legacy validation, byte-identical. */
   siblingSignatures?: readonly string[];
 };
 
 /**
- * Deterministic pre-verify validation (the mechanical brief-fit floor — no
+ * Deterministic pre-verify validation (the mechanical brief-fit floor â€” no
  * LLM): non-empty bounded module, no markdown fences, no forbidden
  * primitives in CODE (literals/comments masked), every claimed export bound
  * in the module, and every typeSignature function name present in the
- * exports list (absent names are reported — never silently dropped).
+ * exports list (absent names are reported â€” never silently dropped).
  */
 export function validateSynthesisModule(
   module: string,
@@ -5683,15 +5770,15 @@ export function validateSynthesisModule(
   signatureNames: readonly string[],
   /** W45/331-4 (Finding B): the earlier chunks of this tree (path + exports). When
    *  present, a top-level declaration of a name an earlier chunk already exports is
-   *  refused — the materialized ESM imports that export, so the duplicate is a
+   *  refused â€” the materialized ESM imports that export, so the duplicate is a
    *  load-time SyntaxError. W46/332-1 (P1): a chunk's `asyncExports` mark also lets
    *  the validator refuse an un-awaited async sibling call used as a value.
-   *  Absent/null ⇒ the single-module path, byte-identical. */
+   *  Absent/null â‡’ the single-module path, byte-identical. */
   priorChunks?: readonly { path: string; exports: readonly string[]; asyncExports?: readonly string[] }[] | null,
   /** fixes/349 (P6 convergence): the shared contract type names the build
    *  injects. A local `type`/`interface`/`class` declaration
    *  of one is the drift root cause (two chunks declaring the same name
-   *  differently) — refused, with a dedicated reconcile repair. Absent/null ⇒
+   *  differently) â€” refused, with a dedicated reconcile repair. Absent/null â‡’
    *  the legacy validation, byte-identical. */
   contractTypeNames?: readonly string[] | null,
   /** fixes/349-P6: the call-site-specific add-ons (see ModuleValidationOptions). */
@@ -5710,14 +5797,14 @@ export function validateSynthesisModule(
   if (/```/.test(module)) {
     return { ok: false, code: "RT_E_VALIDATION", error: "module contains markdown fences" };
   }
-  // A2 (SYNTHSPEC §5 trap 1): a suppression pragma is a gate, not a lint nit —
+  // A2 (SYNTHSPEC Â§5 trap 1): a suppression pragma is a gate, not a lint nit â€”
   // it would defeat the compiler/pre-seal typecheck the whole pipeline relies on.
   const pragma = suppressionPragmaHit(module);
   if (pragma !== null) {
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `generated module injects a compiler/linter suppression pragma (${pragma}) — remove it and fix the underlying defect`,
+      error: `generated module injects a compiler/linter suppression pragma (${pragma}) â€” remove it and fix the underlying defect`,
     };
   }
   const masked = maskLiteralsAndComments(module);
@@ -5726,7 +5813,7 @@ export function validateSynthesisModule(
     const token = hit.hard ?? hit.soft ?? "unknown";
     return { ok: false, code: "RT_E_VALIDATION", error: `forbidden primitive in generated module code (${token})` };
   }
-  // 216f (T-15 / F-06): Math.random() in CODE — the emitted
+  // 216f (T-15 / F-06): Math.random() in CODE â€” the emitted
   // compute-rent-roll.ts minted random entity ids in a nominally deterministic
   // system, so nothing about the product was reproducible. Masked source, so a
   // doc mention or a string is data, never a violation. Refused; the bounded
@@ -5736,13 +5823,13 @@ export function validateSynthesisModule(
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `non-deterministic primitive in generated module code (${nondet}) — derive ids/values deterministically instead`,
+      error: `non-deterministic primitive in generated module code (${nondet}) â€” derive ids/values deterministically instead`,
     };
   }
-  // 216f (T-09 / F-04): prose-in-code — bare English deliberation written into
+  // 216f (T-09 / F-04): prose-in-code â€” bare English deliberation written into
   // the module body (the 23-line leak shipped at chunk-0.ts:340-362). Refused
   // with the first offending line named (bounded excerpt). SCOPE: LLM-derived
-  // modules ONLY — the only callers are the synthesis paths
+  // modules ONLY â€” the only callers are the synthesis paths
   // (synthesizeSingleModule / synthesizeChunkEnvelope + their repair
   // re-checks). Scaffold-authored files (src/main.tsx: it carries a prose
   // header and an `import` line) NEVER pass through this validator.
@@ -5764,11 +5851,11 @@ export function validateSynthesisModule(
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `JSX in a .ts module (raw element at line${jsx.length === 1 ? "" : "s"} ${jsx.slice(0, 6).join(", ")}) — the generated chunk contract is JSX-free plain-TS logic; return the value as a string/data and let the UI shell render it`,
+      error: `JSX in a .ts module (raw element at line${jsx.length === 1 ? "" : "s"} ${jsx.slice(0, 6).join(", ")}) â€” the generated chunk contract is JSX-free plain-TS logic; return the value as a string/data and let the UI shell render it`,
     };
   }
   // R2-03 (TS2503): the same `.ts` contract rejects an UNBOUND `JSX` TYPE
-  // namespace reference (`: JSX.Element`) — the measured bakery-website chunk
+  // namespace reference (`: JSX.Element`) â€” the measured bakery-website chunk
   // red its own tsc on it though the console shell was already JSX-free. Every
   // validated module (job chunks included) passes through this gate; a module
   // that declares/imports the namespace (the compiling historical shape) is
@@ -5778,7 +5865,7 @@ export function validateSynthesisModule(
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `JSX in a .ts module (unbound JSX namespace reference at line${jsxNs.length === 1 ? "" : "s"} ${jsxNs.slice(0, 6).join(", ")}) — a generated .ts chunk cannot resolve the global JSX namespace (TS2503); type the value with a local/plain element type and let the UI shell render it`,
+      error: `JSX in a .ts module (unbound JSX namespace reference at line${jsxNs.length === 1 ? "" : "s"} ${jsxNs.slice(0, 6).join(", ")}) â€” a generated .ts chunk cannot resolve the global JSX namespace (TS2503); type the value with a local/plain element type and let the UI shell render it`,
     };
   }
   // BF-5 (SYNTHSPEC A5): a money-named export that sums a quantity field is the
@@ -5792,20 +5879,20 @@ export function validateSynthesisModule(
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `money-semantics: "${first.name}" at line ${first.line} accumulates only a quantity (\`${first.operand}\`) — a money amount must be price × quantity in integer minor units${extra}`,
+      error: `money-semantics: "${first.name}" at line ${first.line} accumulates only a quantity (\`${first.operand}\`) â€” a money amount must be price Ã— quantity in integer minor units${extra}`,
     };
   }
-  // fixes/349-P6 (Fix 5): refuse a body the ESM materializer cannot clean — a
+  // fixes/349-P6 (Fix 5): refuse a body the ESM materializer cannot clean â€” a
   // `module.exports`/`exports` reference used as a VALUE or a TypeScript
   // `export =`. Accepting it here is what let a CommonJS body reach emit and
   // kill the whole emitted spec ("assembled generated module body is CommonJS
-  // but the emitted package declares \"type\":\"module\"" — no tree at all).
+  // but the emitted package declares \"type\":\"module\"" â€” no tree at all).
   const cjsResidue = materializedCjsResidueHits(module, claimedExports);
   if (cjsResidue.length > 0) {
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `non-ESM module body: the file still references ${cjsResidue.join(", ")} after the ESM conversion — the emitted package declares "type":"module", so importing it throws "module is not defined in ES module scope" and the product cannot load. Declare plain functions and list the export names only in the envelope's \`exports\` array (no \`module.exports\`, no \`exports.\`, no \`export =\`, no import/export statement)`,
+      error: `non-ESM module body: the file still references ${cjsResidue.join(", ")} after the ESM conversion â€” the emitted package declares "type":"module", so importing it throws "module is not defined in ES module scope" and the product cannot load. Declare plain functions and list the export names only in the envelope's \`exports\` array (no \`module.exports\`, no \`exports.\`, no \`export =\`, no import/export statement)`,
     };
   }
   // fixes/349-P6 (Fix 6): the TS7006 class. The chunked tree's own `tsc` runs
@@ -5821,7 +5908,7 @@ export function validateSynthesisModule(
       return {
         ok: false,
         code: "RT_E_VALIDATION",
-        error: `implicit-any parameter: \`${first.fn}\` parameter \`${first.param}\` at line ${first.line} has no type annotation (TS7006)${extra} — annotate EVERY parameter and return type with a built-in type (string/number/boolean/unknown/any/object/T[]), a type declared in this module, or an injected TYPE DEFINITIONS entry`,
+        error: `implicit-any parameter: \`${first.fn}\` parameter \`${first.param}\` at line ${first.line} has no type annotation (TS7006)${extra} â€” annotate EVERY parameter and return type with a built-in type (string/number/boolean/unknown/any/object/T[]), a type declared in this module, or an injected TYPE DEFINITIONS entry`,
       };
     }
   }
@@ -5844,7 +5931,7 @@ export function validateSynthesisModule(
   }
   // fixes/349: a chunk must not redeclare a shared contract type. The materializer
   // injects the canonical aliases into the file (single source of truth); a local
-  // declaration of the same name is a duplicate identifier or — worse — a
+  // declaration of the same name is a duplicate identifier or â€” worse â€” a
   // divergent identity that drifts from every sibling chunk
   // (the measured `Type 'OpenStatus' is not assignable to type 'boolean'`).
   const contractRedecl = contractTypeRedeclarations(module, contractTypeNames);
@@ -5853,7 +5940,7 @@ export function validateSynthesisModule(
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `local redeclaration of shared contract type: ${named} — the build already injects the canonical alias (the single source of truth) at the top of this file; delete the local declaration and use the type as-is`,
+      error: `local redeclaration of shared contract type: ${named} â€” the build already injects the canonical alias (the single source of truth) at the top of this file; delete the local declaration and use the type as-is`,
     };
   }
   // W45/331-4 (Finding B): a later chunk must not redeclare a name an earlier chunk
@@ -5868,7 +5955,7 @@ export function validateSynthesisModule(
       return {
         ok: false,
         code: "RT_E_VALIDATION",
-        error: `cross-chunk duplicate declaration: ${named} — the materialized ESM imports each earlier chunk's exports, so a same-named top-level declaration fails to load (SyntaxError: Identifier '${dup[0]!.name}' has already been declared)`,
+        error: `cross-chunk duplicate declaration: ${named} â€” the materialized ESM imports each earlier chunk's exports, so a same-named top-level declaration fails to load (SyntaxError: Identifier '${dup[0]!.name}' has already been declared)`,
       };
     }
   }
@@ -5891,12 +5978,12 @@ export function validateSynthesisModule(
       return {
         ok: false,
         code: "RT_E_VALIDATION",
-        error: `sibling call arity mismatch: "${first.name}" at line ${first.line} called with ${first.got} argument(s), but that earlier file's export accepts ${want} (TS2554)${extra} — call it with the arguments its own signature declares`,
+        error: `sibling call arity mismatch: "${first.name}" at line ${first.line} called with ${first.got} argument(s), but that earlier file's export accepts ${want} (TS2554)${extra} â€” call it with the arguments its own signature declares`,
       };
     }
   }
   // W46/332-1 (P1): an async callable (a sibling's async export, or the module's
-  // own `async function`) whose result is consumed as a value without `await` —
+  // own `async function`) whose result is consumed as a value without `await` â€”
   // property read, destructure, or stored-then-read. The real keyed tree's
   // `src/jobs/rehab.ts` did exactly this off the async `getProperty`, so the
   // returned Promise's rejection floated past the spec and reded the file. Checked
@@ -5908,7 +5995,7 @@ export function validateSynthesisModule(
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `un-awaited async call used as a value: "${first.name}" at line ${first.line} (${first.form})${extra} — the call returns a Promise, so any property read off it is undefined and its rejection floats past the caller; await it before reading or destructuring the result`,
+      error: `un-awaited async call used as a value: "${first.name}" at line ${first.line} (${first.form})${extra} â€” the call returns a Promise, so any property read off it is undefined and its rejection floats past the caller; await it before reading or destructuring the result`,
     };
   }
   return { ok: true, exports: claimed };
@@ -5916,17 +6003,17 @@ export function validateSynthesisModule(
 
 /**
  * p6-brief-fit pre-acceptance: the brief's required noun tokens must appear as
- * code identifiers in the candidate — bar max(1, ceil(required × 0.35)). 322 X1
- * (P6-C): recalibrated ½ → 0.35 — measured honest coverage (TS-truth mask,
- * stem-tolerant) is 40–50%, so 0.35 keeps ≥1 margin for stochastic keyed
- * re-runs; placeholders (≈0 hits) still fail by construction. Vocabulary-free
+ * code identifiers in the candidate â€” bar max(1, ceil(required Ã— 0.35)). 322 X1
+ * (P6-C): recalibrated Â½ â†’ 0.35 â€” measured honest coverage (TS-truth mask,
+ * stem-tolerant) is 40â€“50%, so 0.35 keeps â‰¥1 margin for stochastic keyed
+ * re-runs; placeholders (â‰ˆ0 hits) still fail by construction. Vocabulary-free
  * briefs pass vacuously.
  *
- * fixes/347: this is the mechanical FLOOR only — NOT the DoD gate. dod.ts's
+ * fixes/347: this is the mechanical FLOOR only â€” NOT the DoD gate. dod.ts's
  * p6-brief-fit probe (and its W61 C1 calibration) measures the CORE-noun bar
  * (sandbox.briefFitSubstancePasses). Mirroring the core bar here was measured
  * against the codegen.server suite and refused candidates the journey's own
- * gate-repair cycle converges, with no honesty gain — the gate stays the
+ * gate-repair cycle converges, with no honesty gain â€” the gate stays the
  * authority on the record, and this floor stays the pre-acceptance for one
  * candidate.
  */
@@ -5939,7 +6026,7 @@ export function briefFitSatisfied(brief: string, source: string): { ok: boolean;
 }
 
 /**
- * fixes/348: the candidate's CORE brief-vocabulary coverage ratio (0..1) — the
+ * fixes/348: the candidate's CORE brief-vocabulary coverage ratio (0..1) â€” the
  * quality-directed best-of-N tie-break. A vocabulary-free brief has nothing to
  * prefer and scores 1. Pure; delegates to the SAME `briefFitCoverage` the
  * `p6-brief-fit` gate measures, so selection and the gate can never drift.
@@ -5957,10 +6044,10 @@ export function briefCoverageRatio(
 
 /**
  * fixes/341-1 (emitted-product integrity): one self-typecheck verdict for the
- * CANDIDATE emitted tree — the real `tsc` verdict of the project's OWN
+ * CANDIDATE emitted tree â€” the real `tsc` verdict of the project's OWN
  * declared `typecheck` script over a scratch materialization of the tree about
  * to be sealed. `"skip"` is honest non-verification (no declared script / an
- * un-runnable toolchain), never a pass — mirroring `treeRun`'s own declared-
+ * un-runnable toolchain), never a pass â€” mirroring `treeRun`'s own declared-
  * script contract. `files` are the compiler-named offender paths (POSIX,
  * relative to the emitted root), used to route the bounded repair.
  */
@@ -5980,9 +6067,15 @@ export type P6SynthesisDeps = {
   /** Brief expansion seam. The optional `lessons` argument carries the
    *  read-back lines (fixes/124 A3-03 wire): advisory prior-run lessons for
    *  the expansion model, gathered by the liveP6Synthesis caller from
-   *  project.memory (selectLessons → lessonLinesForBrief). Injected fakes
-   *  with the legacy one-arg shape stay assignable. */
-  expand: (brief: string, lessons?: readonly string[]) => Promise<ExpandBriefResult>;
+   *  project.memory (selectLessons â†’ lessonLinesForBrief). Injected fakes
+   *  with the legacy one-arg shape stay assignable.
+   *
+   *  W359 (kind fidelity): the TRAILING optional `kind` is the resolved
+   *  delivery kind (`engine.deliveryKindOf`), rendered into the expansion
+   *  prompt as PROSE â€” the kind never becomes a seventh envelope key, so
+   *  `ExpandedSpec`'s persisted shape and every cached `implementationSpec`
+   *  are unchanged. Trailing + optional keeps every existing seam compiling. */
+  expand: (brief: string, lessons?: readonly string[], kind?: DeliveryKind | null) => Promise<ExpandBriefResult>;
   verify: (
     source: string,
     brief: string,
@@ -5991,51 +6084,51 @@ export type P6SynthesisDeps = {
       signatureNames?: readonly string[];
       /** E-08 (A4-b): the rendered `oracleToCaseSeeds(project.oracle)` block. */
       seeds?: string;
-      /** E-08 (A4-b): the pinned A7 oracle ids — a returned case list dropping
-       *  one is refused (346 E1 · A1-04 wires these through to the seam). */
+      /** E-08 (A4-b): the pinned A7 oracle ids â€” a returned case list dropping
+       *  one is refused (346 E1 Â· A1-04 wires these through to the seam). */
       pinnedOracleIds?: readonly string[];
     },
   ) => Promise<VerifyOutcome>;
   /** fixes/144 (M3-2): optional tree-run failure context (failing file path +
-   *  first not-ok tail — bounded ~1500 chars) supplied by the M4 journey
+   *  first not-ok tail â€” bounded ~1500 chars) supplied by the M4 journey
    *  driver's synthesize-or-repair cycle. When present, every bounded repair
    *  re-prompt built during this synthesis appends it as a coded context
    *  block; omitted keeps the legacy byte-identical repair prompts. */
   treeFailure?: string;
-  /** fixes/326 F1b: the journey's one-shot gate-repair context — recorded
+  /** fixes/326 F1b: the journey's one-shot gate-repair context â€” recorded
    *  unmet P6 DoD requirements (criteria + missing lists) from a
    *  green-tree-run/red-gate cycle. When present, the PRIMARY synthesis
    *  prompt (single-module and every tree chunk) carries it as a bounded
-   *  "P6 GATE REPAIR CONTEXT" block; absent/blank ⇒ byte-identical legacy. */
+   *  "P6 GATE REPAIR CONTEXT" block; absent/blank â‡’ byte-identical legacy. */
   gateRepair?: string;
-  /** fixes/328 F1 (Ledger): the previous cycle's refusal context — the refusal
-   *  class + the model's own bounded reason — from a cycle that refused to
+  /** fixes/328 F1 (Ledger): the previous cycle's refusal context â€” the refusal
+   *  class + the model's own bounded reason â€” from a cycle that refused to
    *  synthesize (headless `p6CycleLiveDeps`, fixes/153 P2). When present, the
    *  PRIMARY synthesis prompt (single-module and every tree chunk) carries it
    *  as a bounded "P6 PREVIOUS-REFUSAL CONTEXT" block via
-   *  withSynthesisRefusalContext; absent/blank ⇒ byte-identical legacy, so a
+   *  withSynthesisRefusalContext; absent/blank â‡’ byte-identical legacy, so a
    *  cycle that was NOT refused synthesizes exactly as before. */
   synthesisRefusal?: string;
-  /** T-107.1 (216r · W7-L1): opt-in patch (str_replace) repair level — when
+  /** T-107.1 (216r Â· W7-L1): opt-in patch (str_replace) repair level â€” when
    *  true a LOCALIZED defect (soft forbidden primitive / non-deterministic
    *  primitive / prose-in-code) gets ONE bounded delta attempt BEFORE the
    *  legacy full-rewrite repair; a refusal returns the legacy path unchanged.
    *  Absent/false keeps every prompt byte and the model-call count legacy. */
   patchRepairs?: boolean;
-  /** T4 (112 §4.4 / 216g): human-accepted CROSS-PROJECT lesson rows, resolved
+  /** T4 (112 Â§4.4 / 216g): human-accepted CROSS-PROJECT lesson rows, resolved
    *  by the caller via `knowledge.provenRowsFromStore`. When present they rank
-   *  alongside the project's own memory lessons at EVERY lesson site here —
+   *  alongside the project's own memory lessons at EVERY lesson site here â€”
    *  the expansion call's advisory lines AND both PRIMARY synthesis prompts
-   *  (single-module + every tree chunk) — through `lessonLinesForBrief`'s
-   *  `opts.proven`. Absent/empty ⇒ each site passes `proven: undefined` and
+   *  (single-module + every tree chunk) â€” through `lessonLinesForBrief`'s
+   *  `opts.proven`. Absent/empty â‡’ each site passes `proven: undefined` and
    *  produces byte-identical legacy prompts (the additive-field discipline). */
   proven?: readonly RankableLessonRow[];
   /** PR-16 (I7, O-01): the previous cycle's ACCEPTED chunks, carried by the
-   *  journey's ctx→deps mapping (`headless.p6CycleLiveDeps`) so a later
+   *  journey's ctxâ†’deps mapping (`headless.p6CycleLiveDeps`) so a later
    *  synthesis cycle REUSES the chunks it already paid for instead of
    *  re-buying every one (baker-florist-orders burned 419k tokens on
    *  byte-identical re-synthesis). A plan row whose path appears here is taken
-   *  verbatim (source + exports) with no model call; absent/empty ⇒ the
+   *  verbatim (source + exports) with no model call; absent/empty â‡’ the
    *  chunked path is byte-identical to legacy. Keyed by plan path; an entry
    *  for a path this plan does not contain is ignored. */
   resumeAccepted?: readonly { path: string; source: string; exports: string[] }[];
@@ -6044,7 +6137,7 @@ export type P6SynthesisDeps = {
    *  is materialized into a scratch dir and its OWN declared `typecheck` runs
    *  through the real compiler seam (`compile-check.server.ts typecheckDir`).
    *  A red verdict routes into the existing bounded per-chunk repair (or a
-   *  coded partial refusal) — a type-red tree is never sealed. The default is
+   *  coded partial refusal) â€” a type-red tree is never sealed. The default is
    *  the real `defaultTreeTypecheck`; it is disabled ONLY when a caller
    *  REPLACES the real pipeline by injecting BOTH `complete` and `verify`
    *  (that caller must pass this seam explicitly to opt back into the real
@@ -6052,12 +6145,12 @@ export type P6SynthesisDeps = {
    *  does NOT disable the gate.
    */
   typecheckTree?: P6TreeTypecheck;
-  /** fixes/343-1 + fixes/346-S4: best-of-N / bounded-resample sample count —
+  /** fixes/343-1 + fixes/346-S4: best-of-N / bounded-resample sample count â€”
    *  the env var `P6_SYNTH_CANDIDATES` is the production knob (this option wins
    *  over it so a caller/test is explicit). It governs FOUR seams: the PRIMARY
    *  single-module best-of-N (default 1, opt-in, byte-identical) and the
    *  whole-tree pre-seal offender resample (default 1, opt-in), PLUS the chunked
-   *  tree's per-chunk acceptance and fail-fast offender resample (default 2 —
+   *  tree's per-chunk acceptance and fail-fast offender resample (default 2 â€”
    *  ARMED, fixes/346-S4, the T1-measured gain). An explicit 1 opts out of all
    *  four to the byte-identical legacy single sample. Hard-capped at
    *  `P6_SYNTH_CANDIDATES_MAX` (4). When >1, the model is resampled only while
@@ -6071,7 +6164,7 @@ export type P6SynthesisDeps = {
 /** Number of expandBrief attempts on a transient/timeout failure (backoff). */
 export const P6_EXPAND_MAX_ATTEMPTS = 3;
 
-/** True when an expand failure is transient (timeout/abort) — safe to retry. */
+/** True when an expand failure is transient (timeout/abort) â€” safe to retry. */
 function isTransientExpandFailure(res: ExpandBriefResult): boolean {
   return res.ok === false && res.reason === "error" && /timed out|timeout|abort/i.test(res.error ?? "");
 }
@@ -6081,7 +6174,7 @@ function isTransientExpandFailure(res: ExpandBriefResult): boolean {
  * The flash tier's default 20s abort could fire before DeepSeek finished a
  * 3000-token JSON expansion (2/6 probe failures were 20s timeouts). A failed
  * expansion is retried with exponential backoff; non-transient failures
- * (not-configured, unparseable payload) return immediately — never a blind
+ * (not-configured, unparseable payload) return immediately â€” never a blind
  * re-run. P6_EXPAND_MAX_ATTEMPTS keeps it bounded and honest.
  */
 export async function expandBriefWithBackoff(
@@ -6093,25 +6186,25 @@ export async function expandBriefWithBackoff(
     if (attempt > 0) await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
     const res = await expand(brief);
     if (res.ok) return res;
-    if (!isTransientExpandFailure(res)) return res; // not-configured / parse → don't retry
+    if (!isTransientExpandFailure(res)) return res; // not-configured / parse â†’ don't retry
     last = res;
   }
   return last ?? { ok: false, reason: "error", error: "expandBrief failed" };
 }
 
 /**
- * Synthesis retry-with-backoff (make-5 blocker — fixes/121). The main
+ * Synthesis retry-with-backoff (make-5 blocker â€” fixes/121). The main
  * synthesis call was a single non-retrying 90s-capped attempt; when it timed
  * out that WAS the delivery outcome. Give it the same bounded-backoff
  * treatment expandBrief already has: a bounded attempt count with exponential
  * backoff (expandBrief: P6_EXPAND_MAX_ATTEMPTS = 3; this synthesis seam:
  * P6_SYNTH_MAX_ATTEMPTS = 2), and an honest RT_E_LLM_TIMEOUT only after BOTH
  * synthesis attempts fail. 312 C5: this sentence used to read "expandBrief
- * already has: 2 attempts" — DA1 falsified the count and the 311 guard
+ * already has: 2 attempts" â€” DA1 falsified the count and the 311 guard
  * re-verified it (fixes/311_da1_claims.md:16, fixes/311_wd_guard.md:39): the 2
  * belongs to synthesis, expandBrief is 3 (backoff 500/1000ms, see :2429/:2449).
  * Non-transient failures
- * (not-configured, provider rejection, unparseable) return immediately —
+ * (not-configured, provider rejection, unparseable) return immediately â€”
  * never a blind re-run. The `sleep` seam is injectable for deterministic tests.
  */
 export const P6_SYNTH_MAX_ATTEMPTS = 2;
@@ -6121,13 +6214,13 @@ function isTransientSynthFailure(res: LlmResult): boolean {
   return res.ok === false && res.code === "RT_E_LLM_TIMEOUT";
 }
 
-// R4-f03 (W30 · LANE S3): the duplicate env parser (`p6TokenCapFromEnv`) is
-// GONE — ONE parser for `RAPIDTOOL_TOKEN_CAP` lives in token-ledger.ts
+// R4-f03 (W30 Â· LANE S3): the duplicate env parser (`p6TokenCapFromEnv`) is
+// GONE â€” ONE parser for `RAPIDTOOL_TOKEN_CAP` lives in token-ledger.ts
 // (`tokenCapFromEnv`), and the process-scoped ledger + cap come from
 // `sessionTokenBudget()` (the same object every production call site below
-// shares, so the cap binds the RUN, not one call — R12-f02's runaway).
+// shares, so the cap binds the RUN, not one call â€” R12-f02's runaway).
 function accountSynthUsage(ledger: TokenLedger, res: LlmResult, cap: number | undefined): LlmResult | null {
-  // FM-03 (W37 Y1): record EVERY response that reports usage — success or not
+  // FM-03 (W37 Y1): record EVERY response that reports usage â€” success or not
   // (the I2 ledger contract, token-ledger.ts: "record every response that
   // reports usage, success or not"). Before this, a refusal that reported
   // usage was silently dropped and RAPIDTOOL_TOKEN_CAP under-counted real
@@ -6153,7 +6246,7 @@ function accountSynthUsage(ledger: TokenLedger, res: LlmResult, cap: number | un
 
 /**
  * FM-03 (W37 Y1): bounded repair re-prompts call `completeCall` directly,
- * outside `synthWithBackoff` — before this their spend was invisible to the
+ * outside `synthWithBackoff` â€” before this their spend was invisible to the
  * session ledger (RAPIDTOOL_TOKEN_CAP systematically under-counted by every
  * repair call, and a budget stop surfaced as a model/provider-failure story).
  * Record the repair reply against the SAME session budget the primary call
@@ -6178,7 +6271,7 @@ export async function synthWithBackoff(
   prompt: string,
   opts: DeepSeekCompleteOptions,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
-  // R4-f03 (W30 · LANE S3): the defaults are the PROCESS session budget —
+  // R4-f03 (W30 Â· LANE S3): the defaults are the PROCESS session budget â€”
   // every production call site (below) passes neither, so all of them share
   // ONE ledger + ONE cap: `RAPIDTOOL_TOKEN_CAP` binds the whole RUN, not a
   // single call (R12-f02's runaway). Explicit callers/tests keep full control
@@ -6210,8 +6303,10 @@ const defaultDeps: P6SynthesisDeps = {
   complete: completeDeepSeek,
   // A3-03 read-back: the injected lessons lines reach expandBrief as its
   // third argument; omitted lines keep the legacy byte-identical prompt.
-  expand: (brief, lessons) =>
-    expandBriefWithBackoff(brief, (b) => expandBrief(b, undefined, lessons)),
+  // W359: the resolved kind rides as the fourth argument â€” PROMPT TEXT only
+  // (no envelope key), so the spec's persisted six-key shape is untouched.
+  expand: (brief, lessons, kind) =>
+    expandBriefWithBackoff(brief, (b) => expandBrief(b, undefined, lessons, kind)),
   verify: (source, brief, opts) => verifyAndFixServer(source, brief, opts),
 };
 
@@ -6223,7 +6318,7 @@ const P6_TYPECHECK_SCRATCH_PREFIX = "rt-p6-typecheck-";
 export const P6_TYPECHECK_REPAIR_MAX_CHUNKS = 3;
 
 /**
- * fixes/341-1: the file paths a `tsc` / declared-typecheck tail names — the
+ * fixes/341-1: the file paths a `tsc` / declared-typecheck tail names â€” the
  * compiler's `path(line,col): error TSxxxx:` rows (POSIX or Windows
  * separators, optional leading whitespace). Deduped, declaration order kept,
  * capped. Pure + deterministic.
@@ -6269,9 +6364,9 @@ export function typecheckOffenderPaths(detail: string | undefined): string[] {
  * advertised `typecheck` (measured keyed cli-tool: TS2749 `TextDecoder` used
  * as a type + TS2440 import/local conflict, while `compile.failed=0`, the
  * oracle passed and the entry smoke passed) because NEITHER P6 path ran the
- * compiler — `parseVerdictForSource` is syntax-only and `verifyAndFixServer`
+ * compiler â€” `parseVerdictForSource` is syntax-only and `verifyAndFixServer`
  * compiles with `new Function` (JS-only). This seam materializes the CANDIDATE
- * emitted project into a scratch dir (the pure `scaffoldProject` emitter — the
+ * emitted project into a scratch dir (the pure `scaffoldProject` emitter â€” the
  * exact bytes the tree-run later judges) and runs its OWN declared `typecheck`
  * through the real compiler seam (`compile-check.server.ts typecheckDir`).
  * A red verdict must never be sealed; a `skip` (absent/un-runnable toolchain)
@@ -6280,7 +6375,7 @@ export function typecheckOffenderPaths(detail: string | undefined): string[] {
 export async function defaultTreeTypecheck(project: Project): Promise<P6TreeTypecheckVerdict> {
   let files: { path: string; body: string }[];
   try {
-    // R2-04: this is an INTERNAL candidate emit — the candidate carries the
+    // R2-04: this is an INTERNAL candidate emit â€” the candidate carries the
     // previous cycle's `p6.synthesis.refused` logs, so the ship-time
     // under-production guard must NOT preempt the real tsc verdict (a
     // multi-cycle repair would otherwise be unable to re-typecheck and recover).
@@ -6310,11 +6405,11 @@ export async function defaultTreeTypecheck(project: Project): Promise<P6TreeType
         run: "skip",
         detail:
           verdict.note ??
-          "the declared typecheck script was not executed (absent or un-runnable toolchain) — the tree's typing is UNVERIFIED, not a pass",
+          "the declared typecheck script was not executed (absent or un-runnable toolchain) â€” the tree's typing is UNVERIFIED, not a pass",
       };
     }
     const detail =
-      [verdict.detail, verdict.note].filter((s): s is string => typeof s === "string" && s.trim().length > 0).join(" · ").trim() ||
+      [verdict.detail, verdict.note].filter((s): s is string => typeof s === "string" && s.trim().length > 0).join(" Â· ").trim() ||
       `the declared typecheck script ${verdict.run === "fail" ? "exited non-zero" : verdict.run}`;
     return { run: "fail", detail, files: typecheckOffenderPaths(verdict.detail) };
   } catch (err) {
@@ -6357,7 +6452,7 @@ async function runTreeSelfTypecheck(
   try {
     const verdict = await typecheck(candidate);
     if (!verdict || (verdict.run !== "pass" && verdict.run !== "fail" && verdict.run !== "skip")) {
-      return { run: "fail", detail: "the self-typecheck seam returned no usable verdict — fail closed" };
+      return { run: "fail", detail: "the self-typecheck seam returned no usable verdict â€” fail closed" };
     }
     return verdict;
   } catch (err) {
@@ -6383,7 +6478,7 @@ function materializedPathForAccepted(accepted: readonly { path: string }[], i: n
   return accepted[i]?.path ?? "";
 }
 
-/** fixes/341-1: the accepted-chunk indices the self-typecheck verdict names —
+/** fixes/341-1: the accepted-chunk indices the self-typecheck verdict names â€”
  *  from the seam's `files`, else the detail's own compiler rows. Capped at
  *  `P6_TYPECHECK_REPAIR_MAX_CHUNKS` so one bounded round stays bounded. */
 function typecheckOffenderIndices(
@@ -6420,11 +6515,11 @@ function typecheckOffenderIndices(
 }
 
 /** fixes/341-1: the bounded tree-failure context handed to a typecheck repair
- *  re-prompt — the compiler's own report, header first (the existing
+ *  re-prompt â€” the compiler's own report, header first (the existing
  *  `withTreeFailureContext` reader normalizes + bounds it downstream). */
 function typecheckRepairContext(verdict: P6TreeTypecheckVerdict): string {
   return (
-    "the candidate emitted tree fails its OWN declared `npm run typecheck` — " +
+    "the candidate emitted tree fails its OWN declared `npm run typecheck` â€” " +
     "fix the type error(s) WITHOUT restructuring the tree (the compiler report follows):\n" +
     String(verdict.detail ?? "").replace(/\s+/g, " ").trim()
   ).slice(0, 3000);
@@ -6434,7 +6529,7 @@ function typecheckRepairContext(verdict: P6TreeTypecheckVerdict): string {
  * fixes/349 (P6 convergence): the RECONCILE directive appended to a
  * compiler-informed repair prompt. A type-drift / duplicate-declaration error
  * (TS2322/TS2440/TS2308/TS2300/TS2323/TS2749) is fixed by making the file's
- * annotations agree with the ONE shared contract — never by re-inventing the
+ * annotations agree with the ONE shared contract â€” never by re-inventing the
  * type. Quotes the canonical definitions of the contract types the compiler
  * named (so the model edits the annotation, not the contract) and forbids
  * declaration. `[]` when no contract type is named (legacy context bytes).
@@ -6459,7 +6554,7 @@ function contractReconcileDirective(
  * W52/339-2: the `p6.synthesis.refused` detail budget. The previous 160-char
  * hard slice cut the harness/sanitizer's OWN reason out of the surfaced
  * refusal: a verify-failure evidence reads
- * `machine-run cases still failing after 3 iterations: case-1: …; case-2: …
+ * `machine-run cases still failing after 3 iterations: case-1: â€¦; case-2: â€¦
  * (one or more case expressions failed the harness safety check)` and the
  * sanitizer's reason + the offending case id ride the END, so a 160-char
  * head-only cut left only an unactionable "case payload rejected by harness
@@ -6477,14 +6572,14 @@ export const P6_REFUSAL_DETAIL_MAX = 1200;
 export function boundedRefusalDetail(detail: string, max = P6_REFUSAL_DETAIL_MAX): string {
   const clean = typeof detail === "string" && detail.trim() ? detail.trim() : "unknown";
   if (clean.length <= max) return clean;
-  const markerLen = ` …[elided ${clean.length} chars]… `.length;
+  const markerLen = ` â€¦[elided ${clean.length} chars]â€¦ `.length;
   const keep = Math.max(0, max - markerLen);
   const head = Math.ceil(keep * 0.6);
   const tail = keep - head;
   const elided = clean.length - keep;
   return (
     clean.slice(0, head) +
-    ` …[elided ${elided} chars]… ` +
+    ` â€¦[elided ${elided} chars]â€¦ ` +
     (tail > 0 ? clean.slice(clean.length - tail) : "")
   );
 }
@@ -6504,7 +6599,7 @@ export function boundedRefusalDetail(detail: string, max = P6_REFUSAL_DETAIL_MAX
  */
 export type P6SynthesisVerdict = { code: ErrorCode; detail: string };
 
-/** fixes/354 (A1-F6): read the DECIDING code of a P6 synthesis result — the
+/** fixes/354 (A1-F6): read the DECIDING code of a P6 synthesis result â€” the
  *  structured field when present, else the newest `p6.synthesis.refused` row's
  *  leading `RT_E_*` code (the legacy shape headless.p6RefusalCode already
  *  parses). Null when the record carries no synthesis refusal. Pure. */
@@ -6527,7 +6622,7 @@ export function p6SynthesisDeciding(project: Project | null | undefined): P6Synt
   return null;
 }
 
-/** Append the honest refusal trail — the deterministic floor stands; never a fabricated pass. */
+/** Append the honest refusal trail â€” the deterministic floor stands; never a fabricated pass. */
 function refuse(project: Project, code: ErrorCode, detail: string): Project & { p6Synthesis: P6SynthesisVerdict } {
   const clean = typeof detail === "string" && detail.trim() ? detail.trim() : "unknown";
   return {
@@ -6540,18 +6635,18 @@ function refuse(project: Project, code: ErrorCode, detail: string): Project & { 
         phase: 6 as PhaseId,
         level: "warn" as const,
         event: "p6.synthesis.refused",
-        detail: `${code} · ${boundedRefusalDetail(clean)}`,
+        detail: `${code} Â· ${boundedRefusalDetail(clean)}`,
       },
     ].slice(-200),
   };
 }
 
 /**
- * fixes/153 (P1) — AI-call error visibility: the bounded per-attempt
+ * fixes/153 (P1) â€” AI-call error visibility: the bounded per-attempt
  * `p6.synthesis.attempt` journal. Every synthesis-model call in the
  * single-module and chunked paths records one entry naming the chunk, the
  * sequential attempt number within that chunk, the call's timeout budget and
- * its outcome (ok/refused/timeout) — and, when refused, the model/provider's
+ * its outcome (ok/refused/timeout) â€” and, when refused, the model/provider's
  * own refusal text (first ~160 chars; deepseek describeError now keeps the raw
  * body visible inside that text). Additive context only: no prompt, refusal
  * string or terminal p6.synthesis.refused / p6.synthesis event changes.
@@ -6567,7 +6662,7 @@ function synthAttemptLogEntry(a: {
   const failed = !a.res.ok ? (a.res as { error?: string; reason?: string }) : null;
   const refusal =
     outcome === "refused"
-      ? ` · refusal: ${String(failed?.error ?? failed?.reason ?? "")
+      ? ` Â· refusal: ${String(failed?.error ?? failed?.reason ?? "")
           .replace(/\s+/g, " ")
           .trim()
           .slice(0, 160)}`
@@ -6577,11 +6672,11 @@ function synthAttemptLogEntry(a: {
     phase: 6 as PhaseId,
     level: a.res.ok ? ("info" as const) : ("warn" as const),
     event: "p6.synthesis.attempt",
-    detail: `chunk ${a.chunkIndex + 1}/${a.chunkTotal} · attempt ${a.attempt} · ${a.timeoutMs}ms · ${outcome}${refusal}`,
+    detail: `chunk ${a.chunkIndex + 1}/${a.chunkTotal} Â· attempt ${a.attempt} Â· ${a.timeoutMs}ms Â· ${outcome}${refusal}`,
   };
 }
 
-/** Number every model call of one chunk sequentially — synthWithBackoff's
+/** Number every model call of one chunk sequentially â€” synthWithBackoff's
  *  bounded retries AND each bounded repair re-prompt report one event. */
 function attemptObservedComplete(
   complete: P6SynthesisDeps["complete"],
@@ -6634,10 +6729,10 @@ type StampedArtifact = Artifact & { provenance?: ArtifactProvenance };
 
 /**
  * T5.4: the provenance stamp for a MODEL-produced artifact. `servedModel` must
- * be the id the provider ACTUALLY served (its own `LlmResult.model`) — never
+ * be the id the provider ACTUALLY served (its own `LlmResult.model`) â€” never
  * the requested constant. Fail closed: a blank served id (or a blank input
- * hash) yields null — no stamp at all rather than a guessed/unverifiable
- * producer (declare-or-strike; fixes/217c §T5.4: a stamp that guesses the
+ * hash) yields null â€” no stamp at all rather than a guessed/unverifiable
+ * producer (declare-or-strike; fixes/217c Â§T5.4: a stamp that guesses the
  * producer is worse than none).
  */
 function modelProvenance(servedModel: unknown, inputHash: string): ArtifactProvenance | null {
@@ -6647,7 +6742,7 @@ function modelProvenance(servedModel: unknown, inputHash: string): ArtifactProve
 }
 
 /**
- * T5.4: the provenance stamp for a deterministic (machine-derived) record —
+ * T5.4: the provenance stamp for a deterministic (machine-derived) record â€”
  * rendered from inputs by code, never by a model call. Carries no `model` key
  * by construction (a deterministic record is never model-stamped).
  */
@@ -6656,17 +6751,17 @@ function deterministicProvenance(inputHash: string): ArtifactProvenance {
 }
 
 /**
- * W52/338-1 follow-up (spine): the ONE verify-evidence hash formula — mirrors
+ * W52/338-1 follow-up (spine): the ONE verify-evidence hash formula â€” mirrors
  * verify.ts applyVerifyOutcome's `fnv1a(finalSource \u0002 evidence \u0002
  * caseCommitment)` so one witness covers every input the verifier produces.
  * Before this the codegen twins hashed `source \u0002 evidence` only, so two
  * outcomes whose source+evidence agreed but whose ORACLE CASE SET differed
  * minted the same evidence hash (a genuine verification silently conflated
- * with another). `source` plays verify.ts's `finalSource` role — the verified
+ * with another). `source` plays verify.ts's `finalSource` role â€” the verified
  * module bytes codegen records. (Known limit, unchanged: codegen hashes its
  * cleaned `finalModule` while verify.ts hashes `outcome.finalSource`; a
  * fence/trim difference between them can still make a re-apply miss the
- * dedupe — reported, not silently papered over.)
+ * dedupe â€” reported, not silently papered over.)
  */
 function verifyEvidenceHash(source: string, outcome: VerifyOutcome): string {
   const caseCommitment = JSON.stringify(
@@ -6682,7 +6777,7 @@ function verifyEvidenceHash(source: string, outcome: VerifyOutcome): string {
 }
 
 function verifyOutcomeArtifact(finalModule: string, outcome: VerifyOutcome): StampedArtifact {
-  // W52/338-1: the shared verify-evidence formula (verify.ts parity) — the
+  // W52/338-1: the shared verify-evidence formula (verify.ts parity) â€” the
   // source/evidence boundary \u0002 AND the oracle case commitment.
   const evidenceHash = verifyEvidenceHash(finalModule, outcome);
   const caseLines: string[] = [];
@@ -6694,7 +6789,7 @@ function verifyOutcomeArtifact(finalModule: string, outcome: VerifyOutcome): Sta
     if (id && expression) caseLines.push(`- ${id}: ${expression}`);
   }
   const body = [
-    "# Verify outcome — PASSED (machine-run)",
+    "# Verify outcome â€” PASSED (machine-run)",
     "",
     outcome.evidence || "(no evidence text)",
     `Iterations: ${typeof outcome.iterations === "number" ? outcome.iterations : 0}`,
@@ -6704,10 +6799,10 @@ function verifyOutcomeArtifact(finalModule: string, outcome: VerifyOutcome): Sta
     id: `verify-passed-${evidenceHash.slice(0, 8)}`,
     phase: 6,
     kind: "verify" as unknown as ArtifactKind, // headless.ts parity double-cast
-    title: "Verify outcome — passed (machine-run)",
+    title: "Verify outcome â€” passed (machine-run)",
     body,
     language: "markdown",
-    // T5.4: the runner's evidence text is machine-derived — producer
+    // T5.4: the runner's evidence text is machine-derived â€” producer
     // "deterministic" (never model-stamped); the input hash is the same
     // verified-module+evidence hash the artifact id already derives from.
     provenance: deterministicProvenance(evidenceHash),
@@ -6722,7 +6817,7 @@ function verifyOutcomeArtifact(finalModule: string, outcome: VerifyOutcome): Sta
  *  Project.lastTest accepts it at spread time).
  *
  *  fixes/354 (A1-E13): the tree-run mint additionally carries
- *  `declaredScriptsVerified` — the emitted package's declared-toolchain state —
+ *  `declaredScriptsVerified` â€” the emitted package's declared-toolchain state â€”
  *  so dod's `p6-verified` probe (and any other consumer) can gate on it. The
  *  single-module mint passes no value and its stamp stays byte-identical. */
 function testedLastTestStamp(detail: string, evidenceHash: string, declaredScriptsVerified?: boolean): {
@@ -6743,18 +6838,18 @@ function testedLastTestStamp(detail: string, evidenceHash: string, declaredScrip
 
 /**
  * FM-04 (W37 Y1): the packet-facing `project.modelRoute` is DERIVED from the id
- * the provider actually SERVED — never the old hardcoded flash constant.
+ * the provider actually SERVED â€” never the old hardcoded flash constant.
  * Before this, a `DEEPSEEK_MODEL_MAIN=deepseek-v4-pro` pin (or any future
  * non-flash serve) left the run record claiming `deepseek-flash` while the
  * artifact provenance correctly named the served id: the declared serve-model
  * honesty held for artifacts and failed for the run record. The union
- * (types.ts `ModelRoute`) is closed and DeepSeek-scoped: a `…pro` id maps to
+ * (types.ts `ModelRoute`) is closed and DeepSeek-scoped: a `â€¦pro` id maps to
  * "deepseek-pro", every flash-tier id maps to "deepseek-flash", and an
  * absent/unrecognized served id keeps the historical flash label (the tier
- * every synthesis call REQUESTS — P6_SYNTH_MODEL; the unserved case is the
+ * every synthesis call REQUESTS â€” P6_SYNTH_MODEL; the unserved case is the
  * already-declared default, never a guess about a serve that did not report).
- * A non-DeepSeek provider id is unreachable today — `RAPIDTOOL_PROVIDER=xai`
- * refuses by construction (FM-11) — TODO(FM-04b): widen the union + the io.ts
+ * A non-DeepSeek provider id is unreachable today â€” `RAPIDTOOL_PROVIDER=xai`
+ * refuses by construction (FM-11) â€” TODO(FM-04b): widen the union + the io.ts
  * validator when a cross-family route becomes reachable (W-45/OWNER keys).
  */
 function modelRouteForServed(servedModel: string | null | undefined): ModelRoute {
@@ -6777,16 +6872,16 @@ function upgraded(
   finalModule: string,
   outcome: VerifyOutcome,
   specRecord: Project["implementationSpec"],
-  /** T5.4: the id the provider actually served for this synthesis — the
+  /** T5.4: the id the provider actually served for this synthesis â€” the
    *  primary call's `LlmResult.model` (every bounded repair re-prompt reuses
-   *  the same opts/model resolution). Blank/null ⇒ no stamp, fail closed. */
+   *  the same opts/model resolution). Blank/null â‡’ no stamp, fail closed. */
   servedModel: string | null,
 ): Project {
   // W52/338-1: the SAME shared verify-evidence formula verifyOutcomeArtifact
-  // and verify.ts applyVerifyOutcome use — this hash IS the "tested"
+  // and verify.ts applyVerifyOutcome use â€” this hash IS the "tested"
   // lastTest.evidenceHash, so one formula covers every input.
   const evidenceHash = verifyEvidenceHash(finalModule, outcome);
-  // T5.4: the model-produced module's stamp — the SERVED model id + the
+  // T5.4: the model-produced module's stamp â€” the SERVED model id + the
   // synthesis input hash (the persisted brief hash).
   const prov = modelProvenance(servedModel, specRecord?.briefHash ?? "");
   const codeArtifact: StampedArtifact = {
@@ -6800,7 +6895,7 @@ function upgraded(
   };
   const memoryId = "6-episodic-0.93";
   // W52/338-1 follow-up (spine): the L4 verified-procedure row `verify.server`
-  // mints on a PASSED outcome was silently dropped here — the automated pass
+  // mints on a PASSED outcome was silently dropped here â€” the automated pass
   // consumed the outcome but never wrote its lesson. Fold it into memory
   // idempotently by row id (an existing twin is never duplicated), mirroring
   // verify.ts applyVerifyOutcome's own capture.
@@ -6856,7 +6951,7 @@ function upgraded(
         phase: 6 as PhaseId,
         level: "info" as const,
         event: "p6.synthesis",
-        detail: `LLM module machine-verified · ${outcome.iterations} iteration(s) · ${outcome.evidence.slice(0, 140)}`,
+        detail: `LLM module machine-verified Â· ${outcome.iterations} iteration(s) Â· ${outcome.evidence.slice(0, 140)}`,
       },
     ].slice(-200),
     ...(hitl !== project.hitl ? { hitl } : {}),
@@ -6864,27 +6959,27 @@ function upgraded(
 }
 
 /**
- * fixes/148 (F1 — tree-trigger scope) / fixes/342-1 follow-up: whether a
- * project is SINGLE-ENTRY eligible — the ONLY state the ≤8-signature
+ * fixes/148 (F1 â€” tree-trigger scope) / fixes/342-1 follow-up: whether a
+ * project is SINGLE-ENTRY eligible â€” the ONLY state the â‰¤8-signature
  * byte-parity `synthesizeSingleModule` path may serve. `Project.kind` is the
  * OPTIONAL 5-way `DeliveryKind` (342-4) decided once by `engine.deliveryKindOf`
  * and stamped by `engine.withDeliveryKind` at the keyed P6 seam.
  *
  * RULE (fixes/342-1 follow-up, decided from the K9-verified service bytes): the
- * single-module runtime harness serves the SINGLE-ENTRY product kinds — kind
+ * single-module runtime harness serves the SINGLE-ENTRY product kinds â€” kind
  * ABSENT (the brief-expressed library/module fixtures the fixes/144 byte-parity
  * pins protect, plus legacy/imported payloads), `library`, and `service`. A
  * service is a single-entry product exactly like a library: the verified
  * order-webhook service ships ONE runnable `src/main.ts` entry declared by
  * package.json, `scaffold.projectKindOf` maps both onto the same `src/main.ts`
  * emitter, and `scripts/run-eval.mjs` maps a corpus `service` to kind-ABSENT for
- * the same reason (341_1 §R3 names this the "library/service" lane). 342-4's
+ * the same reason (341_1 Â§R3 names this the "library/service" lane). 342-4's
  * engine stamps `kind:"service"`, which must not move that brief into the tree.
  *
- * The MULTI-FILE kinds — `app` (webapp), `tool` (CLI/agent utility) and `game`
- * (playable game) — are NOT single-entry: their honest module is the tree entry
+ * The MULTI-FILE kinds â€” `app` (webapp), `tool` (CLI/agent utility) and `game`
+ * (playable game) â€” are NOT single-entry: their honest module is the tree entry
  * + per-capability files, so they route to the chunked tree regardless of
- * signature count (fixes/145 M1=0 root cause: a ≤8-signature webapp brief fell
+ * signature count (fixes/145 M1=0 root cause: a â‰¤8-signature webapp brief fell
  * into the single-module path by construction).
  *
  * W56/342-1 (cross-lane contract): `"library"` stays in the union so the check
@@ -6905,7 +7000,7 @@ export function singleModuleLibraryKind(project: {
 }
 
 /**
- * Keyed P6 synthesis — the final leapfrog core (fixes/97 P0-01 Part B).
+ * Keyed P6 synthesis â€” the final leapfrog core (fixes/97 P0-01 Part B).
  *
  * `project` is expected to be the DETERMINISTIC P6 result (engine
  * applyPhaseResult(project, 6): phase record complete or awaiting_hitl,
@@ -6922,7 +7017,7 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   const verify = deps?.verify ?? defaultDeps.verify;
   // fixes/341-1: the PRE-SEAL self-typecheck gate. It is part of the REAL
   // synthesis pipeline, so it is live unless the caller has replaced BOTH real
-  // pipeline seams (`complete` AND `verify`) — production (engine.liveLayer
+  // pipeline seams (`complete` AND `verify`) â€” production (engine.liveLayer
   // forwards only the failure-context fields, never an LLM/verify seam) always
   // gates, and a PARTIAL injection (only one seam) does NOT silently disable
   // the gate. A caller that replaces both seams owns that pipeline and must
@@ -6935,36 +7030,36 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
     (deps?.complete !== undefined && deps?.verify !== undefined ? null : defaultTreeTypecheck);
   // M3-2: the optional tree-run failure context rides every bounded repair
   // re-prompt of THIS synthesis when the caller supplied it (defensively
-  // normalized at the prompt builders; absent ⇒ byte-identical legacy text).
+  // normalized at the prompt builders; absent â‡’ byte-identical legacy text).
   const treeFailure = deps?.treeFailure;
   // fixes/326 F1b: the one-shot gate-repair context (journey PREP-1).
   const gateRepair = deps?.gateRepair;
-  // fixes/328 F1 (Ledger) PREP-2: the previous cycle's refusal context —
-  // defensively normalized at withSynthesisRefusalContext; absent/blank ⇒
+  // fixes/328 F1 (Ledger) PREP-2: the previous cycle's refusal context â€”
+  // defensively normalized at withSynthesisRefusalContext; absent/blank â‡’
   // byte-identical legacy primary prompt.
   const synthesisRefusal = deps?.synthesisRefusal;
-  // T-107.1 (216r · W7-L1): the opt-in patch-repair level (see
-  // P6SynthesisDeps.patchRepairs) — false unless the caller asks for it.
+  // T-107.1 (216r Â· W7-L1): the opt-in patch-repair level (see
+  // P6SynthesisDeps.patchRepairs) â€” false unless the caller asks for it.
   const patchRepairs = deps?.patchRepairs === true;
-  // T4 (112 §4.4 / 216g): the caller's resolved cross-project proven rows —
-  // ranked with the memory lessons at every lesson site below; absent/empty ⇒
-  // opts.proven is undefined ⇒ byte-identical legacy prompts.
+  // T4 (112 Â§4.4 / 216g): the caller's resolved cross-project proven rows â€”
+  // ranked with the memory lessons at every lesson site below; absent/empty â‡’
+  // opts.proven is undefined â‡’ byte-identical legacy prompts.
   const proven = deps?.proven;
-  // PR-16 (I7, O-01): the previous cycle's accepted chunks. Absent/empty ⇒
-  // undefined ⇒ the chunked path is byte-identical to legacy.
+  // PR-16 (I7, O-01): the previous cycle's accepted chunks. Absent/empty â‡’
+  // undefined â‡’ the chunked path is byte-identical to legacy.
   const resumeAccepted = Array.isArray(deps?.resumeAccepted) && deps.resumeAccepted.length > 0 ? deps.resumeAccepted : undefined;
-  // fixes/343-1: the PRIMARY best-of-N / whole-tree resample count — OPT-IN
+  // fixes/343-1: the PRIMARY best-of-N / whole-tree resample count â€” OPT-IN
   // (default 1, byte-identical). `deps.candidates` wins over `P6_SYNTH_CANDIDATES`.
   const candidates = resolveSynthesisCandidates(deps?.candidates, process.env.P6_SYNTH_CANDIDATES);
   // fixes/346-S4: the chunk-level (per-chunk acceptance + fail-fast) resample
-  // count — ARMED BY DEFAULT (2, the T1-measured gain). The same explicit opt-out
+  // count â€” ARMED BY DEFAULT (2, the T1-measured gain). The same explicit opt-out
   // (`deps.candidates: 1` / `P6_SYNTH_CANDIDATES=1`) restores the legacy path.
   const chunkCandidates = resolveChunkResampleCandidates(deps?.candidates, process.env.P6_SYNTH_CANDIDATES);
   const brief = typeof project.brief === "string" ? project.brief : "";
   if (!brief.trim() || !Array.isArray(project.phases)) return project;
 
   // R3/B-03: a human-only gate (failed template sandbox) is never
-  // machine-cleared — leave the base untouched for the human to review.
+  // machine-cleared â€” leave the base untouched for the human to review.
   const rec6 = project.phases.find((p) => p.id === 6);
   if (rec6?.status === "awaiting_hitl" && project.hitl?.phase === 6 && project.hitl.forceHuman === true) {
     return project;
@@ -6995,11 +7090,11 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   let spec = specFields;
   if (spec === null) {
     // fixes/124 A3-03 (read-back wire): prior-run lessons from project.memory
-    // re-inject into the keyed P6 expansion — selectLessons (phase-6-preferred,
-    // score-capped, phase-agnostic fallback) → lessonLinesForBrief (FusionRank
-    // against the brief + provenance-visible line form) → expandBrief lessons.
+    // re-inject into the keyed P6 expansion â€” selectLessons (phase-6-preferred,
+    // score-capped, phase-agnostic fallback) â†’ lessonLinesForBrief (FusionRank
+    // against the brief + provenance-visible line form) â†’ expandBrief lessons.
     // Advisory only: ranking never changes gate inputs; empty memory keeps the
-    // legacy byte-identical expansion prompt (lessons omitted). T4 (112 §4.4):
+    // legacy byte-identical expansion prompt (lessons omitted). T4 (112 Â§4.4):
     // the caller's proven cross-project rows rank alongside the memory rows.
     const lessonLines = lessonLinesForBrief(
       brief,
@@ -7008,7 +7103,10 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
     );
     const note = typeof project.notes === "string" ? project.notes.trim() : "";
     const withNotes = note ? [`project.notes: ${note.slice(0, 240)}`, ...lessonLines] : lessonLines;
-    const expanded = await expand(brief, withNotes.length > 0 ? withNotes : undefined);
+    // W359 (kind fidelity): the resolved kind reaches the expansion model as
+    // prompt text â€” the six-key envelope is unchanged (a seventh key would move
+    // ExpandedSpec's persisted shape and every cached implementationSpec).
+    const expanded = await expand(brief, withNotes.length > 0 ? withNotes : undefined, deliveryKindOf(project));
     if (!expanded.ok) {
       return refuse(
         project,
@@ -7032,15 +7130,15 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   const signatureNames = signatureFunctionNames(specRecord.typeSignatures);
 
   // --- Step 2: chunked sequential synthesis (fixes/144 M2 / S-01 T2) --------
-  // typeSignatures are grouped ≤8 per chunk in expand order (MetaGPT ≤8-fn
-  // decomposition — fixes/134 §4 S-01). fixes/148 (F1): the tree-trigger is
-  // KIND-scoped, not signature-count-only — the ≤8 byte-parity rule serves
+  // typeSignatures are grouped â‰¤8 per chunk in expand order (MetaGPT â‰¤8-fn
+  // decomposition â€” fixes/134 Â§4 S-01). fixes/148 (F1): the tree-trigger is
+  // KIND-scoped, not signature-count-only â€” the â‰¤8 byte-parity rule serves
   // ONLY the single-entry kinds (kind ABSENT: undeclared/legacy, E-15 never
-  // infers kind; `library`; `service` — fixes/342-1 follow-up), where ≤8
-  // signatures ⇒ ONE chunk ⇒ the legacy single-module path below (one pro call
-  // + bounded repair re-prompts + machine verify → upgraded) byte-for-byte.
+  // infers kind; `library`; `service` â€” fixes/342-1 follow-up), where â‰¤8
+  // signatures â‡’ ONE chunk â‡’ the legacy single-module path below (one pro call
+  // + bounded repair re-prompts + machine verify â†’ upgraded) byte-for-byte.
   // Every MULTI-FILE delivery kind ("app" = webapp / "tool" / "game") and every
-  // >8-signature spec ⇒ the chunked tree: one pro-tier call PER chunk with the
+  // >8-signature spec â‡’ the chunked tree: one pro-tier call PER chunk with the
   // earlier chunks' exports as context, deterministic per-file validation,
   // deterministic assembly into Project.generatedTree. A kind-absent project
   // with zero signatures keeps the legacy path (nothing to chunk).
@@ -7050,28 +7148,28 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
       patchRepairs, gateRepair, synthesisRefusal, proven, typecheck, candidates);
   }
   // fixes/216k (105 TA-15, W6-L1): the chunked driver computes its own
-  // chunk→file plan (treeChunkPlan) and consumption order (orderTreeChunks)
-  // INSIDE — the caller no longer passes a flat grouping. Job-keyed chunks land
+  // chunkâ†’file plan (treeChunkPlan) and consumption order (orderTreeChunks)
+  // INSIDE â€” the caller no longer passes a flat grouping. Job-keyed chunks land
   // at their spec-graph `src/jobs/*.ts` paths; a job-less graph keeps the
   // pre-216k index-keyed mapping byte-for-byte (treeChunkPlan's legacy branch).
   return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven, typecheck, candidates, resumeAccepted, chunkCandidates);
 }
 
 /**
- * fixes/144 (M2): the legacy single-module synthesis — used ONLY for the
- * single-entry kinds (kind-absent/undeclared — fixes/148 F1 — plus `library`
- * and `service` — fixes/342-1 follow-up) whose spec carries ≤8 typeSignatures
+ * fixes/144 (M2): the legacy single-module synthesis â€” used ONLY for the
+ * single-entry kinds (kind-absent/undeclared â€” fixes/148 F1 â€” plus `library`
+ * and `service` â€” fixes/342-1 follow-up) whose spec carries â‰¤8 typeSignatures
  * (one chunk), so the pre-M2 pipeline is
  * preserved
  * byte-for-byte: one pro-tier call + one bounded repair re-prompt per failure
  * class (envelope / export-binding / forbidden / missing-signature /
  * brief-fit) + deterministic export-injection + machine verify
  * (verifyAndFixServer) + the upgraded honest state, with the verified module
- * materialized to ESM at synthesis time (FM-01 · W37 Y1: an ESM barrel at
+ * materialized to ESM at synthesis time (FM-01 Â· W37 Y1: an ESM barrel at
  * TREE_ENTRY_PATH + the module relocated to TREE_CHUNK0_RELOCATED_PATH with
- * its CJS assigns stripped — generatedSource is the barrel entry, never raw
+ * its CJS assigns stripped â€” generatedSource is the barrel entry, never raw
  * CJS; the machine-verified artifact keeps describing the verified module).
- * The ≤8-signature legacy PIPELINE is unchanged (one call + bounded repairs +
+ * The â‰¤8-signature legacy PIPELINE is unchanged (one call + bounded repairs +
  * machine verify, byte-for-byte).
  */
 async function synthesizeSingleModule(
@@ -7082,21 +7180,21 @@ async function synthesizeSingleModule(
   complete: P6SynthesisDeps["complete"],
   verify: P6SynthesisDeps["verify"],
   treeFailure?: string,
-  /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level. */
+  /** T-107.1 (216r Â· W7-L1): the opt-in patch (str_replace) repair level. */
   patchRepairs = false,
   gateRepair?: string,
-  /** fixes/328 F1 (Ledger): the previous cycle's refusal context — appended to
-   *  the PRIMARY prompt (withSynthesisRefusalContext); absent ⇒ legacy bytes. */
+  /** fixes/328 F1 (Ledger): the previous cycle's refusal context â€” appended to
+   *  the PRIMARY prompt (withSynthesisRefusalContext); absent â‡’ legacy bytes. */
   synthesisRefusal?: string,
-  /** T4 (112 §4.4 / 216g): the caller's resolved cross-project proven rows,
-   *  ranked with the memory lessons; absent/empty ⇒ legacy prompt bytes. */
+  /** T4 (112 Â§4.4 / 216g): the caller's resolved cross-project proven rows,
+   *  ranked with the memory lessons; absent/empty â‡’ legacy prompt bytes. */
   proven?: readonly RankableLessonRow[],
-  /** fixes/341-1: the PRE-SEAL self-typecheck gate (null ⇒ legacy, no gate).
+  /** fixes/341-1: the PRE-SEAL self-typecheck gate (null â‡’ legacy, no gate).
    *  The single-module path covers library/service products, whose emitted ESM
    *  tree is judged by the same declared `typecheck`; a red verdict refuses the
    *  seal (never a machine-run-green but type-red `tested` artifact). */
   typecheck: P6TreeTypecheck | null = null,
-  /** fixes/343-1: opt-in best-of-N sample count (1 ⇒ legacy byte-identical). */
+  /** fixes/343-1: opt-in best-of-N sample count (1 â‡’ legacy byte-identical). */
   candidates = 1,
 ): Promise<Project> {
   // --- Step 2 (legacy): synthesis (one call + one bounded repair re-prompt) --
@@ -7105,10 +7203,10 @@ async function synthesizeSingleModule(
     selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
     { limit: EXPAND_LESSON_RANK_LIMIT, proven },
   );
-  // R10-f01 (W39 Z2): project.contracts rides the prompt — the model used to
+  // R10-f01 (W39 Z2): project.contracts rides the prompt â€” the model used to
   // write the module body blind to the A6 data contract (G3's wire).
   // fixes/354 (TS2304 self-sufficiency): the SAME deterministic shared interface
-  // contract the chunked path derives — the single-module (library/service) lane
+  // contract the chunked path derives â€” the single-module (library/service) lane
   // is compiled by the tree's own `tsc` too, so a plan-referenced domain type
   // must resolve here as well. The prompt bytes are unchanged (the block is not
   // rendered for the single-module prompt); this only feeds materialization.
@@ -7116,7 +7214,7 @@ async function synthesizeSingleModule(
   const treeTypeDefinitions: TreeTypeDefinitions = contractDefs.length > 0 ? contractDefs : null;
   const user = withTreeFailureContext(
     withSynthesisRefusalContext(
-      withGateRepairContext(p6SynthesisUserPrompt(brief, specRecord, lessonLines, project.contracts), gateRepair),
+      withGateRepairContext(p6SynthesisUserPrompt(brief, specRecord, lessonLines, project.contracts, null, deliveryKindOf(project)), gateRepair),
       synthesisRefusal,
     ),
     treeFailure,
@@ -7124,15 +7222,15 @@ async function synthesizeSingleModule(
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
     json: true,
-    // fixes/156 (E1): structured json envelope → OUTPUT budget, not
+    // fixes/156 (E1): structured json envelope â†’ OUTPUT budget, not
     // chain-of-thought. Pro thinking (the default) on these LARGE prompts
     // let reasoning_content consume the whole max_tokens window and the API
     // returned content:"" on EVERY synthesis call (the empty-content
-    // blocker — fixes/154 D5: disable thinking for json envelopes rather
+    // blocker â€” fixes/154 D5: disable thinking for json envelopes rather
     // than keep raising budgets; mechanism: api-docs.deepseek.com
     // /guides/json_mode + goose#11142 shared reasoning/content budget).
     // Deterministic validation + machine verify below are the correctness
-    // loop — not CoT. Repair re-prompts reuse this opts (thinking-off too).
+    // loop â€” not CoT. Repair re-prompts reuse this opts (thinking-off too).
     thinking: false,
     maxTokens: P6_SYNTH_MAX_TOKENS,
     timeoutMs: P6_SYNTH_TIMEOUT_MS,
@@ -7140,13 +7238,13 @@ async function synthesizeSingleModule(
     // fixes/348: deterministic sampling (candidate 0's seed; a resample advances it).
     ...seededSampling(brief, 0),
   };
-  // W61 lane D (D1): repair turns run under the DEDICATED repair persona — the
+  // W61 lane D (D1): repair turns run under the DEDICATED repair persona â€” the
   // delta-or-rewrite contract belongs to the repair prompt, not the generator's.
   // PR-19 (A7): repair turns consume prompt-engine's PURE repair contract
-  // (PR-18) — the delta/full/refusal reply shapes live there, not here.
+  // (PR-18) â€” the delta/full/refusal reply shapes live there, not here.
   const repairOpts: DeepSeekCompleteOptions = { ...opts, system: repairSystemPrompt() };
   // fixes/153 (P1): per-attempt p6.synthesis.attempt journal for this one
-  // chunk — every model call below (synthWithBackoff retries + each bounded
+  // chunk â€” every model call below (synthWithBackoff retries + each bounded
   // repair re-prompt) reports chunk 1/1 + a sequential attempt number.
   const attemptLogs: JsonLog[] = [...(project.logs ?? [])];
   const completeCall = attemptObservedComplete(complete, (attempt, res) => {
@@ -7160,8 +7258,8 @@ async function synthesizeSingleModule(
   const patch: PatchRepairOptions | undefined = patchRepairs
     ? { path: TREE_ENTRY_PATH, log: (entry) => pushAttemptLog(attemptLogs, entry) }
     : undefined;
-  // 217k (W12 LANE B · fixes/216y G6): the unreadable-reply sink for every
-  // envelope read in this call — a reply that ARRIVED but could not be read
+  // 217k (W12 LANE B Â· fixes/216y G6): the unreadable-reply sink for every
+  // envelope read in this call â€” a reply that ARRIVED but could not be read
   // lands in the same bounded attempt journal the patch sink and the terminal
   // refusal trail use, so a parse failure is never again indistinguishable
   // from "no output".
@@ -7183,7 +7281,7 @@ async function synthesizeSingleModule(
   }
   let envelope = parseSynthesisEnvelope(res.text, readSink);
   if (envelope === null) {
-    // W61 lane D (D1): a LEGAL refusal is not an unparseable reply — record the
+    // W61 lane D (D1): a LEGAL refusal is not an unparseable reply â€” record the
     // coded refusal and skip the repair call (a legitimate refusal costs no
     // repair and can never become a pass). Checked before the repair dispatch.
     const refusal = parseSynthesisRefusal(res.text);
@@ -7210,9 +7308,9 @@ async function synthesizeSingleModule(
   // --- Step 2b: opt-in best-of-N candidate selection (fixes/343-1) -----------
   // Engaged ONLY when the caller/env asked for >1 candidates; the default (1)
   // leaves every line below byte-identical. Each candidate is judged against
-  // the ordered deterministic gates that already exist on this path — structure
-  // (validateSynthesisModule) → brief-fit (briefFitSatisfied) → pre-seal
-  // typecheck (the real tsc seam) — and the FIRST candidate to clear them all
+  // the ordered deterministic gates that already exist on this path â€” structure
+  // (validateSynthesisModule) â†’ brief-fit (briefFitSatisfied) â†’ pre-seal
+  // typecheck (the real tsc seam) â€” and the FIRST candidate to clear them all
   // is kept, so a gate-green winner skips the bounded repair block below. When
   // NO candidate clears the gates the primary sample stands and the legacy
   // repair path still runs: selection is never worse than not selecting.
@@ -7234,7 +7332,7 @@ async function synthesizeSingleModule(
       }
       return {
         passed: true,
-        reason: verdict.run === "pass" ? "structure + brief-fit + pre-seal typecheck" : "structure + brief-fit (typecheck skipped — unverified)",
+        reason: verdict.run === "pass" ? "structure + brief-fit + pre-seal typecheck" : "structure + brief-fit (typecheck skipped â€” unverified)",
       };
     };
     // V5/I-A: the session-ledger delta around the selection is the resample
@@ -7249,7 +7347,7 @@ async function synthesizeSingleModule(
         // are reproducible as a set.
         const resample = await completeCall(user, { ...opts, ...seededSampling(brief, index) });
         const resampleStop = accountRepairUsage(resample);
-        if (resampleStop !== null) return null; // budget stop — keep sampling bounded and honest
+        if (resampleStop !== null) return null; // budget stop â€” keep sampling bounded and honest
         if (!resample.ok) return null;
         return parseSynthesisEnvelope(resample.text, readSink);
       },
@@ -7274,8 +7372,8 @@ async function synthesizeSingleModule(
   // fixes/116: two formerly-hard validation failures now get ONE bounded
   // repair re-prompt carrying the exact defect, so a single model slip no
   // longer strands the whole keyed run:
-  //   • claimed-exports-not-bound → re-prompt with the exact missing names;
-  //   • SOFT forbidden primitive (document/fetch/process/…) → re-prompt with
+  //   â€¢ claimed-exports-not-bound â†’ re-prompt with the exact missing names;
+  //   â€¢ SOFT forbidden primitive (document/fetch/process/â€¦) â†’ re-prompt with
   //     the exact token (HARD eval/Function/import is NEVER repaired).
   let validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);
   // fixes/349-P6 (Fix 1): shrink an over-bound candidate deterministically before
@@ -7298,28 +7396,28 @@ async function synthesizeSingleModule(
     const hit = forbiddenPrimitiveHit(masked);
     const unbound = unboundExportNames(envelope.module, envelope.exports);
     const repairableForbidden = hit.soft !== null && hit.hard === null;
-    // fixes/121: signature-missing is now a THIRD repair class — expandBrief
+    // fixes/121: signature-missing is now a THIRD repair class â€” expandBrief
     // returns the contract names; a module that omits them gets ONE bounded
     // re-prompt listing the exact missing functions (was an instant refusal).
     const missingSig = missingSignatureNames(envelope.exports, signatureNames);
     // 216f (T-09/T-15): prose-in-code and a non-deterministic primitive are the
-    // FOURTH/FIFTH bounded repair classes — each gets ONE re-prompt carrying
+    // FOURTH/FIFTH bounded repair classes â€” each gets ONE re-prompt carrying
     // the exact defect (the prose line numbers / the offending token); a repeat
     // is refused. A HARD forbidden primitive still refuses with no repair.
     const nondet = nondeterministicPrimitiveHit(masked);
     const prose = proseLineHits(envelope.module);
-    // BF-5 (SYNTHSPEC A5): the money-semantics class — a money-named export that
-    // sums a quantity field instead of price × quantity. ONE bounded repair.
+    // BF-5 (SYNTHSPEC A5): the money-semantics class â€” a money-named export that
+    // sums a quantity field instead of price Ã— quantity. ONE bounded repair.
     const money = moneySemanticsHits(envelope.module);
     // A12/R2-03: raw JSX and an UNBOUND JSX namespace type reference in the
-    // single-module path too — every validated module gets the one bounded
+    // single-module path too â€” every validated module gets the one bounded
     // JSX-free re-prompt, not only the chunked tree's job modules.
     const jsx = jsxHits(envelope.module);
     const jsxNs = jsxNamespaceHits(envelope.module);
     // W46/332-1 (P1): the un-awaited-async-value class for the single-module
     // path (its own `async function` used as a value without await).
     const asyncUses = unawaitedAsyncValueUses(envelope.module, asyncNamesInScope(envelope.module));
-    // T-107.1 (216r · W7-L1): the patch-first delta repair, ONLY when the
+    // T-107.1 (216r Â· W7-L1): the patch-first delta repair, ONLY when the
     // caller opted in and the defect is a LOCALIZED text edit (soft forbidden
     // token / non-deterministic primitive / prose). A landed delta is applied
     // by `applyStrReplace` against the module the model just produced and
@@ -7327,14 +7425,14 @@ async function synthesizeSingleModule(
     // outcome (no excerpt, non-delta reply, coded refusal, patched module
     // still invalid) falls through to the legacy full-rewrite repair with its
     // prompt bytes unchanged.
-    // 216r (W9-L2 · DEFECT 2): a landed delta that REVALIDATES leaves no
-    // legacy repair class open on the patched bytes — the re-check above runs
+    // 216r (W9-L2 Â· DEFECT 2): a landed delta that REVALIDATES leaves no
+    // legacy repair class open on the patched bytes â€” the re-check above runs
     // every class the legacy block below would dispatch (bound exports,
-    // forbidden, signatures, non-determinism, prose) — so `patchLanded`
+    // forbidden, signatures, non-determinism, prose) â€” so `patchLanded`
     // short-circuits that block. Before this guard the legacy re-prompt still
     // fired after a successful patch (guards were read from the ORIGINAL
     // defect values) and a PARSEABLE reply overwrote the patched envelope,
-    // silently discarding the landed delta (216r §2 defect 2).
+    // silently discarding the landed delta (216r Â§2 defect 2).
     let patchLanded = false;
     if (patch !== undefined) {
       const defect = patchableDefect({
@@ -7418,7 +7516,7 @@ async function synthesizeSingleModule(
   if (!validation.ok) return refuse(withAttemptLogs(project, attemptLogs), validation.code, validation.error);
   let fit = briefFitSatisfied(brief, envelope.module);
   if (!fit.ok) {
-    // fixes/121: the brief-fit class gets ONE bounded repair re-prompt too —
+    // fixes/121: the brief-fit class gets ONE bounded repair re-prompt too â€”
     // the module may have ignored the brief's vocabulary on the first pass.
     const repair = await completeCall(p6SynthesisBriefFitRepairPrompt(fit.missing, treeFailure), repairOpts);
     // FM-03 (W37 Y1): metered like every bounded repair call.
@@ -7451,7 +7549,7 @@ async function synthesizeSingleModule(
   // fixes/121 last-mile: the deterministic export-injection repair. Flash-tier
   // modules routinely DECLARE every contract function yet forget the CJS
   // binding (`function createProperty(){}` with no `module.exports.createProperty
-  // = ...`) — static validation cannot see that, and the machine run dies with
+  // = ...`) â€” static validation cannot see that, and the machine run dies with
   // "ReferenceError: createProperty is not defined". Before burning LLM repair
   // iterations, inject the missing bindings mechanically: for every claimed
   // export name that the module declares at top level (function NAME / const
@@ -7472,8 +7570,8 @@ async function synthesizeSingleModule(
   const outcome = await verify(envelope.module, brief, {
     maxIterations: 3,
     signatureNames: oracleContractNames(envelope.module, envelope.exports),
-    // 346 E1 · A1-04 (E-08 live): feed the project's A7 oracle rows so a case
-    // list that drops a pinned row is refused — a seeded run, not a claim.
+    // 346 E1 Â· A1-04 (E-08 live): feed the project's A7 oracle rows so a case
+    // list that drops a pinned row is refused â€” a seeded run, not a claim.
     seeds: oracleToCaseSeeds(Array.isArray(project.oracle) ? project.oracle : []),
     pinnedOracleIds: (Array.isArray(project.oracle) ? project.oracle : [])
       .map((o) => o?.id)
@@ -7483,7 +7581,7 @@ async function synthesizeSingleModule(
     return refuse(withAttemptLogs(project, attemptLogs), codeForVerifyStatus(outcome.status), outcome.evidence || `verify ${outcome.status}`);
   }
   const finalModule = cleanRepairedSource(outcome.finalSource) ?? envelope.module;
-  // Repairs could regress — re-run every deterministic floor check on the
+  // Repairs could regress â€” re-run every deterministic floor check on the
   // FINAL source (the stored artifact is the verified module, never a claim).
   const finalValidation = validateSynthesisModule(finalModule, envelope.exports, signatureNames);
   if (!finalValidation.ok) return refuse(withAttemptLogs(project, attemptLogs), finalValidation.code, finalValidation.error);
@@ -7500,10 +7598,10 @@ async function synthesizeSingleModule(
   // T5.4: the SERVED model id from the primary synthesis LlmResult (never the
   // requested P6_SYNTH_MODEL constant) rides into the artifact provenance.
   const up = upgraded(withAttemptLogs(project, attemptLogs), finalModule, outcome, specRecord, res.model);
-  // FM-01 (W37 Y1): materialize at SYNTHESIS time — the same seam the chunked
+  // FM-01 (W37 Y1): materialize at SYNTHESIS time â€” the same seam the chunked
   // path uses (:3183). Before this the verified single module was recorded as
   // RAW CommonJS, and only the emit-time residue guard (headless.ts
-  // materializeEmitTree) rewrote it for the `"type":"module"` tenant — so any
+  // materializeEmitTree) rewrote it for the `"type":"module"` tenant â€” so any
   // consumer that read generatedTree/generatedSource WITHOUT emitting
   // (inspect/packet/tree-run on a non-emitted project/a new driver) got bytes
   // that die at import. The recorded shape now equals the chunked path's: an
@@ -7511,7 +7609,7 @@ async function synthesizeSingleModule(
   // TREE_CHUNK0_RELOCATED_PATH with its CJS assigns stripped (module.exports
   // is what p6SynthesisSystemPrompt still mandates from the MODEL; the harness
   // rewrites it, never the prompt). generatedSource is the barrel entry's own
-  // bytes. The emit-time guard stays as the backstop — now a no-op over this
+  // bytes. The emit-time guard stays as the backstop â€” now a no-op over this
   // tree. The machine-verified artifact (codeArtifact body, verify record,
   // lastTest evidenceHash) keeps describing the verified CJS module itself.
   const materialized = materializeImportableTree(
@@ -7523,7 +7621,7 @@ async function synthesizeSingleModule(
   // machine-run harness compiles with `new Function` (JS-only), so a stripped
   // type error (TS2749/TS2440 class) never fails it. A red declared
   // `typecheck` here refuses the seal outright (the machine-verified `up` is
-  // discarded) — the bounded re-synthesis loop lives at the caller
+  // discarded) â€” the bounded re-synthesis loop lives at the caller
   // (headless's P6 journey), which re-runs this path with the refusal context.
   const skipTypecheckLogs: JsonLog[] = [];
   if (typecheck !== null) {
@@ -7532,7 +7630,7 @@ async function synthesizeSingleModule(
       return refuse(
         withAttemptLogs(project, attemptLogs),
         "RT_E_VALIDATION",
-        `the emitted module fails its OWN declared \`typecheck\` — refusing to seal a machine-run-green but type-red artifact: ${verdict.detail ?? "no detail"}`,
+        `the emitted module fails its OWN declared \`typecheck\` â€” refusing to seal a machine-run-green but type-red artifact: ${verdict.detail ?? "no detail"}`,
       );
     }
     if (verdict.run === "skip") {
@@ -7541,7 +7639,7 @@ async function synthesizeSingleModule(
         phase: 6 as PhaseId,
         level: "warn",
         event: "p6.tree.typecheck.skipped",
-        detail: `chunk 1/1 · ${verdict.detail ?? "declared typecheck not executed (unverified, not a pass)"}`,
+        detail: `chunk 1/1 Â· ${verdict.detail ?? "declared typecheck not executed (unverified, not a pass)"}`,
       });
     }
   }
@@ -7554,28 +7652,28 @@ async function synthesizeSingleModule(
 }
 
 /**
- * fixes/144 (M2 / S-01 T2): chunked sequential tree synthesis — one pro-tier
- * call per ≤8-signature chunk, in expand order, each prompt carrying the
+ * fixes/144 (M2 / S-01 T2): chunked sequential tree synthesis â€” one pro-tier
+ * call per â‰¤8-signature chunk, in expand order, each prompt carrying the
  * shared brief + full requirement list + that chunk's signatures + the
  * earlier chunks' exported top-level names + reqTrace. Every accepted chunk
  * becomes one tree file (deterministic path, fnv1a hash, attempt 0);
  * generatedSource = the assembled ENTRY (each file wrapped in a scope that
- * binds the earlier files' exports — later files call earlier exports by name
+ * binds the earlier files' exports â€” later files call earlier exports by name
  * through those bindings, the entry evaluates even under per-file helper-name
  * collisions, and every per-file source stays import-free). Refusals are
  * HONEST PARTIALS: prior chunks' real files stay on the returned project and
  * a p6.synthesis.refused log names the refused chunk index. No machine
- * verify here — per-file deterministic validation is the mechanical floor;
+ * verify here â€” per-file deterministic validation is the mechanical floor;
  * the tree machine-run is the tree-run lane's step (never a fabricated pass).
  *
- * fixes/216k (105 TA-15 / 106 F-03 F-06 F-10, W6-L1): the chunk→file map is
- * computed HERE, per call, from the project's own spec graph —
+ * fixes/216k (105 TA-15 / 106 F-03 F-06 F-10, W6-L1): the chunkâ†’file map is
+ * computed HERE, per call, from the project's own spec graph â€”
  * `treeChunkPlan` keys each chunk to the spec-graph node it implements
- * (`src/jobs/record.ts` …), and the driver consumes the ORDERED plan
+ * (`src/jobs/record.ts` â€¦), and the driver consumes the ORDERED plan
  * (`orderTreeChunks`, D1: leftovers first, then job chunks in reverse plan
  * order) so every job module is synthesized with every earlier-signature chunk
  * already in its prior context (no forward calls). Each accepted chunk lands at
- * its planned `chunk.path` — never `treePathForChunk` for a planned chunk. A
+ * its planned `chunk.path` â€” never `treePathForChunk` for a planned chunk. A
  * graph with no keyable job node keeps the pre-216k index-keyed mapping and
  * chunk-prompt chain byte-for-byte.
  */
@@ -7585,45 +7683,45 @@ async function synthesizeChunkedTree(
   specRecord: NonNullable<Project["implementationSpec"]>,
   complete: P6SynthesisDeps["complete"],
   treeFailure?: string,
-  /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level. */
+  /** T-107.1 (216r Â· W7-L1): the opt-in patch (str_replace) repair level. */
   patchRepairs = false,
   gateRepair?: string,
-  /** fixes/328 F1 (Ledger): the previous cycle's refusal context — appended to
-   *  EVERY chunk's PRIMARY prompt (withSynthesisRefusalContext); absent ⇒
+  /** fixes/328 F1 (Ledger): the previous cycle's refusal context â€” appended to
+   *  EVERY chunk's PRIMARY prompt (withSynthesisRefusalContext); absent â‡’
    *  legacy bytes. */
   synthesisRefusal?: string,
-  /** T4 (112 §4.4 / 216g): the caller's resolved cross-project proven rows,
-   *  ranked with the memory lessons on every chunk; absent/empty ⇒ legacy. */
+  /** T4 (112 Â§4.4 / 216g): the caller's resolved cross-project proven rows,
+   *  ranked with the memory lessons on every chunk; absent/empty â‡’ legacy. */
   proven?: readonly RankableLessonRow[],
-  /** fixes/341-1: the PRE-SEAL self-typecheck gate (null ⇒ legacy, no gate).
+  /** fixes/341-1: the PRE-SEAL self-typecheck gate (null â‡’ legacy, no gate).
    *  A red verdict gets ONE bounded repair round over the compiler-named chunks
    *  (re-synthesized with the compiler's tail as tree-failure context) and, if
-   *  still red, an honest partial refusal — never a sealed red tree. */
+   *  still red, an honest partial refusal â€” never a sealed red tree. */
   typecheck: P6TreeTypecheck | null = null,
   /** fixes/343-1: opt-in best-of-N sample count for the compiler-named chunks
-   *  (1 ⇒ legacy single re-synthesis, byte-identical). */
+   *  (1 â‡’ legacy single re-synthesis, byte-identical). */
   candidates = 1,
   /** PR-16 (I7, O-01): the previous cycle's accepted chunks (see
    *  P6SynthesisDeps.resumeAccepted). A plan row whose path is present is
-   *  reused verbatim with NO model call; absent/empty ⇒ legacy byte-identical
+   *  reused verbatim with NO model call; absent/empty â‡’ legacy byte-identical
    *  chunked synthesis. */
   resumeAccepted?: readonly { path: string; source: string; exports: string[] }[],
   /** fixes/346-S4: the chunk-level (per-chunk acceptance + fail-fast offender)
-   *  resample count — ARM ON by default (2); 1 is the explicit opt-out. */
+   *  resample count â€” ARM ON by default (2); 1 is the explicit opt-out. */
   chunkCandidates = P6_SYNTH_CHUNK_RETRY_CANDIDATES,
 ): Promise<Project> {
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
     json: true,
-    // fixes/156 (E1): structured json envelope → OUTPUT budget, not
+    // fixes/156 (E1): structured json envelope â†’ OUTPUT budget, not
     // chain-of-thought. Pro thinking (the default) on these LARGE chunk
     // prompts let reasoning_content consume the whole max_tokens window and
     // the API returned content:"" on EVERY synthesis call (the
-    // empty-content blocker — fixes/154 D5: disable thinking for json
+    // empty-content blocker â€” fixes/154 D5: disable thinking for json
     // envelopes rather than keep raising budgets; mechanism:
     // api-docs.deepseek.com /guides/json_mode + goose#11142 shared
     // reasoning/content budget). Deterministic per-file validation + the
-    // tree-run lane are the correctness loop — not CoT. Repair re-prompts
+    // tree-run lane are the correctness loop â€” not CoT. Repair re-prompts
     // reuse this opts (thinking-off too).
     thinking: false,
     maxTokens: P6_SYNTH_MAX_TOKENS,
@@ -7634,7 +7732,7 @@ async function synthesizeChunkedTree(
   };
   const accepted: { path: string; source: string; exports: string[]; reqTrace: Record<string, string> }[] = [];
   const prior: ChunkPriorFile[] = [];
-  // PR-16 (I7, O-01): path → a previously-accepted chunk. Only a non-empty
+  // PR-16 (I7, O-01): path â†’ a previously-accepted chunk. Only a non-empty
   // supply materializes the map; absent/empty leaves the loop byte-identical.
   const resumeByPath = new Map<string, { path: string; source: string; exports: string[] }>();
   if (Array.isArray(resumeAccepted)) {
@@ -7645,32 +7743,32 @@ async function synthesizeChunkedTree(
     }
   }
   // T5.4: the SERVED model id of the first accepted chunk's primary synthesis
-  // call — every chunk of one tree uses the same opts/model resolution, so the
+  // call â€” every chunk of one tree uses the same opts/model resolution, so the
   // first served id is the tree's served id. Null until a chunk is accepted
-  // (⇒ no artifact stamp, fail closed).
+  // (â‡’ no artifact stamp, fail closed).
   let servedModel: string | null = null;
-  // W52/338-1: the SPEC-DRIVEN coverage rule — reconcile the model's emitted
+  // W52/338-1: the SPEC-DRIVEN coverage rule â€” reconcile the model's emitted
   // signatures with the deterministic capability floor BEFORE the plan, so every
   // declared spec-graph job maps to a planned file by rule (see
-  // reconcilePlanTypeSignatures). No declared job unbound ⇒ `treeSpec` is the
+  // reconcilePlanTypeSignatures). No declared job unbound â‡’ `treeSpec` is the
   // same reference and every downstream byte/prompt is unchanged.
   const reconciled = reconcilePlanTypeSignatures(project, specRecord.typeSignatures);
   const treeSpec: NonNullable<Project["implementationSpec"]> =
     reconciled.added.length > 0 ? { ...specRecord, typeSignatures: reconciled.typeSignatures } : specRecord;
-  // fixes/216k (105 TA-15, W6-L1 D1/D3): the chunk→file plan + its consumption
+  // fixes/216k (105 TA-15, W6-L1 D1/D3): the chunkâ†’file plan + its consumption
   // order are computed here from the project's own spec graph. `plan[i].path`
   // IS the file path (a job node's `src/jobs/<label>.ts` for job-keyed chunks);
-  // zero job nodes ⇒ treeChunkPlan's legacy branch ⇒ identical paths, identical
+  // zero job nodes â‡’ treeChunkPlan's legacy branch â‡’ identical paths, identical
   // per-chunk prompts (pre-216k byte parity). `plan.length` is the honest chunk
   // total: every plan row is exactly one synthesis call.
   //
-  // A1 (SYNTHSPEC P1): merge the BRIEF-DRIVEN minimum file set — one required
-  // module per declared capability plus a brief-noun floor — so the plan can no
-  // longer collapse to 1–2 chunks. `mergeMinimumPlan` is ADD-ONLY; a plan that
+  // A1 (SYNTHSPEC P1): merge the BRIEF-DRIVEN minimum file set â€” one required
+  // module per declared capability plus a brief-noun floor â€” so the plan can no
+  // longer collapse to 1â€“2 chunks. `mergeMinimumPlan` is ADD-ONLY; a plan that
   // already covers every capability keeps its exact rows.
   // A9/PR-15 + fixes/349-P6: size each chunk by BOTH the rendered signature text
-  // and the ESTIMATED emitted output — the tighter of the two wins, the floor is
-  // 2 — so a signature-dense spec cannot overload one call. For typical corpus
+  // and the ESTIMATED emitted output â€” the tighter of the two wins, the floor is
+  // 2 â€” so a signature-dense spec cannot overload one call. For typical corpus
   // signatures the estimated-output bound is not the tighter one, so the legacy
   // chunk size (and the recorded fixtures' bytes) are reproduced.
   const chunkSize = planningChunkSize(treeSpec.typeSignatures);
@@ -7686,7 +7784,7 @@ async function synthesizeChunkedTree(
     avoidNames: planAvoidNames,
   });
   const plan = orderTreeChunks(mergedPlan);
-  // fixes/349 (P6 convergence): the deterministic shared interface contract —
+  // fixes/349 (P6 convergence): the deterministic shared interface contract â€”
   // the full alias body of every type the FINAL plan's chunk signatures reference
   // (the reconciled set AND the brief-driven mergeMinimumPlan rows), plus the A6
   // contract entities. Derived from the plan's own signatures so a signature the
@@ -7694,7 +7792,7 @@ async function synthesizeChunkedTree(
   // chunk prompt as AUTHORITATIVE and the materializer injects the canonical
   // aliases into each chunk that references them, so every demanded export has a
   // definition and no chunk can declare a divergent copy. Pure function of
-  // (plan signatures, contracts) ⇒ the same brief + seed yields identical defs.
+  // (plan signatures, contracts) â‡’ the same brief + seed yields identical defs.
   const contractDefs = deriveInterfaceTypeDefinitions(
     plan.flatMap((c) => c.signatures),
     project.contracts,
@@ -7702,24 +7800,24 @@ async function synthesizeChunkedTree(
   const treeTypeDefinitions: TreeTypeDefinitions = contractDefs.length > 0 ? contractDefs : null;
   const contractEnvelope =
     contractDefs.length > 0 ? { names: contractDefs.map((d) => d.name), definitions: contractDefs } : null;
-  // A2 (SYNTHSPEC P2): the frozen cross-chunk export registry — one immutable
+  // A2 (SYNTHSPEC P2): the frozen cross-chunk export registry â€” one immutable
   // inventory the validator, the prompt and the materializer all read.
   let registry: FrozenExportRegistry = { entries: new Map(), files: new Map() };
-  // fixes/153 (P1): per-attempt p6.synthesis.attempt journal — the observer
+  // fixes/153 (P1): per-attempt p6.synthesis.attempt journal â€” the observer
   // closure carries the chunk context so every model call of chunk i reports
   // chunk (i+1)/total + a sequential per-chunk attempt number.
   const attemptLogs: JsonLog[] = [...(project.logs ?? [])];
-  // W52/338-1: legible record of what the coverage rule ADDED — the declared
+  // W52/338-1: legible record of what the coverage rule ADDED â€” the declared
   // jobs no model signature named, now planned from the deterministic floor.
   // Nothing is appended when the model already named every declared job.
   if (reconciled.added.length > 0) {
-    const detail = `declared job node(s) no model signature named — planned from the deterministic capability floor: ${reconciled.addedLabels.join(", ")} (+${reconciled.added.length} signature(s) from deriveTypeSignatures)`;
+    const detail = `declared job node(s) no model signature named â€” planned from the deterministic capability floor: ${reconciled.addedLabels.join(", ")} (+${reconciled.added.length} signature(s) from deriveTypeSignatures)`;
     if (!attemptLogs.some((l) => l.event === "p6.tree.plan.reconciled" && l.detail === detail)) {
       attemptLogs.push({ ts: Date.now(), phase: 6, level: "info", event: "p6.tree.plan.reconciled", detail });
     }
   }
   // fixes/349: legible record of the shared interface contract every chunk is
-  // handed — the floor-added signatures' types are defined here too, so a
+  // handed â€” the floor-added signatures' types are defined here too, so a
   // signature the model never authored is never demanded without its definition.
   if (contractDefs.length > 0) {
     const detail = `shared interface contract: ${contractDefs.length} type definition(s) derived from the plan signatures + A6 contract (injected into every chunk that references them; a local redeclaration is refused)`;
@@ -7727,7 +7825,7 @@ async function synthesizeChunkedTree(
       attemptLogs.push({ ts: Date.now(), phase: 6, level: "info", event: "p6.tree.contracts", detail });
     }
   }
-  // W45/331-4: the plan-side shortfall — a declared spec-graph job whose label no
+  // W45/331-4: the plan-side shortfall â€” a declared spec-graph job whose label no
   // typeSignature names gets no chunk and (in tree mode) no emitted file. Count it
   // and persist the row on the project, so it survives into the packet/export
   // instead of vanishing with the scaffold's in-process warnings array. Nothing is
@@ -7737,7 +7835,7 @@ async function synthesizeChunkedTree(
     if (census.unbound.length > 0) {
       // W46/332-1 (P2): the full partition rides the row, so the coverage
       // shortfall is legible (and deterministic) instead of a bare name list.
-      const detail = `declared job node(s) with no bound signature — no src/jobs module will be synthesized: ${census.unbound.join(", ")} (declared ${census.declared.length}, planned ${census.planned.length}, unbound ${census.unbound.length}; their typeSignatures, if any, stay in the src/generated family)`;
+      const detail = `declared job node(s) with no bound signature â€” no src/jobs module will be synthesized: ${census.unbound.join(", ")} (declared ${census.declared.length}, planned ${census.planned.length}, unbound ${census.unbound.length}; their typeSignatures, if any, stay in the src/generated family)`;
       if (!attemptLogs.some((l) => l.event === "p6.tree.shortfall" && l.detail === detail)) {
         attemptLogs.push({ ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.shortfall", detail });
       }
@@ -7749,7 +7847,7 @@ async function synthesizeChunkedTree(
     const added = requiredModules.filter((m) => !basePlan.some((c) => c.path === m.path));
     const detail = `brief-driven minimum plan: +${added.length} module(s) over the model plan (minimum ${minTreeFiles}); ${added
       .slice(0, 12)
-      .map((m) => `${m.source}:${m.label}→${m.path}`)
+      .map((m) => `${m.source}:${m.label}â†’${m.path}`)
       .join(", ")}`;
     if (!attemptLogs.some((l) => l.event === "p6.tree.plan.floor" && l.detail === detail)) {
       attemptLogs.push({ ts: Date.now(), phase: 6, level: "info", event: "p6.tree.plan.floor", detail });
@@ -7759,14 +7857,14 @@ async function synthesizeChunkedTree(
   // fixes/343-1 follow-up (343-2): the persisted tree's ranked outline, built
   // once and appended to every PRIMARY chunk prompt. Tree-only input so the
   // keyless floor's placeholder `generatedSource` can never masquerade as the
-  // tree being extended; no tree ⇒ `rendered === ""` ⇒ no block (legacy bytes).
+  // tree being extended; no tree â‡’ `rendered === ""` â‡’ no block (legacy bytes).
   const repoMap = repoMapForProject(
     { generatedTree: Array.isArray(project.generatedTree) ? project.generatedTree : null },
     { budget: P6_SYNTH_REPO_MAP_BUDGET },
   ).rendered;
 
   // C1-01 (BF-1) + S-3: the ONE refusal door for this tree. A refusal whose
-  // accepted set is below the brief-driven floor is an UNDER-PRODUCED PLAN — it
+  // accepted set is below the brief-driven floor is an UNDER-PRODUCED PLAN â€” it
   // is coded `RT_E_PLAN_UNDERPRODUCED` and names the declared modules that
   // never landed, never the generic `RT_E_VALIDATION` and never a silent
   // partial. The floor verdict OUTRANKS the two RETRYABLE synthesis outcomes
@@ -7789,7 +7887,7 @@ async function synthesizeChunkedTree(
         chunkIndex,
         chunkTotal,
         under.code,
-        `${under.detail} — proximate refusal (${code}): ${detail}`,
+        `${under.detail} â€” proximate refusal (${code}): ${detail}`,
         servedModel,
         treeTypeDefinitions,
       );
@@ -7808,7 +7906,7 @@ async function synthesizeChunkedTree(
 
   for (let i = 0; i < plan.length; i++) {
     const chunk = plan[i]!;
-    // PR-16 (I7, O-01): reuse a previously-accepted chunk for THIS plan path —
+    // PR-16 (I7, O-01): reuse a previously-accepted chunk for THIS plan path â€”
     // no prompt, no model call, no per-chunk fail-fast. The chunk is taken
     // verbatim (its source + exports were validated on the cycle that accepted
     // it); it still enters `accepted`/`prior`/the frozen registry so the plan,
@@ -7829,7 +7927,7 @@ async function synthesizeChunkedTree(
             level: "warn",
             event: "p6.tree.registry.collision",
             detail: `chunk ${i + 1}/${plan.length} (reused): name(s) already frozen by an earlier file: ${frozen.collisions
-              .map((c) => `${c.name}←${c.priorPath}`)
+              .map((c) => `${c.name}â†${c.priorPath}`)
               .join(", ")}`,
           });
         }
@@ -7846,7 +7944,7 @@ async function synthesizeChunkedTree(
           phase: 6 as PhaseId,
           level: "info",
           event: "p6.synthesis.reused",
-          detail: `chunk ${i + 1}/${plan.length}: reused the previously-accepted module at ${chunk.path} (I7/O-01) — 0 synthesis calls`,
+          detail: `chunk ${i + 1}/${plan.length}: reused the previously-accepted module at ${chunk.path} (I7/O-01) â€” 0 synthesis calls`,
         });
         continue;
       }
@@ -7861,14 +7959,14 @@ async function synthesizeChunkedTree(
     const user = withRepoMapContext(
       withTreeFailureContext(
         withSynthesisRefusalContext(
-          withGateRepairContext(p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, prior, lessonLines, project.contracts, contractDefs), gateRepair),
+          withGateRepairContext(p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, prior, lessonLines, project.contracts, contractDefs, deliveryKindOf(project)), gateRepair),
           synthesisRefusal,
         ),
         treeFailure,
       ),
       repoMap,
     );
-    // T-107.1 (216r): per-chunk patch-repair sink — the chunk plan's path IS
+    // T-107.1 (216r): per-chunk patch-repair sink â€” the chunk plan's path IS
     // the emitted tree file's path; absent when the level is off (legacy).
     const patch: PatchRepairOptions | undefined = patchRepairs
       ? { path: chunk.path, log: (entry) => pushAttemptLog(attemptLogs, entry) }
@@ -7888,24 +7986,24 @@ async function synthesizeChunkedTree(
             synthAttemptLogEntry({ chunkIndex: i, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
           );
         },
-        // 217k (W12 LANE B · G6): the unreadable-reply sink for this chunk's
-        // envelope reads — the reply belongs to the planned file's path.
+        // 217k (W12 LANE B Â· G6): the unreadable-reply sink for this chunk's
+        // envelope reads â€” the reply belongs to the planned file's path.
         (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, chunk.path)),
         // W45/331-4 (Finding B): the earlier chunks of this tree. The materializer
         // imports their exports into this file, so a redeclaration is refused by the
         // validator and gets the bounded duplicate-declaration repair below.
         prior,
-        // fixes/349: the shared interface contract — a local redeclaration of a
+        // fixes/349: the shared interface contract â€” a local redeclaration of a
         // contract type is refused and reconciled by the dedicated repair.
         contractEnvelope,
       );
     let synth = await produceChunk();
     // fixes/346 (lane T1): per-chunk bounded resampling. The campaign #2
     // journals show the dominant P6 stall is a per-chunk deterministic
-    // validation refusal — `typeSignature functions not exported`
+    // validation refusal â€” `typeSignature functions not exported`
     // (bakery-website, mobile-companion, office-invoice-tracker, held-out) or
     // `cross-chunk duplicate declaration` (bakery-florist-orders,
-    // office-stock-tracker) — at chunk 2-3 of an 8-11 chunk plan, after one
+    // office-stock-tracker) â€” at chunk 2-3 of an 8-11 chunk plan, after one
     // sample + one class repair and with no independent second attempt. When
     // chunkCandidates > 1 (the default 3, fixes/346-S4 + S5), resample the SAME
     // primary prompt and keep the FIRST candidate the SAME deterministic
@@ -7918,7 +8016,7 @@ async function synthesizeChunkedTree(
     if (!synth.ok && chunkCandidates > 1 && (synth.code === "RT_E_VALIDATION" || synth.code === "RT_E_LLM_REJECTED")) {
       const chunkRetry = Math.min(P6_SYNTH_CANDIDATES_MAX, chunkCandidates);
       const outcomes: string[] = [
-        `candidate 1: rejected — ${synth.code}: ${String(synth.error ?? "").replace(/\s+/g, " ").slice(0, 160)}`,
+        `candidate 1: rejected â€” ${synth.code}: ${String(synth.error ?? "").replace(/\s+/g, " ").slice(0, 160)}`,
       ];
       // V5/I-A: the session-ledger delta across the resample loop is the extra
       // spend this candidate row incurred (candidate 1 already ran above).
@@ -7933,7 +8031,7 @@ async function synthesizeChunkedTree(
           break;
         }
         outcomes.push(
-          `candidate ${k}: rejected — ${retry.code}: ${String(retry.error ?? "").replace(/\s+/g, " ").slice(0, 160)}`,
+          `candidate ${k}: rejected â€” ${retry.code}: ${String(retry.error ?? "").replace(/\s+/g, " ").slice(0, 160)}`,
         );
         if (retry.code === "RT_E_BUDGET_EXHAUSTED" || retry.code === "RT_E_LLM_NOT_CONFIGURED") break;
       }
@@ -7955,12 +8053,12 @@ async function synthesizeChunkedTree(
       return refuse(i, plan.length, synth.code, synth.error);
     }
     // D1/D3: consume the plan row's path directly (no treePathForChunk for a
-    // planned chunk — the plan already de-duped every path, job siblings
+    // planned chunk â€” the plan already de-duped every path, job siblings
     // included via jobSiblingPath).
     const path = chunk.path;
-    // A2: freeze the chunk's MATERIALIZED surface (claim ∪ residual CJS) so the
+    // A2: freeze the chunk's MATERIALIZED surface (claim âˆª residual CJS) so the
     // next chunk's validator and prompt see names the materializer will import
-    // — not just the envelope claim. The frozen union is what `prior.exports`
+    // â€” not just the envelope claim. The frozen union is what `prior.exports`
     // carries below, closing the claim-vs-materialized gap.
     const frozenNames = materializedExportNames(synth.envelope.module, synth.envelope.exports);
     const frozen = freezeFileExports(registry, { path, source: synth.envelope.module, exports: synth.envelope.exports });
@@ -7972,7 +8070,7 @@ async function synthesizeChunkedTree(
         level: "warn",
         event: "p6.tree.registry.collision",
         detail: `chunk ${i + 1}/${plan.length}: name(s) already frozen by an earlier file: ${frozen.collisions
-          .map((c) => `${c.name}←${c.priorPath}`)
+          .map((c) => `${c.name}â†${c.priorPath}`)
           .join(", ")}`,
       });
     }
@@ -7980,11 +8078,11 @@ async function synthesizeChunkedTree(
     if (servedModel === null) servedModel = synth.servedModel;
     prior.push({
       path,
-      // A2: the frozen materialized surface — the same inventory the
+      // A2: the frozen materialized surface â€” the same inventory the
       // materializer imports (registryNamesFor), never the raw claim alone.
       exports: registryNamesFor(registry, path),
       reqTrace: { ...synth.envelope.reqTrace },
-      // W46/332-1 (P1): a later chunk must `await` this file's async exports —
+      // W46/332-1 (P1): a later chunk must `await` this file's async exports â€”
       // the validator and prompt both read this mark.
       asyncExports: asyncExportNames(synth.envelope.module, synth.envelope.exports),
       // fixes/349-P6 (Fix 6): the file's own signature lines, so a later chunk
@@ -7997,7 +8095,7 @@ async function synthesizeChunkedTree(
     // typecheck. An earlier file can never be fixed by a LATER chunk (the
     // materializer only imports earlier exports), so a red prefix is either
     // repaired now (one bounded re-synthesis of the offender with the compiler
-    // tail as context, monotonic) or refused — chunk i+1 is never synthesized
+    // tail as context, monotonic) or refused â€” chunk i+1 is never synthesized
     // on a tree that already cannot compile. Only chunk-attributable offenders
     // act (a scaffold-only error with no mapped chunk is left to the final
     // whole-tree gate, so this is never a false stop).
@@ -8011,7 +8109,7 @@ async function synthesizeChunkedTree(
             phase: 6 as PhaseId,
             level: "warn",
             event: "p6.synthesis.failfast",
-            detail: `chunk ${i + 1}/${plan.length}: the accepted prefix fails the tree's OWN declared typecheck before chunk ${i + 2} is synthesized — ${String(partialVerdict.detail ?? "").replace(/\s+/g, " ").slice(0, 400)}`,
+            detail: `chunk ${i + 1}/${plan.length}: the accepted prefix fails the tree's OWN declared typecheck before chunk ${i + 2} is synthesized â€” ${String(partialVerdict.detail ?? "").replace(/\s+/g, " ").slice(0, 400)}`,
           });
           const oi = offenders[offenders.length - 1]!;
           const oChunk = plan[oi]!;
@@ -8036,7 +8134,7 @@ async function synthesizeChunkedTree(
           const repairUser = withTreeFailureContext(
             withSynthesisRefusalContext(
               withGateRepairContext(
-                p6SynthesisChunkUserPrompt(brief, treeSpec, oChunk.signatures, priorForO, repairLessons, project.contracts, contractDefs),
+                p6SynthesisChunkUserPrompt(brief, treeSpec, oChunk.signatures, priorForO, repairLessons, project.contracts, contractDefs, deliveryKindOf(project)),
                 gateRepair,
               ),
               synthesisRefusal,
@@ -8068,7 +8166,7 @@ async function synthesizeChunkedTree(
           // wall. With the per-chunk resample in place the tree now reaches
           // chunk 7/8 and the compiler-named offender file (TS2554/TS2339/TS7006
           // cross-chunk drift) refuses on the SINGLE repair; campaign #2's
-          // two-sample probe reverted (3→9, 2→2). With chunkCandidates > 1 (the
+          // two-sample probe reverted (3â†’9, 2â†’2). With chunkCandidates > 1 (the
           // default 3, fixes/346-S4 + S5), resample the SAME compiler-informed
           // repair prompt and keep the FIRST offender whose substituted prefix
           // clears the real tsc (strictly fewer diagnostics or green). Pareto: a
@@ -8085,7 +8183,7 @@ async function synthesizeChunkedTree(
           // fixes/349: when no candidate clears the prefix tsc outright, keep the
           // one with the FEWEST diagnostics (interface consistency) rather than
           // the blind first sample. A fully-green candidate is still accepted
-          // immediately (Pareto — a converging first sample pays nothing extra).
+          // immediately (Pareto â€” a converging first sample pays nothing extra).
           type Substituted = (typeof accepted)[number];
           let best:
             | { sub: Substituted; env: SynthesisEnvelope; served: string; after: number; index: number }
@@ -8111,7 +8209,7 @@ async function synthesizeChunkedTree(
             const repaired = await produceRepair(k);
             if (!repaired.ok) {
               failfastOutcomes.push(
-                `candidate ${k}: rejected — structure refused (${repaired.code}: ${String(repaired.error ?? "").replace(/\s+/g, " ").slice(0, 140)})`,
+                `candidate ${k}: rejected â€” structure refused (${repaired.code}: ${String(repaired.error ?? "").replace(/\s+/g, " ").slice(0, 140)})`,
               );
               if (repaired.code === "RT_E_BUDGET_EXHAUSTED" || repaired.code === "RT_E_LLM_NOT_CONFIGURED") break;
               continue;
@@ -8131,7 +8229,7 @@ async function synthesizeChunkedTree(
               accept(substituted[oi]!, repaired.envelope, repaired.servedModel);
               fixed = true;
               winnerIdx = failfastOutcomes.length;
-              failfastOutcomes.push(`candidate ${k}: selected — ${probe.run === "pass" ? "pre-seal typecheck" : "typecheck skipped"}`);
+              failfastOutcomes.push(`candidate ${k}: selected â€” ${probe.run === "pass" ? "pre-seal typecheck" : "typecheck skipped"}`);
               break;
             }
             if (offenderCandidates === 1) {
@@ -8141,11 +8239,11 @@ async function synthesizeChunkedTree(
                 phase: 6 as PhaseId,
                 level: "info",
                 event: "p6.synthesis.monotonic",
-                detail: `chunk ${oi + 1}/${plan.length} (fail-fast): repair reverted — diagnostics ${before} → ${after} (not strictly fewer); the pre-repair chunk stands`,
+                detail: `chunk ${oi + 1}/${plan.length} (fail-fast): repair reverted â€” diagnostics ${before} â†’ ${after} (not strictly fewer); the pre-repair chunk stands`,
               });
             }
             failfastOutcomes.push(
-              `candidate ${k}: rejected — tsc refused (${String(probe.detail ?? "").replace(/\s+/g, " ").slice(0, 140)})`,
+              `candidate ${k}: rejected â€” tsc refused (${String(probe.detail ?? "").replace(/\s+/g, " ").slice(0, 140)})`,
             );
             if (after < before && (best === null || after < best.after)) {
               best = { sub: substituted[oi]!, env: repaired.envelope, served: repaired.servedModel, after, index: failfastOutcomes.length - 1 };
@@ -8156,7 +8254,7 @@ async function synthesizeChunkedTree(
             accept(best.sub, best.env, best.served);
             fixed = true;
             winnerIdx = best.index;
-            failfastOutcomes[best.index] = `candidate ${best.index + 1}: selected — fewer diagnostics (${best.after} remaining)`;
+            failfastOutcomes[best.index] = `candidate ${best.index + 1}: selected â€” fewer diagnostics (${best.after} remaining)`;
           }
           if (offenderCandidates > 1) {
             pushAttemptLog(attemptLogs, {
@@ -8178,7 +8276,7 @@ async function synthesizeChunkedTree(
               i,
               plan.length,
               "RT_E_VALIDATION",
-              `the accepted tree prefix fails its OWN declared \`typecheck\` after chunk ${i + 1}/${plan.length} and the bounded fail-fast repair did not converge — chunk ${i + 2} was never synthesized (${partialVerdict.detail ?? ""})`,
+              `the accepted tree prefix fails its OWN declared \`typecheck\` after chunk ${i + 1}/${plan.length} and the bounded fail-fast repair did not converge â€” chunk ${i + 2} was never synthesized (${partialVerdict.detail ?? ""})`,
             );
           }
         }
@@ -8201,7 +8299,7 @@ async function synthesizeChunkedTree(
     );
   }
 
-  // A3 (SYNTHSPEC P3): normalize the accepted raw modules BEFORE assembly —
+  // A3 (SYNTHSPEC P3): normalize the accepted raw modules BEFORE assembly â€”
   // hoist provably-pure store declarations (the `globalThisStore` TDZ), delete
   // byte-identical duplicate declarations, merge/dedupe imports. Only pure
   // reorders and exact deletions; anything else is surfaced and left to the
@@ -8227,12 +8325,12 @@ async function synthesizeChunkedTree(
         phase: 6 as PhaseId,
         level: "warn",
         event: "p6.tree.normalized.unresolved",
-        detail: `unresolved duplicate declaration(s): ${norm.unresolved.slice(0, 8).join(", ")} — the pre-seal typecheck gate stays fail-closed`,
+        detail: `unresolved duplicate declaration(s): ${norm.unresolved.slice(0, 8).join(", ")} â€” the pre-seal typecheck gate stays fail-closed`,
       });
     }
   }
 
-  // All chunks accepted → assemble the entry and run the TREE-LEVEL brief-fit
+  // All chunks accepted â†’ assemble the entry and run the TREE-LEVEL brief-fit
   // pre-acceptance (a per-file gate would be wrong: the brief's vocabulary
   // legitimately spreads across files; the assembled entry carries it all).
   const entry = assembleTreeEntry(accepted);
@@ -8246,11 +8344,11 @@ async function synthesizeChunkedTree(
     );
   }
   let materialized = materializeImportableTree(accepted, treeTypeDefinitions);
-  // fixes/341-1: the PRE-SEAL self-typecheck gate — the measured defect was a
+  // fixes/341-1: the PRE-SEAL self-typecheck gate â€” the measured defect was a
   // keyed cli-tool tree sealed while failing its OWN declared `typecheck`
   // (TS2749/TS2440, compile.failed=0, oracle+entry pass). A red verdict gets
   // ONE bounded repair round over the compiler-named chunks; still red (or no
-  // chunk maps to the named file) ⇒ an honest partial refusal, never a seal.
+  // chunk maps to the named file) â‡’ an honest partial refusal, never a seal.
   if (typecheck !== null) {
     const first = await runTreeSelfTypecheck(project, materialized, typecheck);
     if (first.run === "fail") {
@@ -8263,7 +8361,7 @@ async function synthesizeChunkedTree(
         })();
       const tc = typecheck;
       let repairedAny = false;
-      // A6: the verdict of the last ACCEPTED substitution — reused as the
+      // A6: the verdict of the last ACCEPTED substitution â€” reused as the
       // post-repair gate verdict so the monotonic probe is not a second run.
       let postRepairVerdict: P6TreeTypecheckVerdict | null = null;
       // fixes/343-1: opt-in best-of-N over the compiler-named chunks. With the
@@ -8275,7 +8373,7 @@ async function synthesizeChunkedTree(
       // is kept. Candidate 1 is probed first, so no resample happens when the
       // existing single sample already clears the gate (Pareto on spend). Only
       // when no sample clears the tree's tsc does candidate 1 stand and the
-      // existing second gate decide — selection is never worse than today.
+      // existing second gate decide â€” selection is never worse than today.
       for (const i of offenders) {
         const chunk = plan[i]!;
         const priorForI = accepted.slice(0, i).map((f) => ({
@@ -8293,7 +8391,7 @@ async function synthesizeChunkedTree(
         const repairUser = withTreeFailureContext(
           withSynthesisRefusalContext(
             withGateRepairContext(
-              p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, priorForI, repairLessons, project.contracts, contractDefs),
+              p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, priorForI, repairLessons, project.contracts, contractDefs, deliveryKindOf(project)),
               gateRepair,
             ),
             synthesisRefusal,
@@ -8342,32 +8440,32 @@ async function synthesizeChunkedTree(
             const v0 = await runTreeSelfTypecheck(project, materializeImportableTree(substitute(fallback), treeTypeDefinitions), tc);
             if (v0.run !== "fail") {
               winner = 0;
-              outcomes.push(`candidate 1: selected — ${v0.run === "pass" ? "pre-seal typecheck" : "typecheck skipped"}`);
+              outcomes.push(`candidate 1: selected â€” ${v0.run === "pass" ? "pre-seal typecheck" : "typecheck skipped"}`);
             } else {
-              outcomes.push(`candidate 1: rejected — tsc refused (${String(v0.detail ?? "").replace(/\s+/g, " ").slice(0, 160)})`);
+              outcomes.push(`candidate 1: rejected â€” tsc refused (${String(v0.detail ?? "").replace(/\s+/g, " ").slice(0, 160)})`);
               for (let k = 1; k < candidates; k++) {
                 const candidate = await produceChunk(k);
                 if (!candidate.ok) {
-                  outcomes.push(`candidate ${k + 1}: rejected — structure refused (${candidate.code}: ${candidate.error})`);
+                  outcomes.push(`candidate ${k + 1}: rejected â€” structure refused (${candidate.code}: ${candidate.error})`);
                   continue;
                 }
                 const v = await runTreeSelfTypecheck(project, materializeImportableTree(substitute(candidate), treeTypeDefinitions), tc);
                 if (v.run === "fail") {
-                  outcomes.push(`candidate ${k + 1}: rejected — tsc refused (${String(v.detail ?? "").replace(/\s+/g, " ").slice(0, 160)})`);
+                  outcomes.push(`candidate ${k + 1}: rejected â€” tsc refused (${String(v.detail ?? "").replace(/\s+/g, " ").slice(0, 160)})`);
                   continue;
                 }
                 repaired = candidate;
                 winner = k;
-                outcomes.push(`candidate ${k + 1}: selected — ${v.run === "pass" ? "pre-seal typecheck" : "typecheck skipped"}`);
+                outcomes.push(`candidate ${k + 1}: selected â€” ${v.run === "pass" ? "pre-seal typecheck" : "typecheck skipped"}`);
                 break;
               }
               if (winner === null) {
                 repaired = fallback;
-                outcomes.push("kept candidate 1 — no resample cleared the tree's tsc");
+                outcomes.push("kept candidate 1 â€” no resample cleared the tree's tsc");
               }
             }
           } else {
-            outcomes.push(`candidate 1: rejected — structure refused (${repaired.code}: ${repaired.error})`);
+            outcomes.push(`candidate 1: rejected â€” structure refused (${repaired.code}: ${repaired.error})`);
           }
           pushAttemptLog(attemptLogs, {
             ts: Date.now(),
@@ -8388,13 +8486,13 @@ async function synthesizeChunkedTree(
             i,
             plan.length,
             "RT_E_VALIDATION",
-            `emitted tree fails its OWN declared \`typecheck\` and the bounded repair of chunk ${i + 1}/${plan.length} did not land (${repaired.code}: ${repaired.error}) — ${first.detail ?? ""}`,
+            `emitted tree fails its OWN declared \`typecheck\` and the bounded repair of chunk ${i + 1}/${plan.length} did not land (${repaired.code}: ${repaired.error}) â€” ${first.detail ?? ""}`,
           );
         }
-        // A6 (SYNTHSPEC P4b · monotonic repair): accept the substituted chunk
+        // A6 (SYNTHSPEC P4b Â· monotonic repair): accept the substituted chunk
         // ONLY when its own pre-seal typecheck STRICTLY decreases the diagnostic
         // count. A repair that trades one error for two (or fixes nothing) is
-        // reverted to the pre-repair chunk — never written into the partial.
+        // reverted to the pre-repair chunk â€” never written into the partial.
         const substituted = accepted.slice();
         substituted[i] = {
           path: chunk.path,
@@ -8416,7 +8514,7 @@ async function synthesizeChunkedTree(
             phase: 6 as PhaseId,
             level: "info",
             event: "p6.synthesis.monotonic",
-            detail: `chunk ${i + 1}/${plan.length}: repair reverted — diagnostics ${before} → ${after} (not strictly fewer); the pre-repair chunk stands`,
+            detail: `chunk ${i + 1}/${plan.length}: repair reverted â€” diagnostics ${before} â†’ ${after} (not strictly fewer); the pre-repair chunk stands`,
           });
         }
       }
@@ -8430,7 +8528,7 @@ async function synthesizeChunkedTree(
             -1,
             plan.length,
             "RT_E_VALIDATION",
-            `emitted tree still fails its OWN declared \`typecheck\` after one bounded repair round — ${second.detail ?? ""}`,
+            `emitted tree still fails its OWN declared \`typecheck\` after one bounded repair round â€” ${second.detail ?? ""}`,
           );
         }
       } else {
@@ -8438,7 +8536,7 @@ async function synthesizeChunkedTree(
           -1,
           plan.length,
           "RT_E_VALIDATION",
-          `emitted tree fails its OWN declared \`typecheck\` but no synthesized chunk maps to the compiler-named file(s) — ${first.detail ?? ""}`,
+          `emitted tree fails its OWN declared \`typecheck\` but no synthesized chunk maps to the compiler-named file(s) â€” ${first.detail ?? ""}`,
         );
       }
     } else if (first.run === "skip") {
@@ -8447,7 +8545,7 @@ async function synthesizeChunkedTree(
         phase: 6 as PhaseId,
         level: "warn",
         event: "p6.tree.typecheck.skipped",
-        detail: `tree ${plan.length}/${plan.length} chunks · ${first.detail ?? "declared typecheck not executed (unverified, not a pass)"}`,
+        detail: `tree ${plan.length}/${plan.length} chunks Â· ${first.detail ?? "declared typecheck not executed (unverified, not a pass)"}`,
       });
     }
   }
@@ -8463,11 +8561,11 @@ async function synthesizeChunkedTree(
 
 /**
  * One chunk's synthesis: synthWithBackoff + the bounded repair classes the
- * legacy single-module path uses (envelope-parse repair ×1; export-binding /
- * soft-forbidden / missing-signature repair ×1; deterministic export
+ * legacy single-module path uses (envelope-parse repair Ã—1; export-binding /
+ * soft-forbidden / missing-signature repair Ã—1; deterministic export
  * injection last-mile). Returns the accepted envelope (+ T5.4: the SERVED
  * model id of this chunk's primary synthesis call, for the tree artifact's
- * provenance) or the coded failure — brief-fit is deliberately NOT a per-chunk
+ * provenance) or the coded failure â€” brief-fit is deliberately NOT a per-chunk
  * gate (tree-level fit runs on the assembled entry; nouns spread across files).
  */
 async function synthesizeChunkEnvelope(
@@ -8476,23 +8574,23 @@ async function synthesizeChunkEnvelope(
   opts: DeepSeekCompleteOptions,
   signatureNames: string[],
   treeFailure?: string,
-  /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level —
+  /** T-107.1 (216r Â· W7-L1): the opt-in patch (str_replace) repair level â€”
    *  absent keeps every prompt byte and the model-call count legacy. */
   patch?: PatchRepairOptions,
   onAttempt?: (attempt: number, res: LlmResult) => void,
-  /** 217k (W12 LANE B · G6): the unreadable-reply sink for this chunk's
+  /** 217k (W12 LANE B Â· G6): the unreadable-reply sink for this chunk's
    *  envelope reads (the caller knows the planned file path); absent keeps the
    *  legacy no-op. */
   readSink?: EnvelopeReadSink,
   /** W45/331-4 (Finding B): the earlier chunks of THIS tree (path + exports). The
-   *  module must not redeclare any of their exported names — the materializer imports
+   *  module must not redeclare any of their exported names â€” the materializer imports
    *  them. W46/332-1 (P1): an `asyncExports` mark lets the validator refuse an
-   *  un-awaited async sibling call used as a value. Absent ⇒ the legacy validation
+   *  un-awaited async sibling call used as a value. Absent â‡’ the legacy validation
    *  (single-module path), byte-identical. */
   priorChunks?: readonly { path: string; exports: readonly string[]; asyncExports?: readonly string[]; signatures?: readonly string[] }[],
-  /** fixes/349 (P6 convergence): the shared interface contract this tree emits —
+  /** fixes/349 (P6 convergence): the shared interface contract this tree emits â€”
    *  the contract type names the module must NOT redeclare, plus their full
-   *  definitions (quoted by the reconcile repair). Absent/null ⇒ the legacy
+   *  definitions (quoted by the reconcile repair). Absent/null â‡’ the legacy
    *  validation, byte-identical. */
   contracts?: { names: readonly string[]; definitions: readonly InterfaceTypeDefinition[] } | null,
 ): Promise<{ ok: true; envelope: SynthesisEnvelope; servedModel: string } | { ok: false; code: ErrorCode; error: string }> {
@@ -8515,7 +8613,7 @@ async function synthesizeChunkEnvelope(
     lastRead = failure;
     readSink?.(failure);
   };
-  // fixes/153 (P1): sequential attempt numbering per chunk — one event per
+  // fixes/153 (P1): sequential attempt numbering per chunk â€” one event per
   // model call (synthWithBackoff retries + each bounded repair re-prompt); an
   // absent observer keeps this path the exact legacy no-op.
   const completeCall = attemptObservedComplete(complete, (attempt, res) => onAttempt?.(attempt, res));
@@ -8532,7 +8630,7 @@ async function synthesizeChunkEnvelope(
   }
   let envelope = parseSynthesisEnvelope(res.text, sink);
   if (envelope === null) {
-    // W61 lane D (D1): a LEGAL refusal is not an unparseable reply — surface the
+    // W61 lane D (D1): a LEGAL refusal is not an unparseable reply â€” surface the
     // coded refusal and skip the repair call (no repair for a stated refusal).
     const refusal = parseSynthesisRefusal(res.text);
     if (refusal !== null) {
@@ -8559,7 +8657,7 @@ async function synthesizeChunkEnvelope(
   let validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames, priorChunks, contractNames, validationOptions);
   if (!validation.ok) {
     // fixes/349-P6 (Fix 1): a too-large candidate is SHRUNK deterministically
-    // before any model call — compactModuleUnderBound removes comments and blank
+    // before any model call â€” compactModuleUnderBound removes comments and blank
     // lines (both masks ignore comments, `tsc` ignores them) so a valid but
     // over-bound module is repaired, never refused outright.
     if (envelope.module.length > P6_MODULE_MAX_CHARS) {
@@ -8609,7 +8707,7 @@ async function synthesizeChunkEnvelope(
     // used without `await`), the same detector the validator applies.
     const asyncUses = unawaitedAsyncValueUses(envelope.module, asyncNamesInScope(envelope.module, priorChunks));
     // 216f (T-09/T-15): same two new bounded repair classes as the single-module
-    // path — prose-in-code and Math.random each get ONE re-prompt naming the
+    // path â€” prose-in-code and Math.random each get ONE re-prompt naming the
     // exact defect; a repeat is refused. This is the LLM CHUNK gate: the only
     // modules that ever reach it are model-authored chunk envelopes.
     const nondet = nondeterministicPrimitiveHit(masked);
@@ -8622,9 +8720,9 @@ async function synthesizeChunkEnvelope(
     // BF-5 (SYNTHSPEC A5): the money-semantics class (one bounded repair).
     const money = moneySemanticsHits(envelope.module);
     // fixes/354 (TS2554): a direct call to an earlier chunk's export with the
-    // wrong argument count — the validator refuses it; this drives the repair.
+    // wrong argument count â€” the validator refuses it; this drives the repair.
     const arity = siblingCallArityMismatches(envelope.module, validationOptions.siblingSignatures);
-    // T-107.1 (216r · W7-L1): the patch-first delta repair, ONLY when the
+    // T-107.1 (216r Â· W7-L1): the patch-first delta repair, ONLY when the
     // caller opted in and the defect is a LOCALIZED text edit (soft forbidden
     // token / non-deterministic primitive / prose). A landed delta is applied
     // by `applyStrReplace` against the module the model just produced for THIS
@@ -8632,10 +8730,10 @@ async function synthesizeChunkEnvelope(
     // non-landing outcome (no excerpt, non-delta reply, coded refusal, patched
     // module still invalid) falls through to the legacy full-rewrite repair
     // with its prompt bytes unchanged.
-    // 216r (W9-L2 · DEFECT 2): the single-module-site fix, mirrored — a landed
+    // 216r (W9-L2 Â· DEFECT 2): the single-module-site fix, mirrored â€” a landed
     // delta that REVALIDATES leaves no legacy repair class open on the patched
     // bytes, so `patchLanded` short-circuits the legacy block below (whose
-    // parseable reply used to overwrite the patched chunk envelope: 216r §2
+    // parseable reply used to overwrite the patched chunk envelope: 216r Â§2
     // defect 2).
     let patchLanded = false;
     if (patch !== undefined) {
@@ -8711,7 +8809,7 @@ async function synthesizeChunkEnvelope(
         if (repaired) {
           envelope = repaired;
           validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames, priorChunks, contractNames, validationOptions);
-          // A repaired reply can STILL be over-size — compact it deterministically
+          // A repaired reply can STILL be over-size â€” compact it deterministically
           // rather than burn the refusal (Fix 1 convergence).
           if (!validation.ok && envelope.module.length > P6_MODULE_MAX_CHARS) {
             const compact = compactModuleUnderBound(envelope.module);
@@ -8744,10 +8842,10 @@ async function synthesizeChunkEnvelope(
  * fixes/144 (M2): honest partial refusal for the chunked path. Prior chunks'
  * accepted files stay REAL on the returned project (generatedTree +
  * generatedSource = the assembled partial entry; modelRoute derives from the
- * SERVED model of the first accepted chunk — FM-04), and a p6.synthesis.refused
+ * SERVED model of the first accepted chunk â€” FM-04), and a p6.synthesis.refused
  * warn log records the refused chunk index (chunkIndex -1 = all chunks
  * accepted but the tree-level brief-fit gate failed). When chunk 0 itself
- * refuses nothing real exists — the deterministic floor stands untouched.
+ * refuses nothing real exists â€” the deterministic floor stands untouched.
  * Never a fabricated full pass.
  */
 function partialTreeRefuse(
@@ -8758,9 +8856,9 @@ function partialTreeRefuse(
   code: ErrorCode,
   detail: string,
   /** FM-04 (W37 Y1): the SERVED model id of the first accepted chunk (null
-   *  when chunk 0 itself refused) — the route label derives from it. */
+   *  when chunk 0 itself refused) â€” the route label derives from it. */
   servedModel: string | null = null,
-  /** fixes/349: the shared interface contract — the partial tree's chunks keep
+  /** fixes/349: the shared interface contract â€” the partial tree's chunks keep
    *  their injected aliases consistent. */
   contracts: TreeTypeDefinitions = null,
 ): Project {
@@ -8773,7 +8871,7 @@ function partialTreeRefuse(
           generatedSource: materialized.entrySource,
           // FM-04 (W37 Y1): the SERVED route of the first accepted chunk.
           modelRoute: modelRouteForServed(servedModel),
-          // 216 (T-06 / F-02) + W-05 (W29 · R9-f02): the partial tree REPLACED
+          // 216 (T-06 / F-02) + W-05 (W29 Â· R9-f02): the partial tree REPLACED
           // the artifact the floor's `tests.pass` stamp describes, so carrying
           // that stamp forward let `p6-test` (dod.ts probe) read green for
           // untested code. Invalidate EXACTLY as treeUpgraded does; the only
@@ -8782,7 +8880,7 @@ function partialTreeRefuse(
         }
       : project;
   const where = chunkIndex < 0 ? `tree ${chunkTotal}/${chunkTotal} chunks accepted` : `chunk ${chunkIndex + 1}/${chunkTotal} refused`;
-  return refuse(base, code, `${where} · ${detail}`);
+  return refuse(base, code, `${where} Â· ${detail}`);
 }
 
 /**
@@ -8792,10 +8890,10 @@ function partialTreeRefuse(
  * the SERVED model tier (`modelRouteForServed`: `deepseek-flash` for the
  * armed-default flash synthesis, `deepseek-pro` only when a pro id was really
  * served), one kind-"code" artifact whose body is the assembled entry (titled
- * with the file count — never claims machine verification: lastTest stays
+ * with the file count â€” never claims machine verification: lastTest stays
  * untouched, so no "tested" stamp is fabricated at synthesis, BEFORE the tree
  * machine-run lane has executed anything). fixes/147 (E2): the honest "tested"
- * promotion for a chunked tree is mintTreeRunTested() — the post-tree-run seam
+ * promotion for a chunked tree is mintTreeRunTested() â€” the post-tree-run seam
  * callers (driveP6Journey / run-eval) invoke ONCE a green treeRun over the
  * assembled entry has actually executed specs. Synthesis alone can never mint it.
  */
@@ -8806,17 +8904,17 @@ function treeUpgraded(
   entry: string,
   chunkCount?: number,
   /** T5.4: the id the provider actually served for this tree's chunk
-   *  syntheses (the first accepted chunk's `LlmResult.model`). Null ⇒ no
-   *  stamp — fail closed. */
+   *  syntheses (the first accepted chunk's `LlmResult.model`). Null â‡’ no
+   *  stamp â€” fail closed. */
   servedModel: string | null = null,
 ): Project {
   const treeFiles = accepted.map((f) => toGeneratedTreeFile(f.path, f.source));
   const chunks = typeof chunkCount === "number" && chunkCount > 0 ? chunkCount : accepted.length;
   const manifest = treeFiles
-    .map((f) => `// ${f.path} · fnv1a ${f.hash} · ${f.source.split("\n").length} lines · attempt ${f.attempt}`)
+    .map((f) => `// ${f.path} Â· fnv1a ${f.hash} Â· ${f.source.split("\n").length} lines Â· attempt ${f.attempt}`)
     .join("\n");
   const evidenceHash = String(fnv1a(entry));
-  // T5.4: the tree artifact's stamp — the SERVED model id + the synthesis
+  // T5.4: the tree artifact's stamp â€” the SERVED model id + the synthesis
   // input hash (the persisted brief hash); absent when the served id is
   // unusable (never a guessed producer).
   const prov = modelProvenance(servedModel, specRecord.briefHash);
@@ -8824,7 +8922,7 @@ function treeUpgraded(
     id: `6-code-tree-${evidenceHash.slice(0, 8)}`,
     phase: 6,
     kind: "code",
-    title: `Generated source tree (LLM — ${treeFiles.length} files, chunked synthesis)`,
+    title: `Generated source tree (LLM â€” ${treeFiles.length} files, chunked synthesis)`,
     body: `${manifest}\n\n${entry}`,
     language: "javascript",
     ...(prov ? { provenance: prov } : {}),
@@ -8878,7 +8976,7 @@ function treeUpgraded(
         phase: 6 as PhaseId,
         level: "info" as const,
         event: "p6.synthesis",
-        detail: `Chunked synthesis: ${treeFiles.length} file(s) in ${chunks} chunk(s) · deterministic per-file validation · assembled entry ${entry.length} chars · machine tree-run is the tree-run lane's step`,
+        detail: `Chunked synthesis: ${treeFiles.length} file(s) in ${chunks} chunk(s) Â· deterministic per-file validation Â· assembled entry ${entry.length} chars Â· machine tree-run is the tree-run lane's step`,
       },
     ].slice(-200),
   });
@@ -8886,8 +8984,8 @@ function treeUpgraded(
 
 // --- fixes/147 (E2): tested-equivalent mint after a GREEN tree-run -----------
 // Divergence #2 (fixes/146): a chunked tree (>8 signatures) could never mint a
-// "tested" lastTest — only the ≤8-signature single-module path ran
-// verifyAndFixServer and minted label:"tested" — so p6-verified / M3 / M4 were
+// "tested" lastTest â€” only the â‰¤8-signature single-module path ran
+// verifyAndFixServer and minted label:"tested" â€” so p6-verified / M3 / M4 were
 // unsatisfiable for every chunked tree, and a keyed enforceDod run hard-stalled
 // at the P6 DoD park. The mint cannot live inside treeUpgraded(): at synthesis
 // the machine tree-run has NOT executed anything, so a stamp there would be
@@ -8897,9 +8995,9 @@ function treeUpgraded(
 
 /**
  * PR-30 / BF-6 (S-side mint half): a stable FNV-1a digest over the tree's OWN
- * bytes — per-file path + content hash, sorted — so a "tested" evidenceHash
+ * bytes â€” per-file path + content hash, sorted â€” so a "tested" evidenceHash
  * identifies the TREE it describes, not merely the generic run summary.
- * BUILD_FORENSICS §3.8: the summary-only hash reused `761559975` across three
+ * BUILD_FORENSICS Â§3.8: the summary-only hash reused `761559975` across three
  * distinct projects (flower/scheduler/stock v1), so the machine-acceptance
  * reading could not be treated as per-tree external evidence. Each row's
  * `hash` (toGeneratedTreeFile: fnv1a(source)) is folded; a legacy row without
@@ -8915,7 +9013,7 @@ export function treeBytesDigest(files: unknown): string {
     const r = f as { path?: unknown; hash?: unknown; source?: unknown };
     const path = typeof r.path === "string" ? r.path : "";
     if (!path) continue;
-    // Always hash the SOURCE bytes when present — a stored `hash` could be
+    // Always hash the SOURCE bytes when present â€” a stored `hash` could be
     // stale relative to an edited source, and a stale digest would let two
     // different trees collide again. The stored hash is a legacy fallback only.
     const fileHash =
@@ -8932,13 +9030,13 @@ export function treeBytesDigest(files: unknown): string {
 }
 
 /** Deterministic evidence summary of a green TreeRunOutcome (rel spec paths +
- *  verdicts + counts only — never the run dir, timings or detail prose, so the
+ *  verdicts + counts only â€” never the run dir, timings or detail prose, so the
  *  fnv1a evidence hash reproduces across hosts). `executed` is the honesty
- *  gate: at least one spec file actually ran, executed ≥1 assertion, AND
- *  carried ≥1 BEHAVIOURAL assertion (346 E1 · item 2 — a shape-only spec may
+ *  gate: at least one spec file actually ran, executed â‰¥1 assertion, AND
+ *  carried â‰¥1 BEHAVIOURAL assertion (346 E1 Â· item 2 â€” a shape-only spec may
  *  not certify "tested" on its own; specs predating the field stay counted).
  *
- *  W48/334-1c: the DECLARED-SCRIPT state is decisive evidence too — a green run
+ *  W48/334-1c: the DECLARED-SCRIPT state is decisive evidence too â€” a green run
  *  whose emitted `package.json` scripts (`typecheck`/`build`) never executed
  *  must not mint the same evidence as one whose toolchain really ran (the F-4
  *  lesson one level deeper: an evidence hash must not conflate a state the
@@ -8962,7 +9060,7 @@ export function treeRunTestedEvidence(o: TreeRunOutcome): {
   // `behavioural: false`.
   const behaviouralSpecs = specs.filter((t) => t.behavioural !== false);
   const assertions = specs.reduce((n, t) => n + (t.tests?.pass ?? 0), 0);
-  // F3-16 (fixes/294 N2): identify WHICH specs passed — counts alone let two
+  // F3-16 (fixes/294 N2): identify WHICH specs passed â€” counts alone let two
   // different trees (equal compile/spec/assertion numbers) mint the identical
   // evidence hash. Sorted rel spec paths restore the "rel spec paths" the doc
   // above promises; deterministic + host-independent (never the run dir,
@@ -8982,21 +9080,21 @@ export function treeRunTestedEvidence(o: TreeRunOutcome): {
   const run = o.run;
   const summary = [
     `compile ${o.compile.passed}/${o.compile.checked} file(s)`,
-    `${specs.length} spec file(s) pass · ${assertions} assertion(s)`,
+    `${specs.length} spec file(s) pass Â· ${assertions} assertion(s)`,
     ...(specPaths.length > 0 ? [`specs [${specPaths.join(", ")}]`] : []),
     ...(run ? [`entry ${run.kind} ${run.run}`] : []),
     ...(declaredUnverified
       ? [`declared-scripts unverified${unverifiedScripts.length > 0 ? ` [${unverifiedScripts.join(", ")}]` : ""}`]
       : []),
     ...(entrySkipped ? ["entry-skipped"] : []),
-  ].join(" · ");
+  ].join(" Â· ");
   return {
     executed: specs.length > 0 && assertions > 0 && behaviouralSpecs.length > 0,
     specFiles: specs.length,
     assertions,
     // fixes/354 (A1-E13): the EXECUTION state of the emitted package's DECLARED
     // scripts, exposed as a first-class field (not only folded into the prose
-    // summary) so a consumer — the mint seam here, and dod's p6-verified probe —
+    // summary) so a consumer â€” the mint seam here, and dod's p6-verified probe â€”
     // can gate on it without parsing prose.
     declaredScriptsVerified: !declaredUnverified,
     unverifiedDeclaredScripts: unverifiedScripts,
@@ -9007,7 +9105,7 @@ export function treeRunTestedEvidence(o: TreeRunOutcome): {
 /** fixes/354 (A1-E13): does the emitted SUBJECT tree carry its OWN installed
  *  toolchain? `outcome.dir` is the normalized subject dir (never the deleted
  *  temp copy), so this is exactly "the declared scripts COULD have run here".
- *  A missing/blank dir (fixture outcomes) reads false — the honest
+ *  A missing/blank dir (fixture outcomes) reads false â€” the honest
  *  fresh-temp-dir state the mint must keep working on. Never throws. */
 function treeHasNodeModules(dir: unknown): boolean {
   if (typeof dir !== "string" || dir.length === 0) return false;
@@ -9019,28 +9117,28 @@ function treeHasNodeModules(dir: unknown): boolean {
 }
 
 /**
- * fixes/147 (E2): mint the E-07 "tested" lastTest after a green tree-run —
- * honest ONLY when the run actually executed specs (outcome.ok AND ≥1 spec
- * file with run:"pass" AND ≥1 executed assertion). Detail = the deterministic
- * run summary ("tree-run green: …"); evidenceHash = fnv1a over that summary.
+ * fixes/147 (E2): mint the E-07 "tested" lastTest after a green tree-run â€”
+ * honest ONLY when the run actually executed specs (outcome.ok AND â‰¥1 spec
+ * file with run:"pass" AND â‰¥1 executed assertion). Detail = the deterministic
+ * run summary ("tree-run green: â€¦"); evidenceHash = fnv1a over that summary.
  *
  * Honesty gates (never a fabricated pass):
  *  - a RED outcome returns the SAME project reference (the journey records the
- *    failure tail — a mint here would be a fake pass);
- *  - a project already carrying a machine "tested" stamp (the ≤8-signature
+ *    failure tail â€” a mint here would be a fake pass);
+ *  - a project already carrying a machine "tested" stamp (the â‰¤8-signature
  *    verifyAndFixServer path, OR an earlier tree-run mint) is compared by its
  *    recorded `evidenceHash`: the SAME verdict keeps the stamp unchanged
  *    (`p6.tree.tested.unchanged` says so, no rewrite); a DIFFERENT verdict
  *    refreshes the stamp from THIS tree-run (`p6.tree.tested.refreshed`, both
  *    hashes named) so the record never carries a hash that describes a
- *    different verification state (fixes/336 · 336-2);
+ *    different verification state (fixes/336 Â· 336-2);
  *  - an ok tree-run that executed NO specs (UI-shell/webapp tree without
- *    executable specs, or a no-spec headless tree) is NOT minted — the honest
+ *    executable specs, or a no-spec headless tree) is NOT minted â€” the honest
  *    current state stands and a coded `p6.tree.tested.skipped` warn log
  *    explains why, so a later reader never mistakes the absence for a pass;
  *  - fixes/354 (A1-E13): an ok tree-run whose emitted package DECLARED
  *    `typecheck`/`build` scripts that never ran, on a tree that CARRIES its own
- *    `node_modules`, is NOT minted either — the toolchain was installed and the
+ *    `node_modules`, is NOT minted either â€” the toolchain was installed and the
  *    verification gap is real. A tree with no `node_modules` (the fresh temp
  *    dir the P6 journey always emits to) still mints, so the criterion is
  *    satisfiable.
@@ -9057,7 +9155,7 @@ export function mintTreeRunTested(project: Project, outcome: TreeRunOutcome): Pr
     if (alreadyTested) return project;
     const skipNote = `tree-run ok but no executable spec ran (${ev.specFiles} spec file(s), ${ev.assertions} assertion(s)${
       outcome.run ? `; entry ${outcome.run.kind} ${outcome.run.run}` : ""
-    }) — no "tested" stamp minted (honest: nothing executed headless)`;
+    }) â€” no "tested" stamp minted (honest: nothing executed headless)`;
     return {
       ...project,
       logs: [
@@ -9076,7 +9174,7 @@ export function mintTreeRunTested(project: Project, outcome: TreeRunOutcome): Pr
   // toolchain that never ran must not mint the same "tested" evidence as one
   // whose declared scripts really ran. On a tree that CARRIES its own
   // `node_modules`, an unverified declared script means the toolchain was
-  // installed and still did not execute — a verification gap, not the honest
+  // installed and still did not execute â€” a verification gap, not the honest
   // fresh-temp-dir skip. Refuse the mint there (no stamp, a coded skip row); the
   // no-node_modules case still mints, so the criterion stays satisfiable.
   if (!ev.declaredScriptsVerified && treeHasNodeModules(outcome.dir)) {
@@ -9092,22 +9190,22 @@ export function mintTreeRunTested(project: Project, outcome: TreeRunOutcome): Pr
           event: "p6.tree.tested.skipped",
           detail: `tree-run ok but the emitted package's declared scripts did NOT run (${
             ev.unverifiedDeclaredScripts.join(", ") || "declared scripts"
-          }) while the tree carries node_modules — the toolchain was installed and never verified, so no "tested" stamp is minted`,
+          }) while the tree carries node_modules â€” the toolchain was installed and never verified, so no "tested" stamp is minted`,
         },
       ].slice(-200),
     };
   }
   // BF-6 (PR-30): bind the evidence hash to the TREE BYTES, not just the
-  // generic run summary — two distinct trees must never share a "tested" hash.
-  // No generatedTree ⇒ treeDigest "" ⇒ the pre-BF-6 summary hash is preserved.
+  // generic run summary â€” two distinct trees must never share a "tested" hash.
+  // No generatedTree â‡’ treeDigest "" â‡’ the pre-BF-6 summary hash is preserved.
   const treeDigest = treeBytesDigest(project.generatedTree);
-  const evidenceHash = String(fnv1a(treeDigest ? `${ev.summary} · tree ${treeDigest}` : ev.summary));
+  const evidenceHash = String(fnv1a(treeDigest ? `${ev.summary} Â· tree ${treeDigest}` : ev.summary));
   if (alreadyTested) {
     // 336-2 follow-up: an already-"tested" project must not keep an evidence
     // hash that describes a DIFFERENT verification (the same two-artifacts-
-    // disagree class as the stale packet). Same verdict ⇒ the stamp already
-    // describes this tree-run: keep it, say so, do not rewrite. Different ⇒
-    // the record must not keep a stale hash — refresh from THIS verdict.
+    // disagree class as the stale packet). Same verdict â‡’ the stamp already
+    // describes this tree-run: keep it, say so, do not rewrite. Different â‡’
+    // the record must not keep a stale hash â€” refresh from THIS verdict.
     if (typeof current?.evidenceHash === "string" && current.evidenceHash === evidenceHash) {
       return {
         ...project,
@@ -9118,7 +9216,7 @@ export function mintTreeRunTested(project: Project, outcome: TreeRunOutcome): Pr
             phase: 6 as PhaseId,
             level: "info" as const,
             event: "p6.tree.tested.unchanged",
-            detail: `tested stamp already describes this tree-run · fnv1a ${evidenceHash.slice(0, 8)} — kept (no rewrite)`,
+            detail: `tested stamp already describes this tree-run Â· fnv1a ${evidenceHash.slice(0, 8)} â€” kept (no rewrite)`,
           },
         ].slice(-200),
       };
@@ -9137,7 +9235,7 @@ export function mintTreeRunTested(project: Project, outcome: TreeRunOutcome): Pr
           phase: 6 as PhaseId,
           level: "warn" as const,
           event: "p6.tree.tested.refreshed",
-          detail: `tested stamp refreshed — recorded evidence ${prior} did not describe this tree-run · fnv1a ${evidenceHash.slice(0, 8)}`,
+          detail: `tested stamp refreshed â€” recorded evidence ${prior} did not describe this tree-run Â· fnv1a ${evidenceHash.slice(0, 8)}`,
         },
       ].slice(-200),
     };
@@ -9152,7 +9250,7 @@ export function mintTreeRunTested(project: Project, outcome: TreeRunOutcome): Pr
         phase: 6 as PhaseId,
         level: "info" as const,
         event: "p6.tree.tested",
-        detail: `tested-equivalent minted after green tree-run · ${ev.summary} · fnv1a ${evidenceHash.slice(0, 8)}`,
+        detail: `tested-equivalent minted after green tree-run Â· ${ev.summary} Â· fnv1a ${evidenceHash.slice(0, 8)}`,
       },
     ].slice(-200),
   };

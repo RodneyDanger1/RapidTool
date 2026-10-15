@@ -1,5 +1,6 @@
+// W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left.
 // ---------------------------------------------------------------------------
-// scaffold.test.ts — E-15 scaffold emitter + E-27 shipped-artifact notes
+// scaffold.test.ts â€” E-15 scaffold emitter + E-27 shipped-artifact notes
 // (src/lib/scaffold.ts). Pure, deterministic, no disk writes.
 // Run: node --experimental-strip-types --test src/lib/scaffold.test.ts
 // ---------------------------------------------------------------------------
@@ -17,7 +18,7 @@ import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
 import type { Project, SpecGraph } from "./types.ts";
 import { DEPLOY_HONESTY_STAMP, CAUTION_ALERT_LEAD, cjsResidueHits, deployNotes, deplyNotes, declaredSurfaceNamesOf, projectKindOf, readmeLeadsWithCautionBanner, scaffoldProject, surfaceTreeRows, underProductionRefusalOf, withheldTreeReadmeNote } from "./scaffold.ts";
 import { emitSoftware } from "./software-export.ts";
-import type { ScaffoldFile, ScaffoldResult } from "./scaffold.ts";
+import type { ProjectKind, ScaffoldFile, ScaffoldResult } from "./scaffold.ts";
 import { declaredSurfaceNames, productSurfaceKindOf, productSurfaceTrace } from "./dod.ts";
 import { deliveryKindOf, withDeliveryKind } from "./engine.ts";
 import { compileFixtureAssertion, fixtureMatchHelperSource } from "./brief-fixtures.ts";
@@ -33,7 +34,7 @@ const primed = (over: Partial<Project> = {}) => runHeadless(seedProject(over), [
  * Assert ok and return the NARROWED ok-arm. `ScaffoldResult` is a discriminated
  * union and `assert.ok(result.ok)` does not narrow it, so a caller that needs an
  * ok-only field (`gameTemplate` / `underProduced` / `uiGeneration`) must come
- * through here — `assert.fail` is typed `never`, which is what narrows.
+ * through here â€” `assert.fail` is typed `never`, which is what narrows.
  */
 function okResult(result: ScaffoldResult): Extract<ScaffoldResult, { ok: true }> {
   if (!result.ok) assert.fail(`expected ok: ${result.error}`);
@@ -82,7 +83,7 @@ describe("projectKindOf (E-15 kind mapping + inference)", () => {
 
   it("341-1: a brief naming a library is not captured by a surface noun (agrees with engine.uiKindOf)", () => {
     // "board" is a webapp keyword and previously won over "library" because
-    // webapp was checked first — while engine.uiKindOf resolved library and the
+    // webapp was checked first â€” while engine.uiKindOf resolved library and the
     // P6 module came out library-shaped (kind left absent). RED before the
     // precedence fix: this asserted "webapp".
     assert.equal(
@@ -93,7 +94,7 @@ describe("projectKindOf (E-15 kind mapping + inference)", () => {
     assert.equal(projectKindOf(primed({ brief: "A kanban board for dispatch teams" })), "webapp");
   });
 
-  it("342-4: a STORED kind is the single source of truth — projectKindOf never re-infers against it", () => {
+  it("342-4: a STORED kind is the single source of truth â€” projectKindOf never re-infers against it", () => {
     // A stored library kind must win over the brief's webapp surface noun:
     // the resolver reads the ONE decided value instead of re-deriving a second
     // kind from the brief. RED before: the declared-kind branch had no library
@@ -108,12 +109,12 @@ describe("projectKindOf (E-15 kind mapping + inference)", () => {
 
   it("342-4: engine decision == scaffold decision == one value, for the kanban library brief", () => {
     const p = primed({ brief: "A kanban board library exposing a typed board client" });
-    // The engine decides ONCE (library wins over the "board" surface noun)…
+    // The engine decides ONCE (library wins over the "board" surface noun)â€¦
     assert.equal(deliveryKindOf(p), "library");
-    // …stamps that single value onto the project…
+    // â€¦stamps that single value onto the projectâ€¦
     const decided = withDeliveryKind(p);
     assert.equal(decided.kind, "library");
-    // …and the scaffold resolver reads it back — no second inference.
+    // â€¦and the scaffold resolver reads it back â€” no second inference.
     assert.equal(projectKindOf(decided), "library");
     // The emitted tree is a real library PACKAGE (main/exports/files, no index.html).
     const files = okFiles(scaffoldProject(decided));
@@ -126,7 +127,7 @@ describe("projectKindOf (E-15 kind mapping + inference)", () => {
   });
 });
 
-describe("scaffoldProject — file-tree shape per kind", () => {
+describe("scaffoldProject â€” file-tree shape per kind", () => {
   it("emits the full root file set for an app (declared kind) project", () => {
     const p = fullRun({ kind: "app" });
     const files = okFiles(scaffoldProject(p));
@@ -157,7 +158,7 @@ describe("scaffoldProject — file-tree shape per kind", () => {
     assert.match((result as { ok: true; summary: string }).summary, /kind webapp/);
   });
 
-  it("T4.2 (217f): emits a deterministic .gitignore — ignore list pinned, reviewed artifacts tracked", () => {
+  it("T4.2 (217f): emits a deterministic .gitignore â€” ignore list pinned, reviewed artifacts tracked", () => {
     // Single-module mode (the legacy hosted-module emit).
     const result = scaffoldProject(fullRun());
     const body = bodyOf(result, ".gitignore");
@@ -206,7 +207,7 @@ describe("scaffoldProject — file-tree shape per kind", () => {
     assert.equal(pkg.name, slugName(p.name));
     const ui = bodyOf(result, "src/ui/console.tsx");
     // 216d (106 T-05 / F-03): the emitted shell imports the module the emitter
-    // ACTUALLY writes — here the hosted P6 module (the first job-* node),
+    // ACTUALLY writes â€” here the hosted P6 module (the first job-* node),
     // resolved relative to src/ui/. OLD assertion: `ui.includes("../generated")`
     // pinned the literal "../generated.ts", a path the tree allow-list refuses
     // and nothing ever wrote (a guaranteed dangling specifier in every emit).
@@ -235,9 +236,9 @@ describe("scaffoldProject — file-tree shape per kind", () => {
     const result = scaffoldProject(p);
     const pkg = JSON.parse(bodyOf(result, "package.json")) as Record<string, any>;
     // W52 / 338-5: `tsx` was declared on cli-tool/service but NO emitted script or
-    // import ever used it (the entries run `node --experimental-strip-types`) —
+    // import ever used it (the entries run `node --experimental-strip-types`) â€”
     // declare-or-strike: a dev tool nothing consumes is not declared.
-    assert.ok(!pkg.devDependencies.tsx, "no unused tsx devDep — the emitted scripts run node --experimental-strip-types");
+    assert.ok(!pkg.devDependencies.tsx, "no unused tsx devDep â€” the emitted scripts run node --experimental-strip-types");
     assert.ok(!pkg.scripts.dev && !pkg.scripts.build, "no vite scripts for a tool");
     assert.ok(pkg.scripts.test.includes("--test tests/oracle.spec.ts"));
     const ui = bodyOf(result, "src/ui/console.tsx");
@@ -311,8 +312,8 @@ describe("scaffoldProject — file-tree shape per kind", () => {
       files.every((f) => !f.path.startsWith("src/") || f.path === "src/main.tsx" || f.path === "src/styles.css"),
       "only the boot-shell src entry without a spec graph",
     );
-    // fixes/217f (T4.2) + fixes/352: the emitted file set grew again — 11 files
-    // (338-5) → 13 (the LICENSE + CI workflow every professional tree ships).
+    // fixes/217f (T4.2) + fixes/352: the emitted file set grew again â€” 11 files
+    // (338-5) â†’ 13 (the LICENSE + CI workflow every professional tree ships).
     assert.ok((result as { ok: true; summary: string }).summary.startsWith("13 files"));
   });
 
@@ -324,7 +325,7 @@ describe("scaffoldProject — file-tree shape per kind", () => {
   });
 });
 
-describe("scaffoldProject — generated source + artifacts placement", () => {
+describe("scaffoldProject â€” generated source + artifacts placement", () => {
   it("hosts the machine-verified P6 module verbatim on the first job node", () => {
     const p = fullRun();
     assert.ok(p.generatedSource.length > 0, "fixture must have generated code");
@@ -333,7 +334,7 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
     const host = bodyOf(result, hostNode.file);
     assert.ok(host.includes("const JOBS = ["), "generated module embedded");
     // fixes/135: the host may append an exports/export surface after the
-    // generated module (so tests/oracle.spec.ts can import its names) — the
+    // generated module (so tests/oracle.spec.ts can import its names) â€” the
     // generated source itself must still be embedded byte-for-byte.
     assert.ok(host.includes(p.generatedSource.trim()), "generated source embedded verbatim");
     // exactly one emitted src module carries the generated code (.rapidtool/project.json
@@ -342,7 +343,7 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       (f) => f.path.startsWith("src/") && f.body.includes("const JOBS = ["),
     );
     assert.equal(carriers.length, 1);
-    // leftover job-* nodes re-export the hosted module (fixes/196) — never a
+    // leftover job-* nodes re-export the hosted module (fixes/196) â€” never a
     // throw stub and never an invented job body.
     const job1 = p.specGraph!.nodes.find((n) => n.id === "job-1");
     if (job1) {
@@ -367,12 +368,12 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
     assert.equal(rows.length, p.contracts!.endpoints.length);
   });
 
-  it("turns A7 oracle rows into REAL assertions in tests/oracle.spec.ts (no TODO stubs — fixes/135)", () => {
+  it("turns A7 oracle rows into REAL assertions in tests/oracle.spec.ts (no TODO stubs â€” fixes/135)", () => {
     const p = fullRun();
     const result = scaffoldProject(p);
     const spec = bodyOf(result, "tests/oracle.spec.ts");
     const testLines = spec.split("\n").filter((l) => l.trimStart().startsWith("test("));
-    // ≥ oracle rows: the spec adds module-truth + store/api surface tests on
+    // â‰¥ oracle rows: the spec adds module-truth + store/api surface tests on
     // top of one test per pinned oracle row (fixes/135 real-assertion contract).
     assert.ok(testLines.length >= p.oracle.length, "at least one test per oracle row");
     for (const row of p.oracle) {
@@ -380,15 +381,15 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
     }
     // The E-15 stub era is gone: every oracle row pins a test that asserts
     // what the emitted modules ACTUALLY do (module truth / store-api surface /
-    // honest stub-rejection) — no `todo: true` rows.
-    assert.ok(!spec.includes("{ todo: true }"), "no todo stubs — real assertions only");
+    // honest stub-rejection) â€” no `todo: true` rows.
+    assert.ok(!spec.includes("{ todo: true }"), "no todo stubs â€” real assertions only");
     assert.ok(/PINNED/.test(spec), "verify-harness id-pinning pointer present");
     assert.ok(spec.includes('from "node:test"'), "runnable under node:test");
     assert.ok(spec.includes("assert."), "contains real assertions");
     // fixes/147 (E-15 paren canonicalization): the spec's stub-rejection rows
     // assert /TODO\(E-15\) stub/ against the emitted route() rejection, so the
     // emitted routes body must carry the canonical paren form (paren closes
-    // after "15" — never "TODO(E-15 stub)"). The regex must match both the
+    // after "15" â€” never "TODO(E-15 stub)"). The regex must match both the
     // emitted source and the simulated runtime message route() throws.
     const apiNode = p.specGraph!.nodes.find((n) => n.id === "api");
     assert.ok(apiNode, "fixture must carry an api node");
@@ -398,7 +399,7 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       /TODO\(E-15\) stub/,
       "emitted routes.ts carries the canonical marker the oracle reject-regex asserts",
     );
-    // fixes/328 P2: the emitted router now carries TWO coded refusals — an
+    // fixes/328 P2: the emitted router now carries TWO coded refusals â€” an
     // unrecorded endpoint (contract drift, `unknown endpoint`) and a recorded
     // endpoint whose job has no emitted implementation (the TODO stub form).
     // The oracle reject-regex targets the LATTER, so simulate that one; the
@@ -422,13 +423,13 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       unknownMsg!
         .replace("${method}", "GET")
         .replace("${path}", "/v1/example"),
-      /RT_E_VALIDATION · unknown endpoint GET \/v1\/example/,
+      /RT_E_VALIDATION Â· unknown endpoint GET \/v1\/example/,
       "the unknown-endpoint refusal is coded and names the unrecorded wire",
     );
   });
 
   // W60/346-6 C1: the emitted failure paths are SURFACED product failures. Each
-  // must carry the registered refusal code (I13) — never a bare message a tree
+  // must carry the registered refusal code (I13) â€” never a bare message a tree
   // consumer cannot classify. The `ErrorCode` annotation on the constant is the
   // typecheck tie; this scans the emitted throw lines at runtime.
   it("every emitted scaffold throw carries the registered refusal code (I13)", () => {
@@ -440,7 +441,7 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       `the emitted refusal code must be registered: ${decl![1]}`,
     );
     const throws = src.split("\n").filter((l) => /throw new Error\(/.test(l));
-    // Floor moved 12 → 11 by fixes/347-2: the per-kind runnable entries stopped
+    // Floor moved 12 â†’ 11 by fixes/347-2: the per-kind runnable entries stopped
     // being throw-stubs (the measured "CLI throws TODO(E-15) on every command"),
     // removing three coded-throw lines. The invariant below (every remaining
     // throw is coded) is unchanged; the floor only guards against the invariant
@@ -457,7 +458,7 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
   it("emits only the canonical TODO(E-15) stub marker in every file that mentions E-15 (fixes/147)", () => {
     // Regression for the E-15 paren mismatch: the oracle spec asserts
     // /TODO\(E-15\) stub/ (paren closes after "15"), so every emitted stub that
-    // mentions the marker must use that canonical form — the pre-fix
+    // mentions the marker must use that canonical form â€” the pre-fix
     // "TODO(E-15 stub)" (paren closing after "stub") made every stub-rejection
     // row fail. Sweep every kind flavor that emits marker-bearing stubs.
     const variants: Project[] = [
@@ -477,7 +478,7 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
         );
         assert.ok(
           !f.body.includes("TODO(E-15 stub"),
-          `${f.path}: pre-fix paren form — paren closes after "stub" instead of "15"`,
+          `${f.path}: pre-fix paren form â€” paren closes after "stub" instead of "15"`,
         );
       }
     }
@@ -554,14 +555,14 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       ],
     });
     const spec = bodyOf(result, "tests/oracle.spec.ts");
-    // fixes/353: the outcome is asserted behaviourally — a usable value for at
+    // fixes/353: the outcome is asserted behaviourally â€” a usable value for at
     // least one documented input, AND determinism for the input that succeeded.
     assert.match(spec, /assert\.notEqual\(jm_\w+Good, undefined, "job module "/, "the emitted row asserts a usable call outcome");
     assert.match(spec, /Number\.isFinite\(out\)/, "a NaN stub return (the L1-F2 shape) fails the row");
     assert.match(spec, /assert\.deepEqual\(await jm_\w+Fn\(jm_\w+GoodInput\), jm_\w+Good,/, "the succeeding input must yield the same outcome");
     assert.ok(
       specSourceHasBehaviouralAssert(spec),
-      "the emitted spec must carry ≥1 behavioural assertion, not only typeof/length probes",
+      "the emitted spec must carry â‰¥1 behavioural assertion, not only typeof/length probes",
     );
   });
 
@@ -572,7 +573,7 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
   });
 });
 
-describe("scaffoldProject — determinism", () => {
+describe("scaffoldProject â€” determinism", () => {
   it("returns byte-identical trees for the same project", () => {
     const p = fullRun({ kind: "game" });
     const a = scaffoldProject(p);
@@ -586,7 +587,7 @@ describe("scaffoldProject — determinism", () => {
     assert.deepEqual(fa, fb);
   });
 
-  it("keeps .env.example constant per kind — never derived from project text", () => {
+  it("keeps .env.example constant per kind â€” never derived from project text", () => {
     const p1 = fullRun({ kind: "app", name: "Alpha", brief: "completely different brief A" });
     const p2 = fullRun({ kind: "app", name: "Beta", brief: "completely different brief B" });
     const e1 = bodyOf(scaffoldProject(p1), ".env.example");
@@ -600,8 +601,8 @@ describe("scaffoldProject — determinism", () => {
   });
 });
 
-describe("scaffoldProject — escaping (hostile inputs)", () => {
-  const HOSTILE = 'A/B "quote" `tick` <script>alert(1)</script>\nline2 🧨';
+describe("scaffoldProject â€” escaping (hostile inputs)", () => {
+  const HOSTILE = 'A/B "quote" `tick` <script>alert(1)</script>\nline2 ðŸ§¨';
 
   function hostileProject(): Project {
     const base = seedProject({ kind: "app", name: HOSTILE });
@@ -610,7 +611,7 @@ describe("scaffoldProject — escaping (hostile inputs)", () => {
         {
           id: "job-0",
           file: "../../../etc/passwd",
-          purpose: "Implement job “drop table; --” against the contract",
+          purpose: "Implement job â€œdrop table; --â€ against the contract",
           dependsOn: [],
           owner: "implementer",
         },
@@ -703,7 +704,7 @@ describe("scaffoldProject — escaping (hostile inputs)", () => {
     const spec = bodyOf(result, "tests/oracle.spec.ts");
     // 216b (106 T-08 / F-05) + fixes/356 (W356 A3): a row with no real surface
     // to assert against no longer emits the tautological `test("<id>".length >
-    // 0)` floor, and no longer emits a reachable `assert.fail` either — it emits
+    // 0)` floor, and no longer emits a reachable `assert.fail` either â€” it emits
     // a MARKED, COUNTED skip under its pinned id. This test's intent is that the
     // rows exist and stay single-line (the escaping contract), so count every
     // emitted row-entry form.
@@ -712,7 +713,7 @@ describe("scaffoldProject — escaping (hostile inputs)", () => {
       return t.startsWith("test(") || t.startsWith("test.skip(");
     });
     assert.equal(rows.length, 2, "both oracle rows still materialise as single-line spec entries");
-    // The new contract, per row: an unwired row is VISIBLY marked — never a
+    // The new contract, per row: an unwired row is VISIBLY marked â€” never a
     // silent always-true assertion and never an unavoidable red.
     for (const l of rows) {
       assert.ok(
@@ -735,7 +736,7 @@ describe("scaffoldProject — escaping (hostile inputs)", () => {
   });
 });
 
-describe("scaffoldProject + deployNotes — no secrets, honest local-only framing", () => {
+describe("scaffoldProject + deployNotes â€” no secrets, honest local-only framing", () => {
   it("keeps .env.example to PLACEHOLDER values even when the project carries secrets", () => {
     const p = seedProject({
       kind: "app",
@@ -766,7 +767,7 @@ describe("scaffoldProject + deployNotes — no secrets, honest local-only framin
     for (const secret of ["sk-live-ABCDEF0123456789", "AKIAIOSFODNN7EXAMPLE", "hunter2"]) {
       assert.ok(!env.includes(secret), `.env.example leaked ${secret}`);
     }
-    // DEPLOY.md is composed from P9/P12 artifacts + kind defaults — never from memory/brief text.
+    // DEPLOY.md is composed from P9/P12 artifacts + kind defaults â€” never from memory/brief text.
     const notes = deployNotes(p);
     for (const secret of ["sk-live-ABCDEF0123456789", "AKIAIOSFODNN7EXAMPLE", "hunter2"]) {
       assert.ok(!notes.includes(secret), `DEPLOY.md leaked ${secret}`);
@@ -781,7 +782,7 @@ describe("scaffoldProject + deployNotes — no secrets, honest local-only framin
       "## Run locally",
       "## Environment",
       "## Test",
-      "## Deploy — human-gated, nothing automatic",
+      "## Deploy â€” human-gated, nothing automatic",
       "## Assets",
       "## Recorded pipeline templates (P9/P12)",
     ]) {
@@ -816,7 +817,7 @@ describe("scaffoldProject + deployNotes — no secrets, honest local-only framin
   });
 });
 
-describe("deployNotes — run/test/env/deploy steps exist and are executable-sounding", () => {
+describe("deployNotes â€” run/test/env/deploy steps exist and are executable-sounding", () => {
   it("lists real commands matching the emitted skeleton", () => {
     const p = fullRun({ kind: "tool" });
     const notes = deployNotes(p);
@@ -827,7 +828,7 @@ describe("deployNotes — run/test/env/deploy steps exist and are executable-sou
     const pkg = JSON.parse(bodyOf(scaffoldProject(p), "package.json")) as Record<string, any>;
     for (const script of Object.values(pkg.scripts) as string[]) {
       if (script.includes("--test")) {
-        // fixes/135: emitted tests are REAL assertions now — the notes tell the
+        // fixes/135: emitted tests are REAL assertions now â€” the notes tell the
         // operator to run the oracle suite, not that stubs stay green.
         assert.ok(
           notes.includes("oracle.spec") || notes.includes("npm test"),
@@ -844,7 +845,7 @@ describe("deployNotes — run/test/env/deploy steps exist and are executable-sou
   });
 });
 
-describe("A2 — approved fixtures fold into tests/oracle.spec.ts", () => {
+describe("A2 â€” approved fixtures fold into tests/oracle.spec.ts", () => {
   const fx = {
     id: "orc-1",
     requirementId: "orc-1",
@@ -874,7 +875,7 @@ describe("A2 — approved fixtures fold into tests/oracle.spec.ts", () => {
     };
   }
 
-  it("no fixtures / partial approval → oracle.spec has no fx. tests (byte-identical pair)", () => {
+  it("no fixtures / partial approval â†’ oracle.spec has no fx. tests (byte-identical pair)", () => {
     const p = fullRun();
     const tree = [
       {
@@ -907,7 +908,7 @@ describe("A2 — approved fixtures fold into tests/oracle.spec.ts", () => {
     assert.ok(!pkg.scripts?.test?.includes("brief.spec"), "no second test file");
   });
 
-  it("A1-01: an approved placeholder set is refused at emit — no vacuous fx. test", () => {
+  it("A1-01: an approved placeholder set is refused at emit â€” no vacuous fx. test", () => {
     const placeholder = { ...fx, expect: { kind: "shape" as const, value: { id: "<draft>" } } };
     const spec = bodyOf(
       scaffoldProject(treeProject({ acceptanceFixtures: [placeholder] })),
@@ -923,7 +924,7 @@ describe("A2 — approved fixtures fold into tests/oracle.spec.ts", () => {
   });
 });
 
-describe("scaffoldProject — leftover job-* nodes (fixes/196)", () => {
+describe("scaffoldProject â€” leftover job-* nodes (fixes/196)", () => {
   function leftoverJobs(p: Project) {
     return (p.specGraph?.nodes ?? []).filter((n) => n.id.startsWith("job-")).slice(1);
   }
@@ -954,7 +955,7 @@ describe("scaffoldProject — leftover job-* nodes (fixes/196)", () => {
     }
     const spec = bodyOf(result, "tests/oracle.spec.ts");
     for (const node of leftovers) {
-      const m = node.purpose.match(/["“]([^"”]+)["”]/);
+      const m = node.purpose.match(/["â€œ]([^"â€]+)["â€]/);
       const label = m ? m[1] : node.id;
       assert.ok(
         !new RegExp(`Target seam: ${label}[\\s\\S]{0,400}assert\\.rejects\\(route[\\s\\S]{0,80}TODO`).test(
@@ -966,7 +967,7 @@ describe("scaffoldProject — leftover job-* nodes (fixes/196)", () => {
     // host job / API route may still assert the TODO throw (do not delete globally).
     // W16+W17 coded-refusal contract: the emitted row names RT_E_VALIDATION
     // before the canonical escaped-paren TODO marker.
-    assert.match(spec, /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/RT_E_VALIDATION · TODO\\\(E-15\\\) stub\/\)/);
+    assert.match(spec, /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/RT_E_VALIDATION Â· TODO\\\(E-15\\\) stub\/\)/);
   });
 
   it("keeps leftover jobs as emitJobStub when there is no generatedSource", () => {
@@ -984,7 +985,7 @@ describe("scaffoldProject — leftover job-* nodes (fixes/196)", () => {
     const spec = bodyOf(result, "tests/oracle.spec.ts");
     assert.match(
       spec,
-      /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/RT_E_VALIDATION · TODO\\\(E-15\\\) stub\/\)/,
+      /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/RT_E_VALIDATION Â· TODO\\\(E-15\\\) stub\/\)/,
       "stub jobs MAY still assert the TODO throw",
     );
   });
@@ -1001,29 +1002,29 @@ describe("scaffoldProject — leftover job-* nodes (fixes/196)", () => {
     const files = okFiles(scaffoldProject(withTree));
     const copies = files.filter((f) => f.path === job1!.file);
     assert.equal(copies.length, 1, "tree-covered path emitted once");
-    assert.equal(copies[0]!.body, treeSrc, "verbatim tree source — not a bridge, not a stub");
+    assert.equal(copies[0]!.body, treeSrc, "verbatim tree source â€” not a bridge, not a stub");
   });
 });
 
 /**
- * fixes/216d — Wave D regressions (106 T-04 + T-05, plus the 216b oracle-row
+ * fixes/216d â€” Wave D regressions (106 T-04 + T-05, plus the 216b oracle-row
  * census these edits cross-reference). Each block pins behaviour the code
  * edits landed in `scaffold.ts`; nothing here re-tests the pre-fix literals.
  *
- *   - T-04: a refused `generatedTree` row is REFUSED LOUDLY — shipped README
- *     line + `warnings[]` — never a silent drop; the declared
+ *   - T-04: a refused `generatedTree` row is REFUSED LOUDLY â€” shipped README
+ *     line + `warnings[]` â€” never a silent drop; the declared
  *     `src/generated.ts` entry assembles verbatim; look-alikes stay refused.
  *   - census (216b): the README oracle-row bullet renders in BOTH branches and
  *     always agrees with the emitted spec's skip set.
  *   - T-05: the emitted shell imports the module the emitter ACTUALLY writes
  *     (the computed entry), so the specifier can never dangle.
  */
-describe("fixes/216d — refused tree rows, declared entry, census bullet, computed UI entry", () => {
+describe("fixes/216d â€” refused tree rows, declared entry, census bullet, computed UI entry", () => {
   /** The single `## Honest boundaries` oracle-row bullet (null when absent). */
   const censusLineOf = (readme: string): string | undefined =>
     readme.split("\n").find((l) => l.startsWith("- Oracle rows ("));
 
-  it("T-04: a refused non-empty tree row is surfaced in the README AND warnings[] — never a silent drop", () => {
+  it("T-04: a refused non-empty tree row is surfaced in the README AND warnings[] â€” never a silent drop", () => {
     const treeSrc = "export function overwrite() { return 1; }\n";
     const result = scaffoldProject({
       ...fullRun(),
@@ -1047,9 +1048,9 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
     assert.ok(refusalLine, "the shipped README records the refusal under Honest boundaries");
     assert.ok(
       refusalLine!.includes(expected),
-      "the README line names the declared path and the reason — not a silent drop",
+      "the README line names the declared path and the reason â€” not a silent drop",
     );
-    // A refused-only tree leaves treeMode false (no accepted row) → the legacy
+    // A refused-only tree leaves treeMode false (no accepted row) â†’ the legacy
     // summary sentence; with an accepted row alongside, the CLI-facing summary
     // carries the refusal count too (scaffold.ts summary contract).
     const mixed = scaffoldProject({
@@ -1072,7 +1073,7 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
         // silently bridged). Verdict order: refusal first, then graph order.
         ...(["dispatch", "reroute", "scan"] as const).map(
           (label) =>
-            `specGraph:unmaterialised-job:"src/jobs/${label}.ts":job "${label}" has no generated tree file — tree mode NEVER bridges a job node (fixes/216k D3 / TA-15)`,
+            `specGraph:unmaterialised-job:"src/jobs/${label}.ts":job "${label}" has no generated tree file â€” tree mode NEVER bridges a job node (fixes/216k D3 / TA-15)`,
         ),
       ],
       "warnings[] carries the refusal verdict verbatim + the three counted unmaterialised job nodes",
@@ -1093,12 +1094,12 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
     const entry = files.find((f) => f.path === "src/generated.ts");
     assert.ok(
       entry,
-      "the declared tree entry assembles (pre-fix it was refused by construction — 106 F-03)",
+      "the declared tree entry assembles (pre-fix it was refused by construction â€” 106 F-03)",
     );
-    assert.equal(entry!.body, entrySrc, "tree files are emitted verbatim — no scaffold wrapper");
+    assert.equal(entry!.body, entrySrc, "tree files are emitted verbatim â€” no scaffold wrapper");
     const warnings = result.ok ? (result.warnings ?? []) : [];
     // Parent boundary update (W8, fixes/216k D3): tree mode now surfaces the
-    // fixture's three unmaterialised job nodes alongside the single refusal —
+    // fixture's three unmaterialised job nodes alongside the single refusal â€”
     // pre-D3 they were silently bridged. The refusal must stay FIRST.
     assert.equal(warnings.length, 4, "the look-alike refusal + the three unmaterialised job nodes");
     assert.ok(
@@ -1120,14 +1121,14 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
   });
 
   it("216b/356 census: the README bullet renders in BOTH branches and agrees with the emitted spec", () => {
-    // Branch 1 — every pinned row carries a real assertion (full engine run).
+    // Branch 1 â€” every pinned row carries a real assertion (full engine run).
     const clean = scaffoldProject(fullRun());
     const cleanLine = censusLineOf(bodyOf(clean, "README.md"));
     const cleanSpec = bodyOf(clean, "tests/oracle.spec.ts");
     assert.ok(cleanLine, "census bullet renders when nothing is unwired");
     assert.match(
       cleanLine!,
-      /: all \d+ pinned row\(s\) assert the emitted modules' real current behavior — no NOT IMPLEMENTED rows\.$/,
+      /: all \d+ pinned row\(s\) assert the emitted modules' real current behavior â€” no NOT IMPLEMENTED rows\.$/,
       "all-assert branch statement",
     );
     assert.ok(!cleanLine!.includes("are NOT IMPLEMENTED"), "no false unwired claim on the all-assert branch");
@@ -1148,7 +1149,7 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
       "spec agrees: no marked-shortfall row when every row is wired",
     );
 
-    // Branch 2 — rows the emitted modules give no surface to assert against are
+    // Branch 2 â€” rows the emitted modules give no surface to assert against are
     // counted AND named; fixes/356 (W356 A3): each is a MARKED, COUNTED skip
     // (never a silent green, never an unavoidable red), the README sentence and
     // the spec header carry the same total (same predicate), and the tree's own
@@ -1159,7 +1160,7 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
     assert.ok(skipLine, "census bullet still renders when rows are NOT IMPLEMENTED");
     assert.match(
       skipLine!,
-      /: ACCEPTANCE SHORTFALL — \d+ of \d+ pinned row\(s\) are NOT IMPLEMENTED/,
+      /: ACCEPTANCE SHORTFALL â€” \d+ of \d+ pinned row\(s\) are NOT IMPLEMENTED/,
       "mixed branch statement states the shortfall up front",
     );
     assert.ok(skipLine!.includes("A skip is not a pass"), "the census says a skip is NOT a pass");
@@ -1175,7 +1176,7 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
       const rowLine = skipSpec
         .split("\n")
         .find((l) => l.trimStart().startsWith(`test(${JSON.stringify(id)}, `));
-      assert.ok(rowLine, `the emitted spec keeps ${id} BY NAME under its pinned id — census and artifact agree`);
+      assert.ok(rowLine, `the emitted spec keeps ${id} BY NAME under its pinned id â€” census and artifact agree`);
       assert.ok(
         rowLine!.includes("{ skip: ") && rowLine!.includes("NOT IMPLEMENTED"),
         `and carries the visible shortfall marker: ${rowLine}`,
@@ -1198,7 +1199,7 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
     );
   });
 
-  it("T-05: the emitted shell imports the computed tree entry — exactly the module the oracle spec imports", () => {
+  it("T-05: the emitted shell imports the computed tree entry â€” exactly the module the oracle spec imports", () => {
     const cases: {
       label: string;
       tree: NonNullable<Project["generatedTree"]>;
@@ -1251,8 +1252,8 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
       );
       assert.ok(okFiles(result).some((f) => f.path === c.entry), `${c.label}: the entry really lands on disk`);
     }
-    // Legacy (no tree): the shell follows generatedSource's host — the first
-    // job node's file, the scaffold's documented host-selection contract —
+    // Legacy (no tree): the shell follows generatedSource's host â€” the first
+    // job node's file, the scaffold's documented host-selection contract â€”
     // never a fixed literal.
     const legacyProject = fullRun();
     const legacy = scaffoldProject(legacyProject);
@@ -1276,27 +1277,27 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
 });
 
 // ---------------------------------------------------------------------------
-// A3 (fixes/309_a3_guardset.md) — M4-16: the deplyNotes/deployNotes twin is
+// A3 (fixes/309_a3_guardset.md) â€” M4-16: the deplyNotes/deployNotes twin is
 // consolidated on the correct spelling; the legacy name survives as the alias.
 // ---------------------------------------------------------------------------
 
-describe("A3/M4-16 — deplyNotes/deployNotes twin", () => {
+describe("A3/M4-16 â€” deplyNotes/deployNotes twin", () => {
   it("deplyNotes resolves to the canonical deployNotes (call site + exports agree)", () => {
-    assert.equal(deplyNotes, deployNotes, "one function, two names — the legacy spelling is alias-only");
+    assert.equal(deplyNotes, deployNotes, "one function, two names â€” the legacy spelling is alias-only");
     assert.equal(typeof deployNotes(seedProject()), "string", "the wired name is callable");
   });
 });
 
 // ---------------------------------------------------------------------------
-// fixes/328 P2 (TA-15 / P0-04) — REAL per-job modules + real HTTP wiring.
+// fixes/328 P2 (TA-15 / P0-04) â€” REAL per-job modules + real HTTP wiring.
 //
 // The recorded specRecord (`implementationSpec.typeSignatures`) is the line
-// between real and refusal: bound signatures ⇒ a real module / a dispatched
-// endpoint; no recorded surface (the keyless floor) ⇒ the honest coded stub
+// between real and refusal: bound signatures â‡’ a real module / a dispatched
+// endpoint; no recorded surface (the keyless floor) â‡’ the honest coded stub
 // stays. These pins carry TEETH: they read the emitted bytes AND classify them
 // with the doctor's own census so "real" here means what `doctor --tree` says.
 // ---------------------------------------------------------------------------
-describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", () => {
+describe("fixes/328 P2 â€” REAL per-job modules + HTTP wiring (TA-15/P0-04)", () => {
   /** primed project + a recorded specRecord (the keyed half of the boundary). */
   const keyed = (typeSignatures: string[], over: Partial<Project> = {}): Project => ({
     ...primed(over),
@@ -1312,7 +1313,7 @@ describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", ()
       createdAt: 0,
     },
   });
-  /** The doctor's own classifier — the census authority, not a regex of ours. */
+  /** The doctor's own classifier â€” the census authority, not a regex of ours. */
   const jobKinds = (files: ScaffoldFile[]): Record<string, string> =>
     Object.fromEntries(
       inventoryFromJobSources(
@@ -1341,7 +1342,7 @@ describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", ()
     assert.equal(kinds["src/jobs/dispatch.ts"], "real", "doctor's classifier agrees: real");
     assert.equal(kinds["src/jobs/reroute.ts"], "stub", "an unwired job keeps the honest coded stub");
     assert.equal(kinds["src/jobs/scan.ts"], "stub", "an unwired job keeps the honest coded stub");
-    // The type the spec names but does not shape is declared opaquely — never
+    // The type the spec names but does not shape is declared opaquely â€” never
     // invented as a field list.
     assert.ok(dispatch.body.includes("export type DispatchCommand = string | number | Record<string, unknown>;"));
     assert.ok(!/^\s*(export\s+)?interface\s/m.test(dispatch.body), "no invented field shape");
@@ -1357,7 +1358,7 @@ describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", ()
     // Refusals stay REAL paths: unrecorded endpoint AND recorded-but-unwired job.
     assert.match(api.body, /unknown endpoint \$\{method\} \$\{path\}/);
     assert.match(api.body, /TODO\(E-15\) stub: implement/);
-    // Keyless floor: no wired jobs ⇒ no imports/handlers, every endpoint refuses.
+    // Keyless floor: no wired jobs â‡’ no imports/handlers, every endpoint refuses.
     const floor = okFiles(scaffoldProject(primed())).find((f) => f.path === "src/api/routes.ts")!;
     assert.ok(!floor.body.includes("jobMod0"), "no handler wiring without a recorded surface");
     assert.ok(floor.body.includes("const HANDLERS: Record<string, (input: unknown) => Promise<unknown>> = {\n};"));
@@ -1373,7 +1374,7 @@ describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", ()
     assert.ok(spec.includes("assert.equal(res.job, \"dispatch\");"), "and asserts the dispatched job");
     assert.match(
       spec,
-      /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/RT_E_VALIDATION · TODO\\\(E-15\\\) stub\/\)/,
+      /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/RT_E_VALIDATION Â· TODO\\\(E-15\\\) stub\/\)/,
       "the unwired row keeps the coded stub-rejection assertion",
     );
     // Capability rows must scan the materialised job modules, not only the host.
@@ -1385,7 +1386,7 @@ describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", ()
     const files = okFiles(scaffoldProject(p));
     const kinds = jobKinds(files);
     for (const path of ["src/jobs/dispatch.ts", "src/jobs/reroute.ts", "src/jobs/scan.ts"]) {
-      assert.equal(kinds[path], "stub", `${path}: no recorded surface ⇒ the coded stub, never an invented body`);
+      assert.equal(kinds[path], "stub", `${path}: no recorded surface â‡’ the coded stub, never an invented body`);
     }
     assert.ok(
       files.find((f) => f.path === "src/jobs/dispatch.ts")!.body.includes("TODO(E-15) stub: implement job dispatch"),
@@ -1405,7 +1406,7 @@ describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", ()
     assert.equal(
       kinds["src/jobs/reroute.ts"],
       undefined,
-      "an unbound job stays unmaterialised in tree mode — never a stub, never a bridge",
+      "an unbound job stays unmaterialised in tree mode â€” never a stub, never a bridge",
     );
     const warnings = result.ok ? (result.warnings ?? []) : [];
     assert.ok(
@@ -1418,7 +1419,7 @@ describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", ()
     );
   });
 
-  it("stays deterministic with a recorded surface (same project ⇒ byte-identical files)", () => {
+  it("stays deterministic with a recorded surface (same project â‡’ byte-identical files)", () => {
     const p = keyed([
       "runDispatch(command: DispatchCommand): Promise<Tech>",
       "runReroute(command: RerouteCommand): Promise<Dispatcher>",
@@ -1429,17 +1430,17 @@ describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", ()
 });
 
 // ---------------------------------------------------------------------------
-// 330 Transit — emitted-format integrity: the emitter never ships a module the
+// 330 Transit â€” emitted-format integrity: the emitter never ships a module the
 // package it declares cannot load. packageJson() declares `"type":"module"` and
 // this emitter's own infra is ESM, so a CommonJS body assembled verbatim
 // (`module.exports` / `exports.x =`) throws "module is not defined in ES module
-// scope" at import — while compile-check is a parse (a CJS body parses fine) and
+// scope" at import â€” while compile-check is a parse (a CJS body parses fine) and
 // the emitted spec imports only its own surfaces. Reproduced live: a
 // generatedSource-only CJS project emitted ok:true and `tree-run` read ok:true
 // while `import()` threw. The emit-time materializer rewrites TREES, not a lone
 // generatedSource, and direct callers bypass it entirely. Declare-or-strike.
 // ---------------------------------------------------------------------------
-describe("330 Transit — emitted-format integrity (never ship an unloadable module)", () => {
+describe("330 Transit â€” emitted-format integrity (never ship an unloadable module)", () => {
   it("REFUSES a generatedSource-only CommonJS body (the package declares type:module)", () => {
     const p = primed({
       generatedSource: "function add(a, b) { return a + b; }\nmodule.exports.add = add;\n",
@@ -1485,7 +1486,7 @@ describe("330 Transit — emitted-format integrity (never ship an unloadable mod
 });
 
 // ---------------------------------------------------------------------------
-// W48 / 334-3 (T1a) — the emitted README must say the EMITTER never ran the
+// W48 / 334-3 (T1a) â€” the emitted README must say the EMITTER never ran the
 // declared scripts. 338-2 (W52) changed what a tree-run REPORTS: it now
 // resolves the declared tools (the tree's own node_modules, else the repo's)
 // and runs them, so a type-clean tree reads `declaredScriptsVerified: true`
@@ -1493,7 +1494,7 @@ describe("330 Transit — emitted-format integrity (never ship an unloadable mod
 // Without a banner the README could present the scaffold as complete. Same
 // unmissable style as headless's red-tree banner.
 // ---------------------------------------------------------------------------
-describe("W48 / 334-3 (T1a) — declared-scripts-unverified README banner", () => {
+describe("W48 / 334-3 (T1a) â€” declared-scripts-unverified README banner", () => {
   it("the emitted README LEADS with the banner and names the declared typecheck + build as unverified", () => {
     const p = fullRun({ kind: "app" });
     const readme = bodyOf(scaffoldProject(p), "README.md");
@@ -1501,7 +1502,7 @@ describe("W48 / 334-3 (T1a) — declared-scripts-unverified README banner", () =
     assert.match(readme, /DECLARED SCRIPTS NOT RUN/);
     assert.match(readme, /`typecheck` and `build`/);
     assert.match(readme, /UNVERIFIED/);
-    // 338-2: the banner now names BOTH tree-run outcomes truthfully — a verified
+    // 338-2: the banner now names BOTH tree-run outcomes truthfully â€” a verified
     // tree reads true, an unresolvable declared tool reads false + the field.
     assert.match(readme, /declaredScriptsVerified: true/);
     assert.match(readme, /declaredScriptsVerified: false/);
@@ -1529,13 +1530,13 @@ describe("W48 / 334-3 (T1a) — declared-scripts-unverified README banner", () =
 });
 
 // ---------------------------------------------------------------------------
-// W49 / 335-3 — the cli-tool declares its runnable entry. Pre-fix its
+// W49 / 335-3 â€” the cli-tool declares its runnable entry. Pre-fix its
 // package.json carried only `bin`; the headless entry resolver therefore fell
 // through to an unrelated job module, so corrupting the program the bin
 // launcher actually runs (src/main.ts) kept the tree GREEN (a false green of
 // the same class the W48 T3 fix closed for library/service).
 // ---------------------------------------------------------------------------
-describe("W49 / 335-3 — cli-tool declares its runnable entry (main)", () => {
+describe("W49 / 335-3 â€” cli-tool declares its runnable entry (main)", () => {
   it("package.json declares `main: './src/main.ts'`, the file the bin launcher delegates to", () => {
     const p = fullRun({ kind: "tool" });
     const result = scaffoldProject(p);
@@ -1553,12 +1554,12 @@ describe("W49 / 335-3 — cli-tool declares its runnable entry (main)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// W50 / 336-3 (Transit) — DEPLOY.md must state what the emitted bytes actually
+// W50 / 336-3 (Transit) â€” DEPLOY.md must state what the emitted bytes actually
 // declare. The pre-fix Test section told the operator to run `npm test` against
 // a tree whose package.json declares no `test` script (zero oracle rows) and
 // claimed "no todo stubs" on a tree whose own README counts unwired rows.
 // ---------------------------------------------------------------------------
-describe("W50 / 336-3 — DEPLOY.md matches the emitted oracle bytes", () => {
+describe("W50 / 336-3 â€” DEPLOY.md matches the emitted oracle bytes", () => {
   it("a NOT IMPLEMENTED oracle row makes DEPLOY.md carry the census, not a 'no todo stubs' claim", () => {
     const p = seedProject(); // P0: rows with no module surface are NOT IMPLEMENTED
     const result = scaffoldProject(p);
@@ -1592,12 +1593,12 @@ describe("W50 / 336-3 — DEPLOY.md matches the emitted oracle bytes", () => {
 });
 
 // ---------------------------------------------------------------------------
-// W52 / 338-5 (Product) — the emitted tree must wire every declared dependency
+// W52 / 338-5 (Product) â€” the emitted tree must wire every declared dependency
 // and its README must name the files it actually writes (the "no fake, properly
 // wired" standard). The webapp declares `@tailwindcss/vite` + `tailwindcss` but
 // the emitted config never loaded them and no emitted byte consumed them.
 // ---------------------------------------------------------------------------
-describe("W52 / 338-5 — emitted webapp wires its declared Tailwind devDeps", () => {
+describe("W52 / 338-5 â€” emitted webapp wires its declared Tailwind devDeps", () => {
   it("emits src/styles.css and wires it into main.tsx + vite.config.ts", () => {
     const result = scaffoldProject(fullRun());
     const pkg = JSON.parse(bodyOf(result, "package.json")) as {
@@ -1644,11 +1645,11 @@ describe("W52 / 338-5 — emitted webapp wires its declared Tailwind devDeps", (
     assert.ok(!css.includes("A/B"), "the hostile name never appears in the stylesheet");
     // Byte-stable + project-independent: two different projects yield identical bytes.
     assert.equal(bodyOf(scaffoldProject(fullRun()), "src/styles.css"), css, "project-independent bytes");
-    assert.equal(bodyOf(scaffoldProject(fullRun()), "src/styles.css"), bodyOf(scaffoldProject(fullRun()), "src/styles.css"), "same project in ⇒ identical stylesheet out");
+    assert.equal(bodyOf(scaffoldProject(fullRun()), "src/styles.css"), bodyOf(scaffoldProject(fullRun()), "src/styles.css"), "same project in â‡’ identical stylesheet out");
   });
 });
 
-describe("W52 / 338-5 — the emitted README names the files it actually writes", () => {
+describe("W52 / 338-5 â€” the emitted README names the files it actually writes", () => {
   it("webapp tables the real browser entry (src/main.tsx), never the nonexistent `src/main`", () => {
     const result = scaffoldProject(fullRun());
     const readme = bodyOf(result, "README.md");
@@ -1680,13 +1681,13 @@ describe("W52 / 338-5 — the emitted README names the files it actually writes"
 });
 
 // ---------------------------------------------------------------------------
-// W52 / 338-5 — the game spec-graph ui node is emitted at `src/ui/console.tsx`
+// W52 / 338-5 â€” the game spec-graph ui node is emitted at `src/ui/console.tsx`
 // (plain-TS canvas shell, no JSX) and the game `src/main.ts` imports it
 // extensionless. With NO `jsx` setting, `tsc --noEmit` refuses to resolve a
 // `.tsx` module (TS6142) and the game's DECLARED `npm run typecheck` fails on a
 // clean emitted tree. Proven with the repo's own tsc over the emitted tree.
 // ---------------------------------------------------------------------------
-describe("W52 / 338-5 — game tsconfig resolves the emitted .tsx ui node", () => {
+describe("W52 / 338-5 â€” game tsconfig resolves the emitted .tsx ui node", () => {
   it("sets `jsx` (no React smuggled in) so the declared `tsc --noEmit` passes", () => {
     const result = scaffoldProject(fullRun({ kind: "game" }));
     const cfg = JSON.parse(bodyOf(result, "tsconfig.json")) as {
@@ -1717,15 +1718,15 @@ describe("W52 / 338-5 — game tsconfig resolves the emitted .tsx ui node", () =
 });
 
 // ---------------------------------------------------------------------------
-// 340-6 (A3-f07 / W-14) — the DEFAULT emitted-UI generator.
+// 340-6 (A3-f07 / W-14) â€” the DEFAULT emitted-UI generator.
 //
 // Pre-fix the default webapp shell rendered a name-dump (`generated exports
-// (N): …`) behind an open A3-f07 marker. These pins hold the replacement to
-// the W-14 bar: ≥2 real domain fields + ≥1 interaction bound to a GENUINELY
+// (N): â€¦`) behind an open A3-f07 marker. These pins hold the replacement to
+// the W-14 bar: â‰¥2 real domain fields + â‰¥1 interaction bound to a GENUINELY
 // exported function, byte-deterministic, parseable, and honest (never
 // fabricated) when there is nothing real to bind.
 // ---------------------------------------------------------------------------
-describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interaction)", () => {
+describe("A3-f07 / W-14 â€” default emitted-UI generator (real fields + interaction)", () => {
   /** The emitted entry module the shell's `generated` namespace actually imports. */
   function importedEntryBody(result: ScaffoldResult, uiPath: string, uiBody: string): string {
     const m = uiBody.match(/import \* as generated from "([^"]+)";/);
@@ -1751,7 +1752,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     assert.equal(
       diags.length,
       0,
-      `${label}: emitted UI must parse — ${diags
+      `${label}: emitted UI must parse â€” ${diags
         .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))
         .join("; ")}`,
     );
@@ -1783,20 +1784,20 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     };
   };
 
-  it("binds ≥2 spec-derived fields + an interaction to a real generated export", () => {
+  it("binds â‰¥2 spec-derived fields + an interaction to a real generated export", () => {
     const sig =
       "createRequest(customerId: string, priority: number): { customerId: string; priority: number }";
     const p = specBoundProject();
     const result = scaffoldProject(p);
     const ui = bodyOf(result, "src/ui/console.tsx");
 
-    // ≥2 REAL fields, derived from the recorded spec's parameters.
+    // â‰¥2 REAL fields, derived from the recorded spec's parameters.
     for (const field of ["customerId", "priority"]) {
       assert.ok(sig.includes(field), `premise: ${field} is a recorded spec parameter`);
       assert.ok(ui.includes(`name="${field}"`), `UI input bound to the real field ${field}`);
       assert.ok(ui.includes(`htmlFor="rt-${field}"`), `UI label bound to ${field}`);
     }
-    // ≥1 REAL interaction calling a name the generated module really exports.
+    // â‰¥1 REAL interaction calling a name the generated module really exports.
     assert.ok(ui.includes("onSubmit={onSubmit}"), "a real form handler is wired");
     assert.ok(/generated\.createRequest\(/.test(ui), "the handler calls the generated export");
     const entry = importedEntryBody(result, "src/ui/console.tsx", ui);
@@ -1812,7 +1813,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
   });
 
   it("358 merge: the spec-derived page set no longer REPLACES the ui node's binding", () => {
-    // R-UI-1: this same fixture derives ≥2 pages, and the 353 site used to
+    // R-UI-1: this same fixture derives â‰¥2 pages, and the 353 site used to
     // wholesale-replace `src/ui/console.tsx` with a bare router mount, which made
     // the W-14 binding above unreachable for that input class. The merge keeps
     // BOTH: the derived page set is emitted AND the console keeps the binding.
@@ -1844,7 +1845,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     assert.ok(!ui.includes("generated exports ("), "the name-dump is gone");
     assert.ok(/generated\.synthesize\(/.test(ui), "the handler calls the real generated export");
     const inputs = [...ui.matchAll(/name="([^"]+)"/g)].map((m) => m[1]!);
-    assert.ok(inputs.length >= 2, `≥2 domain inputs (got ${inputs.length})`);
+    assert.ok(inputs.length >= 2, `â‰¥2 domain inputs (got ${inputs.length})`);
     assert.ok(
       inputs.includes("name") && inputs.includes("job"),
       "fields are the generated function's own parameter keys",
@@ -1923,7 +1924,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     assertParsesTsx("barrel UI", ui);
   });
 
-  it("341-1: the documented field cap holds on every shape (a 6-param callable renders ≤4 inputs)", () => {
+  it("341-1: the documented field cap holds on every shape (a 6-param callable renders â‰¤4 inputs)", () => {
     // uiDomainFields' doc claims "deduped and capped"; the pre-fix positional and
     // object-literal branches returned the full list, so only the spec/contract/
     // lattice fallback was capped. RED before the fix (6 inputs), GREEN after (4).
@@ -1945,7 +1946,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
   it("341-1: never binds a form to a callable whose param a form cannot supply", () => {
     // The webapp shell is emitted for a webapp brief; a generated export taking
     // a domain object (Board) cannot be fed by FormData strings. The pre-fix
-    // generator emitted `generated.createBoard(String(...), String(...))` — a
+    // generator emitted `generated.createBoard(String(...), String(...))` â€” a
     // TS2345 the pre-seal typecheck gate then refused with no repairable chunk.
     const p: Project = {
       ...primed(),
@@ -1963,7 +1964,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
   it("fixes/346-S5: a form binds to a callable whose param type is a local numeric alias", () => {
     // The measured keyed tree's only callable: computeLineTotal(quantity: number,
     // unitPrice: Money) with `type Money = number;` in the same source. The alias
-    // NAME is not a primitive, but its shape is — the form's Number(...) argument
+    // NAME is not a primitive, but its shape is â€” the form's Number(...) argument
     // is assignable to it, so the shell must call it. Pre-fix this was the honest
     // (but false-negative) panel that left the real tree unwired.
     const p: Project = {
@@ -1985,7 +1986,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
 
   it("fixes/346-S5: an alias to a NON-primitive keeps the honest panel (no fabricated argument)", () => {
     // S5 must not over-broaden: resolving an alias is only sound when its RHS is
-    // a form-bindable primitive. A string-literal-union alias stays unbindable —
+    // a form-bindable primitive. A string-literal-union alias stays unbindable â€”
     // a plain String(...) is not assignable to `"draft" | "confirmed"`.
     const p: Project = {
       ...primed(),
@@ -2005,7 +2006,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
   it("fixes/346-S5: the form prefers a genuinely bindable callable over an earlier unbindable one", () => {
     // The keyed tree's first multi-field export was an object-param
     // `listItems(params: {...})`; a bindable two-arg numeric export existed too.
-    // Selecting the FIRST candidate left the form unwired — prefer the bindable.
+    // Selecting the FIRST candidate left the form unwired â€” prefer the bindable.
     const p: Project = {
       ...primed(),
       implementationSpec: null,
@@ -2024,7 +2025,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
   it("fixes/346-S5: a render tree whose render export is unfedable wires a bindable form callable instead", () => {
     // s1/s2 keyed bakery-website: `renderOpeningHoursBadge(status: OpenStatus)`
     // (object-typed) could not be called, so the shell had ALL-null pages and
-    // called nothing — while `computeLineTotal(price, quantity)` was bindable.
+    // called nothing â€” while `computeLineTotal(price, quantity)` was bindable.
     const p: Project = {
       ...primed(),
       implementationSpec: null,
@@ -2042,10 +2043,10 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
 
   it("fixes/346-S2: a soundly callable render export never suppresses a genuinely bindable form", () => {
     // The signed decision: when the tree exposes BOTH a soundly callable
-    // renderer and a genuinely bindable form callable (≥2 real domain fields +
-    // sound args), the console binds the form that CALLS the bindable export —
+    // renderer and a genuinely bindable form callable (â‰¥2 real domain fields +
+    // sound args), the console binds the form that CALLS the bindable export â€”
     // the render shell is the fallback, not the default. Pre-fix the zero-arg
-    // renderer forced the shell (`renderCalls` non-empty ⇒ formCallable null)
+    // renderer forced the shell (`renderCalls` non-empty â‡’ formCallable null)
     // and the bindable form was left unwired.
     const p: Project = {
       ...primed(),
@@ -2065,7 +2066,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
   it("fixes/347: a multi-page render tree emits the site shell, not a lone form", () => {
     // The measured keyed bakery tree exported four page renderers plus a
     // bindable numeric helper; 346-S2's form preference then emitted a single
-    // `computeLineTotal` form and threw the site away. ≥2 page renderers is a
+    // `computeLineTotal` form and threw the site away. â‰¥2 page renderers is a
     // site: the shell must mount the pages.
     const p: Project = {
       ...primed(),
@@ -2097,14 +2098,14 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     assertParsesTsx("render shell control UI", ui);
   });
 
-  it("no generated module ⇒ the honest no-module panel (nothing fabricated)", () => {
+  it("no generated module â‡’ the honest no-module panel (nothing fabricated)", () => {
     const ui = bodyOf(scaffoldProject(primed()), "src/ui/console.tsx");
     assert.ok(ui.includes("no generated module yet"), "the honest no-module notice survives");
     assert.ok(!ui.includes("<input"), "no fabricated input without a generated module");
     assert.ok(!ui.includes("onSubmit="), "no fabricated interaction without a generated module");
   });
 
-  it("a generated module with nothing bindable ⇒ honest panel, never a fake call", () => {
+  it("a generated module with nothing bindable â‡’ honest panel, never a fake call", () => {
     const graph: SpecGraph = {
       nodes: [
         { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
@@ -2144,7 +2145,7 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     };
     const a = scaffoldProject(p);
     const b = scaffoldProject(p);
-    assert.deepEqual(a, b, "same project ⇒ byte-identical emission");
+    assert.deepEqual(a, b, "same project â‡’ byte-identical emission");
     assert.equal(bodyOf(a, "src/ui/console.tsx"), bodyOf(b, "src/ui/console.tsx"));
   });
 
@@ -2275,7 +2276,7 @@ describe("W346-A4 brief-driven website shell", () => {
     // The mobile-companion shape: `renderTabs(activeTab: TabId)` with a local
     // `type TabId = string`. Before S4 the shell could not prove the alias and
     // left the export uncalled (uiWired:false). Resolving the alias yields the
-    // honest empty string — a real call with a genuinely sound argument.
+    // honest empty string â€” a real call with a genuinely sound argument.
     const p: Project = {
       ...seedProject({ name: "Crumb & Bloom Companion", kind: "app" }),
       generatedSource: "",
@@ -2335,7 +2336,7 @@ describe("W346-A4 brief-driven website shell", () => {
     };
     const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
     assert.ok(ui.includes("<section key={p.id}>"), "the multi-shell is used");
-    assert.ok(!/generated\.renderSummary\(/.test(ui), "an alias to an object type yields no sound arg — the export is left uncalled");
+    assert.ok(!/generated\.renderSummary\(/.test(ui), "an alias to an object type yields no sound arg â€” the export is left uncalled");
     assert.ok(parsesTsx(ui), "the emitted shell parses as TSX");
   });
 });
@@ -2371,13 +2372,13 @@ describe("W346-A10 README manifest honesty", () => {
 });
 
 // ---------------------------------------------------------------------------
-// PR-28 lane S2 — C1-02 (mounted UI never calls a real generated export) and
+// PR-28 lane S2 â€” C1-02 (mounted UI never calls a real generated export) and
 // C1-03 (generated console.tsx references the removed global JSX namespace).
 // The replay reads the read-only campaign1 / historical testruns/<slug>
 // artifacts; the synthetic pin replays the EXACT campaign shape (a tree barrel
 // plus a first-job file) so the defect is RED before the fix and GREEN after.
 // ---------------------------------------------------------------------------
-describe("PR-28 C1-02/C1-03 — the mounted shell calls a real generated export, JSX-free", () => {
+describe("PR-28 C1-02/C1-03 â€” the mounted shell calls a real generated export, JSX-free", () => {
   const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
   const TESTRUNS_ROOT = join(REPO_ROOT, "..", "testruns");
   const APP_SLUGS = [
@@ -2486,7 +2487,7 @@ describe("PR-28 C1-02/C1-03 — the mounted shell calls a real generated export,
         // 351: a web-marketing brief emits the multi-page site (router + one file
         // per page + site-data adapters over the generated module) instead of the
         // single-file shell. It is wired when its adapters call real generated
-        // exports — verified against the same barrel's export surface.
+        // exports â€” verified against the same barrel's export surface.
         if (result.files.some((f) => f.path === "src/ui/router.tsx")) {
           assert.match(ui, /from "\.\/router\.tsx"/, `${root}: the site console mounts the router`);
           const siteData = bodyOf(result, "src/ui/site-data.ts");
@@ -2501,7 +2502,7 @@ describe("PR-28 C1-02/C1-03 — the mounted shell calls a real generated export,
             assert.ok(siteExports.has(name), `${root}: site-data called ${name} is a real export of the mounted module`);
           }
           assert.ok(siteCalls.length > 0, `${root}: the site adapters call a real generated export`);
-          wired += 1; // the adapters call real generated exports — the site is wired
+          wired += 1; // the adapters call real generated exports â€” the site is wired
           checked += 1;
           continue;
         }
@@ -2517,7 +2518,7 @@ describe("PR-28 C1-02/C1-03 — the mounted shell calls a real generated export,
           assert.ok(exports.has(name), `${root}: C1-02 called ${name} is a real export of the mounted module`);
         }
         if (treeHasRenderExport(project)) {
-          assert.ok(calls.length > 0, `${root}: C1-02 a render export exists ⇒ the shell calls a real export`);
+          assert.ok(calls.length > 0, `${root}: C1-02 a render export exists â‡’ the shell calls a real export`);
           wired += 1;
         }
         checked += 1;
@@ -2532,15 +2533,15 @@ describe("PR-28 C1-02/C1-03 — the mounted shell calls a real generated export,
 // ---------------------------------------------------------------------------
 // R2-04 (P1) + fixes/354 A2-F4 (Decision D1) + fixes/356 (W356 A3; restores the
 // 354 wave's inverted safety default): the ABSENT policy refuses a below-floor
-// plan up front — zero files — and an EXPLICIT `"partial"` (or the headless/CLI
+// plan up front â€” zero files â€” and an EXPLICIT `"partial"` (or the headless/CLI
 // spelling `"banner"`) lands the PARTIAL with the `> [!CAUTION]` /
 // `## BELOW-FLOOR PLAN` banner IN the emitted README and
 // `underProduced{code,detail}` on the result. `"refuse"` and the legacy
 // `allowUnderProduced:false` are the same refusal.
 // R2-05 (P1) re-decided by fixes/356 (W356 A3): an unwired oracle row is a
-// MARKED, COUNTED skip — never a silent green row and never an unavoidable red.
+// MARKED, COUNTED skip â€” never a silent green row and never an unavoidable red.
 // ---------------------------------------------------------------------------
-describe("R2-04 / A2-F4 — the below-floor partial needs an EXPLICIT opt-in; the default refuses", () => {
+describe("R2-04 / A2-F4 â€” the below-floor partial needs an EXPLICIT opt-in; the default refuses", () => {
   const C2_ROOT = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "..", "testruns", "campaign2");
 
   /** A primed project carrying a recorded under-production refusal + substance. */
@@ -2559,7 +2560,7 @@ describe("R2-04 / A2-F4 — the below-floor partial needs an EXPLICIT opt-in; th
           level: "warn",
           event: "p6.synthesis.refused",
           detail:
-            "RT_E_PLAN_UNDERPRODUCED � chunk 2/8 refused � accepted tree has 1 module(s) but the brief demands >= 8 � the plan is under-produced; missing module(s): src/jobs/show.ts (job:show)",
+            "RT_E_PLAN_UNDERPRODUCED ï¿½ chunk 2/8 refused ï¿½ accepted tree has 1 module(s) but the brief demands >= 8 ï¿½ the plan is under-produced; missing module(s): src/jobs/show.ts (job:show)",
         },
         ...(over.logs ?? []),
       ],
@@ -2669,7 +2670,7 @@ describe("R2-04 / A2-F4 — the below-floor partial needs an EXPLICIT opt-in; th
   });
 });
 
-describe("R2-05 — a shortfall oracle is MARKED and COUNTED, never silent and never a skip wall", () => {
+describe("R2-05 â€” a shortfall oracle is MARKED and COUNTED, never silent and never a skip wall", () => {
   /** A project every oracle row has NO emitted surface for (job/api/host all absent). */
   function noSurface(): Project {
     return {
@@ -2682,7 +2683,7 @@ describe("R2-05 — a shortfall oracle is MARKED and COUNTED, never silent and n
     };
   }
 
-  it("every-row-unwired oracle emits MARKED, COUNTED skips — no silent green, no unavoidable red", () => {
+  it("every-row-unwired oracle emits MARKED, COUNTED skips â€” no silent green, no unavoidable red", () => {
     const result = scaffoldProject(noSurface());
     const spec = bodyOf(result, "tests/oracle.spec.ts");
     const rows = spec.split("\n").filter((l) => /^\s*test\(/.test(l));
@@ -2695,7 +2696,7 @@ describe("R2-05 — a shortfall oracle is MARKED and COUNTED, never silent and n
     }
     assert.ok(
       !spec.includes("assert.fail("),
-      "R2-05: no reachable assert.fail — one unwired row no longer condemns the tree",
+      "R2-05: no reachable assert.fail â€” one unwired row no longer condemns the tree",
     );
     assert.equal(
       spec.split("\n").filter((l) => l.trimStart().startsWith("test.skip(")).length,
@@ -2705,7 +2706,7 @@ describe("R2-05 — a shortfall oracle is MARKED and COUNTED, never silent and n
     assert.match(
       spec,
       /ORACLE SHORTFALL: \d+ of \d+ pinned A7 row\(s\) are/,
-      "R2-05: the counted total is on the emitted spec header — the skip wall is never silent",
+      "R2-05: the counted total is on the emitted spec header â€” the skip wall is never silent",
     );
     assert.match(
       spec,
@@ -2714,11 +2715,11 @@ describe("R2-05 — a shortfall oracle is MARKED and COUNTED, never silent and n
     );
   });
 
-  it("fixes/356 (W356 A3): an UNWIRED row in a NON-dominated oracle is a MARKED, COUNTED skip — the tree is not condemned", () => {
+  it("fixes/356 (W356 A3): an UNWIRED row in a NON-dominated oracle is a MARKED, COUNTED skip â€” the tree is not condemned", () => {
     // primed() has 5 assertable rows (endpoints) and ONE unwired row
-    // (`orc-phase`, job "graph" — no endpoint, no host). The pre-354 ratio gate
+    // (`orc-phase`, job "graph" â€” no endpoint, no host). The pre-354 ratio gate
     // (`notImplemented > assertable` = 1 > 5) let that row emit an UNCOUNTED
-    // `test.skip("orc-phase — NOT IMPLEMENTED")` — a shortfall that could vanish
+    // `test.skip("orc-phase â€” NOT IMPLEMENTED")` â€” a shortfall that could vanish
     // into a green run. The 354 answer (a reachable `assert.fail`) failed the
     // whole tree instead. It is now a marked, counted skip: visible per row and
     // totalled on both headers.
@@ -2731,18 +2732,18 @@ describe("R2-05 — a shortfall oracle is MARKED and COUNTED, never silent and n
     );
     assert.match(spec, /ORACLE SHORTFALL: 1 of 6 pinned A7 row\(s\) are/, "the header counts it");
     assert.ok(
-      !spec.includes("orc-phase is NOT IMPLEMENTED — replace"),
+      !spec.includes("orc-phase is NOT IMPLEMENTED â€” replace"),
       "no reachable failing assertion for the unwired row",
     );
   });
 });
 
 // ---------------------------------------------------------------------------
-// fixes/354 A2-F5 — a PROSE brief (no labelled Pages:/Views: list) derives its
+// fixes/354 A2-F5 â€” a PROSE brief (no labelled Pages:/Views: list) derives its
 // page set from the project's own implementationSpec, so a real generated tree
 // gets a router + pages instead of the single-file shell.
 // ---------------------------------------------------------------------------
-describe("A2-F5 — spec-derived page set for a prose brief", () => {
+describe("A2-F5 â€” spec-derived page set for a prose brief", () => {
   /** A prose bakery brief (NO Pages:/Views: label) + a spec + a mountable tree. */
   function proseBakery(): Project {
     return {
@@ -2814,12 +2815,12 @@ describe("A2-F5 — spec-derived page set for a prose brief", () => {
   it("a brief with an absent implementationSpec keeps the single-file shell (no spec, no derived pages)", () => {
     const p = proseBakery();
     const paths = okFiles(scaffoldProject({ ...p, implementationSpec: null })).map((f) => f.path);
-    assert.ok(!paths.includes("src/ui/router.tsx"), "no spec ⇒ no derived page set ⇒ the single-file shell is kept");
+    assert.ok(!paths.includes("src/ui/router.tsx"), "no spec â‡’ no derived page set â‡’ the single-file shell is kept");
   });
 
   it("358 merge: the derived page set and the ui node's own W-14 binding ride the SAME emission", () => {
     // R-UI-1, other side: the derived page set stays AND the console keeps the
-    // real field binding — and the derived page binds the same real mutator, so
+    // real field binding â€” and the derived page binds the same real mutator, so
     // the binding is applied TO the spec-derived pages, not only kept beside them.
     const result = scaffoldProject(proseBakery());
     const paths = okFiles(result).map((f) => f.path);
@@ -2839,11 +2840,260 @@ describe("A2-F5 — spec-derived page set for a prose brief", () => {
 });
 
 // ---------------------------------------------------------------------------
-// fixes/354 A2-F11 — the `game` kind's platformer is a deterministic scaffold
+// W359 kind-gate (P0, lane `kind-gate`) â€” the emitted tsconfig must ADMIT the
+// file set the emitter writes, for EVERY kind, and the emitted package must
+// declare every runtime that source imports.
+//
+// Measured defect (W358; fixes/358_close_kindjsx.md Â§1.2): `briefedSiteFiles`
+// fired for ANY kind, so `tool`/`service`/`library` were handed the 353 site's
+// react-importing `.tsx` modules while `tsconfigJson` granted `jsx` only to
+// webapp/game â€” their own declared `npm run typecheck` red 83 rows (180 with a
+// declared-deps-only toolchain), and `game`'s site REPLACED the canvas shell
+// `src/main.ts` imports (TS2614 `bootGame`). The invariant is proven by the
+// repo's own compiler over the emitted bytes, never shape-asserted.
+// ---------------------------------------------------------------------------
+describe("W359 kind-gate â€” every kind's emitted source compiles under its emitted tsconfig", () => {
+  const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  type KindCase = { kind: NonNullable<Project["kind"]>; declared: ProjectKind };
+  const KIND_CASES: KindCase[] = [
+    { kind: "app", declared: "webapp" },
+    { kind: "game", declared: "game" },
+    { kind: "tool", declared: "cli-tool" },
+    { kind: "service", declared: "service" },
+    { kind: "library", declared: "library" },
+  ];
+
+  /** The A2-F5 prose fixture, per kind: a brief + spec naming â‰¥2 pages over a
+   *  mountable generated tree â€” the shape that FIRES the 353 briefed site, so
+   *  the emitted JSX population is maximal for each kind. */
+  function siteBrief(kind: NonNullable<Project["kind"]>): Project {
+    return {
+      ...seedProject({
+        name: "Golden Crust Bakery",
+        kind,
+        brief:
+          "Golden Crust Bakery needs a website: customers browse the breads and pastries, check the opening hours, and place an order for pickup. Do not invent prices.",
+      }),
+      domain: "custom-software",
+      lattice: { domain: "custom-software", jobs: ["checkout"], entities: ["order"], constraints: [], nodes: [], complexity: 1 },
+      contracts: { entities: [{ name: "order", fields: [] }], endpoints: [] },
+      implementationSpec: {
+        requirements: ["Browse the menu of breads and pastries", "See the bakery's opening hours", "Place an order for pickup"],
+        edgeCases: [],
+        errorHandling: [],
+        typeSignatures: [],
+        dataFlow: [],
+        negativeConstraints: [],
+        source: "p6",
+        briefHash: "w359-kind-gate",
+        createdAt: 1,
+      },
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/content.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/content.ts",
+          source: [
+            "export function getOpenStatus(): { open: boolean } { return { open: true }; }",
+            'export async function getMenuItems(): Promise<{ id: string; name: string }[]> { return [{ id: "bread", name: "Bread" }]; }',
+            "export function addToCart(productId: string, quantity: number): { productId: string; quantity: number } { return { productId, quantity }; }",
+            "",
+          ].join("\n"),
+          hash: "h1",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
+        ],
+        order: ["ui"],
+      },
+    };
+  }
+
+  /**
+   * The emitted files compiled under the emitted `compilerOptions`, in a VIRTUAL
+   * tree rooted under the repo â€” so module resolution walks up into the repo's
+   * own installed toolchain, the same root production's `typecheckDir` junctions
+   * (`compile-check.server.sharedToolchainRoot`). Only diagnostics reported IN
+   * the emitted files are returned, so a missing import is visible, never masked.
+   */
+  function emittedDiagnostics(result: ScaffoldResult, label: string): string[] {
+    const files = okFiles(result);
+    const cfg = JSON.parse(bodyOf(result, "tsconfig.json")) as { compilerOptions: Record<string, unknown> };
+    const virtualRoot = join(REPO_ROOT, ".w359-kind-gate", label).replace(/\\/g, "/");
+    const options = ts.convertCompilerOptionsFromJson(cfg.compilerOptions, virtualRoot).options;
+    const sources = new Map(files.map((f) => [join(virtualRoot, f.path).replace(/\\/g, "/"), f.body]));
+    const base = ts.createCompilerHost(options);
+    const host: ts.CompilerHost = {
+      ...base,
+      getCurrentDirectory: () => virtualRoot,
+      fileExists: (p) => sources.has(p.replace(/\\/g, "/")) || base.fileExists(p),
+      readFile: (p) => sources.get(p.replace(/\\/g, "/")) ?? base.readFile(p),
+      getSourceFile: (p, lv) => {
+        const body = sources.get(p.replace(/\\/g, "/"));
+        return body === undefined ? base.getSourceFile(p, lv) : ts.createSourceFile(p, body, lv, true);
+      },
+      writeFile: () => {},
+      // A virtual tree is not on disk: without this tsc decides the containing
+      // directory is absent and reds every relative import with TS2307.
+      directoryExists: (d) => {
+        const n = d.replace(/\\/g, "/");
+        return n === virtualRoot || n.startsWith(`${virtualRoot}/`) || (base.directoryExists?.(d) ?? true);
+      },
+    };
+    const program = ts.createProgram([...sources.keys()], options, host);
+    const out: string[] = [];
+    for (const d of ts.getPreEmitDiagnostics(program)) {
+      const file = d.file;
+      if (file === undefined) continue;
+      const key = file.fileName.replace(/\\/g, "/");
+      if (!sources.has(key)) continue;
+      const pos = file.getLineAndCharacterOfPosition(d.start ?? 0);
+      out.push(
+        `${key.slice(virtualRoot.length + 1)}(${pos.line + 1},${pos.character + 1}): TS${d.code} ${ts.flattenDiagnosticMessageText(d.messageText, " ")}`,
+      );
+    }
+    return out;
+  }
+
+  it("emits a `jsx` setting for every kind whose tree carries a .tsx/.jsx module (the byte-level reading)", () => {
+    for (const { kind, declared } of KIND_CASES) {
+      const project = siteBrief(kind);
+      assert.equal(projectKindOf(project), declared, `${kind} maps onto the ${declared} scaffold taxonomy`);
+      const result = scaffoldProject(project);
+      const files = okFiles(result);
+      const cfg = JSON.parse(bodyOf(result, "tsconfig.json")) as { compilerOptions: { jsx?: string } };
+      const jsxSources = files.map((f) => f.path).filter((p) => /\.(tsx|jsx)$/.test(p));
+      assert.ok(
+        jsxSources.length >= 1,
+        `${kind}: premise â€” the emit writes a .tsx module (got ${jsxSources.join(", ") || "none"})`,
+      );
+      assert.equal(
+        typeof cfg.compilerOptions.jsx,
+        "string",
+        `${kind}: a .tsx is emitted (${jsxSources[0]}), so the emitted tsconfig must set jsx or its own tsc reds TS17004/TS6142`,
+      );
+      const pkg = JSON.parse(bodyOf(result, "package.json")) as { dependencies?: Record<string, string> };
+      const declaresReact = pkg.dependencies?.react !== undefined;
+      assert.equal(
+        cfg.compilerOptions.jsx,
+        declaresReact ? "react-jsx" : "preserve",
+        `${kind}: the jsx transform follows the renderer the emitted PACKAGE declares (react: ${declaresReact})`,
+      );
+    }
+  });
+
+  it("compiles green under the emitted compilerOptions for every kind (the repo's own TypeScript)", () => {
+    for (const { kind } of KIND_CASES) {
+      const diags = emittedDiagnostics(scaffoldProject(siteBrief(kind)), kind);
+      assert.deepEqual(
+        diags,
+        [],
+        `${kind}: the emitted source must compile under the emitted tsconfig â€” ${diags.slice(0, 3).join(" | ")}`,
+      );
+    }
+  });
+
+  it("declares every bare specifier its emitted source imports (the other half of the same invariant)", () => {
+    for (const { kind } of KIND_CASES) {
+      const result = scaffoldProject(siteBrief(kind));
+      const pkg = JSON.parse(bodyOf(result, "package.json")) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      const declared = new Set([...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})]);
+      const undeclared: string[] = [];
+      for (const f of okFiles(result)) {
+        if (!/\.(m|c)?[tj]sx?$/.test(f.path)) continue;
+        for (const m of f.body.matchAll(/(?:from\s*|import\s*\(\s*)["']([^"']+)["']/g)) {
+          const spec = m[1]!;
+          if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:")) continue;
+          const parts = spec.split("/");
+          const name = parts[0]!.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0]!;
+          if (!declared.has(name)) undeclared.push(`${f.path} imports "${spec}"`);
+        }
+      }
+      assert.deepEqual(undeclared, [], `${kind}: the emitted package must declare every runtime its source imports`);
+    }
+  });
+
+  it("declares a real tool and an emitted target for every script the emitted package declares", () => {
+    // W359 (kind-gate) / fixes/358_close_kindjsx.md Â§3: the emitted script
+    // surface per kind â€” every kind declares typecheck+test, only `service`
+    // adds `start`, and the two vite kinds add dev/build/preview. A declared
+    // script the emitter cannot honour is the same defect class as a tsconfig
+    // that does not admit the emitted source.
+    const TOOL_OWNER: Record<string, string | null> = { tsc: "typescript", vite: "vite", node: null };
+    for (const { kind } of KIND_CASES) {
+      const result = scaffoldProject(siteBrief(kind));
+      const paths = okFiles(result).map((f) => f.path);
+      const pkg = JSON.parse(bodyOf(result, "package.json")) as {
+        scripts?: Record<string, string>;
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      const declared = new Set([...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})]);
+      const expected =
+        kind === "app" || kind === "game"
+          ? ["dev", "build", "preview", "typecheck", "test"]
+          : kind === "service"
+            ? ["typecheck", "test", "start"]
+            : ["typecheck", "test"];
+      assert.deepEqual(
+        Object.keys(pkg.scripts ?? {}).sort(),
+        [...expected].sort(),
+        `${kind}: the declared script surface`,
+      );
+      for (const [name, cmd] of Object.entries(pkg.scripts ?? {})) {
+        const tokens = String(cmd).split(/\s+/);
+        const bin = tokens[0]!;
+        const owner = bin in TOOL_OWNER ? TOOL_OWNER[bin]! : bin;
+        assert.ok(
+          owner === null || declared.has(owner),
+          `${kind}/${name}: the tool "${bin}" must be declared by the emitted package (${String(owner)})`,
+        );
+        for (const target of tokens.filter((t) => !t.startsWith("-") && /\/|\.(tsx?|mjs|js|html|json)$/.test(t))) {
+          assert.ok(
+            paths.includes(target.replace(/^\.\//, "")),
+            `${kind}/${name}: names ${target}, which this emit does not write`,
+          );
+        }
+      }
+    }
+  });
+
+  it("keeps the webapp's derived site (the gate suppresses only a kind with no declared renderer)", () => {
+    const webapp = scaffoldProject(siteBrief("app"));
+    const paths = okFiles(webapp).map((f) => f.path);
+    assert.ok(paths.includes("src/ui/router.tsx"), "the webapp still emits the derived multi-page site");
+    assert.ok(
+      paths.filter((p) => /^src\/ui\/pages\/.+\.tsx$/.test(p)).length >= 2,
+      "â€¦with â‰¥2 real page modules",
+    );
+    // W358's merge survives: the webapp console keeps the real bound field set + interaction.
+    const ui = bodyOf(webapp, "src/ui/console.tsx");
+    for (const field of ["productId", "quantity"]) {
+      assert.ok(ui.includes(`name="${field}"`), `the webapp console keeps the real bound field ${field}`);
+    }
+    assert.ok(ui.includes("onSubmit={onSubmit}"), "the webapp console keeps the real interaction");
+    for (const kind of ["game", "tool", "service", "library"] as const) {
+      const other = okFiles(scaffoldProject(siteBrief(kind))).map((f) => f.path);
+      assert.ok(
+        !other.some((p) => /^src\/ui\/pages\//.test(p)),
+        `${kind}: no react-importing site module is emitted â€” its package declares no react`,
+      );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/354 A2-F11 â€” the `game` kind's platformer is a deterministic scaffold
 // TEMPLATE, marked in the envelope and the emitted README (never presented as
 // brief-generated work).
 // ---------------------------------------------------------------------------
-describe("A2-F11 — the game template is marked honestly", () => {
+describe("A2-F11 â€” the game template is marked honestly", () => {
   it("gameTemplate:true rides the envelope and the README states the deterministic-template boundary", () => {
     const result = scaffoldProject(seedProject({ kind: "game", brief: "A physics puzzle game about stacking crates." }));
     const files = okFiles(result);
@@ -2860,10 +3110,10 @@ describe("A2-F11 — the game template is marked honestly", () => {
 });
 
 // ---------------------------------------------------------------------------
-// fixes/354 A2-F13 — ONE value-position CJS-residue predicate, exported so the
+// fixes/354 A2-F13 â€” ONE value-position CJS-residue predicate, exported so the
 // emit boundary (headless) and the synthesis validator (codegen) share it.
 // ---------------------------------------------------------------------------
-describe("A2-F13 — the shared CJS-residue predicate", () => {
+describe("A2-F13 â€” the shared CJS-residue predicate", () => {
   it("flags module/exports residue, leaves clean ESM alone, and adds `export =` only on request", () => {
     assert.deepEqual(cjsResidueHits("export const x = 1;\n"), [], "clean ESM is not residue");
     assert.ok(cjsResidueHits("module.exports = { run };\n").includes("module.exports"));
@@ -2881,12 +3131,12 @@ describe("A2-F13 — the shared CJS-residue predicate", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 351 — web-marketing multi-page site emission.
+// 351 â€” web-marketing multi-page site emission.
 // A `web-marketing` webapp brief whose generated module exposes page content
 // emits one file per page + a router + a shared layout + a designed stylesheet
 // + the ordering flow, instead of the single `src/ui/console.tsx` shell.
 // ---------------------------------------------------------------------------
-describe("351 — web-marketing multi-page site emission", () => {
+describe("351 â€” web-marketing multi-page site emission", () => {
   function marketing(over: Partial<Project> = {}): Project {
     return {
       ...seedProject({
@@ -3021,19 +3271,19 @@ describe("351 — web-marketing multi-page site emission", () => {
       );
     }
     const fixed = marketing();
-    assert.deepEqual(scaffoldProject(fixed), scaffoldProject(fixed), "same project ⇒ byte-identical site");
+    assert.deepEqual(scaffoldProject(fixed), scaffoldProject(fixed), "same project â‡’ byte-identical site");
   });
 });
 
 // ---------------------------------------------------------------------------
-// fixes/352 — the measured defects on the real emitted bytes:
+// fixes/352 â€” the measured defects on the real emitted bytes:
 //   * the marketing emitter must accept the PARAMETERISED-renderer shape (the
 //     green keyed bakery tree), not only zero-arg data getters;
 //   * schema/api/store must be REAL modules in tree mode, never `export *`;
 //   * the store must persist; the oracle must be behavioural or skip honestly;
 //   * the tree ships LICENSE + CI + a project-derived version.
 // ---------------------------------------------------------------------------
-describe("fixes/352 — renderer-shape site, real tree modules, release hygiene", () => {
+describe("fixes/352 â€” renderer-shape site, real tree modules, release hygiene", () => {
   function rendererProject(): Project {
     return {
       ...seedProject({
@@ -3119,7 +3369,7 @@ describe("fixes/352 — renderer-shape site, real tree modules, release hygiene"
     assert.match(bodyOf(result, "src/ui/console.tsx"), /from "\.\/router\.tsx"/, "the console mounts the router");
   });
 
-  it("tree mode emits REAL api/store/domain modules — never `export *`", () => {
+  it("tree mode emits REAL api/store/domain modules â€” never `export *`", () => {
     const files = okFiles(scaffoldProject(rendererProject()));
     for (const p of ["src/api/routes.ts", "src/state/store.ts", "src/domain/web_marketing.ts"]) {
       const body = files.find((f) => f.path === p)!.body;
@@ -3139,7 +3389,7 @@ describe("fixes/352 — renderer-shape site, real tree modules, release hygiene"
     assert.match(spec, /const fn = treeModule\["renderHome"\] as unknown as/, "a wired capability calls the real export");
     assert.match(spec, /await fn\(\)/, "the call is awaited");
     assert.match(spec, /assert\.notEqual\(outcome, undefined/, "the outcome is asserted");
-    assert.ok(specSourceHasBehaviouralAssert(spec), "≥1 behavioural assertion");
+    assert.ok(specSourceHasBehaviouralAssert(spec), "â‰¥1 behavioural assertion");
     assert.ok(
       !/let __jobOutcomeOk = false;/.test(spec),
       "the pre-352 non-NaN/any-throw probe is gone",
@@ -3170,10 +3420,10 @@ describe("fixes/352 — renderer-shape site, real tree modules, release hygiene"
 });
 
 // ---------------------------------------------------------------------------
-// 353 — the shape-tolerant briefed site, bridge/duplicate cleanup, release
+// 353 â€” the shape-tolerant briefed site, bridge/duplicate cleanup, release
 // hygiene and the game surface (the measured scorecard defects).
 // ---------------------------------------------------------------------------
-describe("353 — shape-tolerant briefed site + release/game hardening", () => {
+describe("353 â€” shape-tolerant briefed site + release/game hardening", () => {
   /** A multi-page brief whose tree exposes async getters + a sync getter + a mutator. */
   function bakeryProject(over: Partial<Project> = {}): Project {
     return {
@@ -3295,16 +3545,16 @@ describe("353 — shape-tolerant briefed site + release/game hardening", () => {
 });
 
 // ---------------------------------------------------------------------------
-// fixes/347-2 — the emitted surface follows the BRIEF's kind, the runnable
+// fixes/347-2 â€” the emitted surface follows the BRIEF's kind, the runnable
 // entries are REAL for every kind, the no-invention rule is hard, and the
 // gate-wiring seam is proven against dod's own kind-aware trace.
 // ---------------------------------------------------------------------------
-describe("347-2 — kind follows the brief + real runnable entries", () => {
+describe("347-2 â€” kind follows the brief + real runnable entries", () => {
   it("a stored `app` label does not beat a brief that plainly says game (agrees with the gate)", () => {
     const p = fullRun({ kind: "app", brief: "Build Sky Hopper, a 2D browser arcade game with platforms and a start screen." });
-    // The gate's own surface decision for the same brief is the game contract…
+    // The gate's own surface decision for the same brief is the game contractâ€¦
     assert.equal(productSurfaceKindOf({ brief: p.brief, kind: p.kind }), "game");
-    // …and the emitter now agrees, so it writes the game surface, not a webapp.
+    // â€¦and the emitter now agrees, so it writes the game surface, not a webapp.
     assert.equal(projectKindOf(p), "game");
     const files = okFiles(scaffoldProject(p));
     assert.ok(
@@ -3361,7 +3611,7 @@ describe("347-2 — kind follows the brief + real runnable entries", () => {
   });
 });
 
-describe("347-2 — the gate-wiring seam (surfaceTreeRows)", () => {
+describe("347-2 â€” the gate-wiring seam (surfaceTreeRows)", () => {
   /** A multi-page web fixture whose tree exposes real, mountable exports. */
   function webFixture(): Project {
     return {
@@ -3447,7 +3697,7 @@ describe("347-2 — the gate-wiring seam (surfaceTreeRows)", () => {
   });
 });
 
-describe("347-2 — lockfile policy + the no-invention hard rule", () => {
+describe("347-2 â€” lockfile policy + the no-invention hard rule", () => {
   it("the README justifies the absent lockfile and CI installs without one", () => {
     const result = scaffoldProject(fullRun());
     const readme = bodyOf(result, "README.md");
@@ -3463,7 +3713,7 @@ describe("347-2 — lockfile policy + the no-invention hard rule", () => {
   });
 
   it("refuses to author a price/award/address literal when the brief withholds one", () => {
-    const withheld = fullRun({ kind: "app", brief: "A bakery site. No prices are published — do not invent numbers." });
+    const withheld = fullRun({ kind: "app", brief: "A bakery site. No prices are published â€” do not invent numbers." });
     // Control: with no invented literal the emission is clean.
     assert.ok(scaffoldProject(withheld).ok, "a withholding brief still emits when nothing is invented");
     // A caller hook that sneaks a price literal into the scaffold-authored UI is refused.
@@ -3482,15 +3732,15 @@ describe("347-2 — lockfile policy + the no-invention hard rule", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 358 (R-10) � the console Preview's caution-banner sentence follows the README
+// 358 (R-10) ï¿½ the console Preview's caution-banner sentence follows the README
 // the emitter actually wrote. The alert used to decide its copy by matching ONE
-// literal (the seam's `RED TREE �` banner line), so a below-floor run � whose
+// literal (the seam's `RED TREE ï¿½` banner line), so a below-floor run ï¿½ whose
 // README leads with the SCAFFOLD's `> [!CAUTION]` / `BELOW-FLOOR PLAN` banner
-// instead � rendered the FALSE sentence "The archive's README does not carry the
+// instead ï¿½ rendered the FALSE sentence "The archive's README does not carry the
 // caution banner for this withheld reason." Both branches are pinned here against
 // real emissions, and the sentence now comes from ONE producer keyed on the bytes.
 // ---------------------------------------------------------------------------
-describe("358 (R-10) � the Preview's caution-banner sentence follows the emitted README", () => {
+describe("358 (R-10) ï¿½ the Preview's caution-banner sentence follows the emitted README", () => {
   const BANNERED = "The archive's README carries the same caution banner.";
   const NOT_BANNERED =
     "The archive's README does not carry the caution banner for this withheld reason.";
@@ -3505,7 +3755,7 @@ describe("358 (R-10) � the Preview's caution-banner sentence follows the emitt
         level: "warn",
         event: "p6.synthesis.refused",
         detail:
-          "RT_E_PLAN_UNDERPRODUCED � chunk 1/8 refused � accepted tree has 0 module(s) but the brief demands >= 8",
+          "RT_E_PLAN_UNDERPRODUCED ï¿½ chunk 1/8 refused ï¿½ accepted tree has 0 module(s) but the brief demands >= 8",
       },
     ],
   });
@@ -3535,7 +3785,7 @@ describe("358 (R-10) � the Preview's caution-banner sentence follows the emitt
     assert.equal(
       withheldTreeReadmeNote(readme),
       BANNERED,
-      "so the alert renders 'carries the same caution banner' � the pre-358 code rendered the false one",
+      "so the alert renders 'carries the same caution banner' ï¿½ the pre-358 code rendered the false one",
     );
   });
 
@@ -3560,7 +3810,7 @@ describe("358 (R-10) � the Preview's caution-banner sentence follows the emitt
     assert.equal(withheldTreeReadmeNote(readme), NOT_BANNERED, "and the fallback sentence is the true one");
   });
 
-  it("the alert's copy is the ONE producer's output � no branch literal remains in the component", () => {
+  it("the alert's copy is the ONE producer's output ï¿½ no branch literal remains in the component", () => {
     const preview = readFileSync(
       fileURLToPath(new URL("../components/software-preview.tsx", import.meta.url)),
       "utf8",
@@ -3580,7 +3830,7 @@ describe("358 (R-10) � the Preview's caution-banner sentence follows the emitt
     assert.doesNotMatch(
       preview,
       /\.body\.includes\(|\.body\.startsWith\(/,
-      "and reads no README bytes of its own — the producer owns that decision",
+      "and reads no README bytes of its own â€” the producer owns that decision",
     );
     assert.doesNotMatch(
       preview,

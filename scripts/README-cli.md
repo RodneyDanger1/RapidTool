@@ -1,6 +1,7 @@
-# rapidtool-cli.mjs — file-based headless RapidTool driver
+<!-- W359 PAUSED 2026-10-15 - work in progress; see wave_plans/W359/HANDOFF.md for what landed, what is half-done and what is left. -->
+# rapidtool-cli.mjs â€” file-based headless RapidTool driver
 
-Drive a RapidTool project with **no browser, no Vite server, no localStorage** —
+Drive a RapidTool project with **no browser, no Vite server, no localStorage** â€”
 just JSON files on disk. It is a thin `argv` wrapper over `src/lib/headless.ts`,
 which imports the existing pure engine/io/phases/report-intake exports read-only
 and dynamically imports the vault (`vault.ts`), crew (`crew.server.ts`),
@@ -11,7 +12,7 @@ modules when their subcommands run.
 `create` `run` `gate` `resume` `unattended` `approve` `reject` `retry` `ingest` `packet` `export` `emit`
 `tree-run` `repair` `edit` `summary` `vault` `search` `crew` `verify` `check` `design`
 `diagram` `artifacts` `doctor` `diagnose` `harvest` `swarm` `prompt` `bench`
-`mine` `knowledge` `lesson` `wild` `chat` `deepen` `fixtures` `scan` `eval` — from brief to verified artifact,
+`mine` `knowledge` `lesson` `wild` `chat` `deepen` `fixtures` `scan` `eval` â€” from brief to verified artifact,
 design tokens + SVG diagrams, an Obsidian-style knowledge vault, the
 runnable-scaffold writer (`emit`), per-file compile checks (`check`), telemetry
 diagnosis (`diagnose`), a bounded live-source harvester, the advisory
@@ -19,43 +20,43 @@ swarm/prompt/bench pillar tools, a cross-project pattern store, the human-gated
 lesson family (`list`/`propose`/`accept`/`supersede`/`refute`/`advise`/`verify`), wild-mode
 macro-runs (enable/start/pause/resume/stop), a grounded copilot turn, the E-13
 research-deepen recovery, a capability pre-flight, the brief-fixture
-drafter/approver (`fixtures` `--draft` / `--approve` — drafted cases stay
-pending until a human approves), the in-place edit verb (`edit` — dry-run by
-default, its own [Edit section](#edit-edit) below), and the emit→edit→re-emit
-continuation verbs `tree-run` + `repair` (rows #31–32 below).
+drafter/approver (`fixtures` `--draft` / `--approve` â€” drafted cases stay
+pending until a human approves), the in-place edit verb (`edit` â€” dry-run by
+default, its own [Edit section](#edit-edit) below), and the emitâ†’editâ†’re-emit
+continuation verbs `tree-run` + `repair` (rows #31â€“32 below).
 
 > **`tree-run` + `repair` + `edit` shipped (fixes/150 wave G1 + 216s); `emit --verify-kind` shipped
-> too (fixes/216z · T4.1).** The dir-based continuation verbs are callable today — rows #31–32
+> too (fixes/216z Â· T4.1).** The dir-based continuation verbs are callable today â€” rows #31â€“32
 > below and the [Tree-run and repair (landed); emit verify-kind (landed)](#tree-run-and-repair-landed-emit-verify-kind-landed)
 > section describe their real envelopes (`edit`'s own section: [Edit (`edit`)](#edit-edit)). `emit --verify-kind` is a **flag of
 > `emit`**, not its own case arm: `grep -c 'case "'` reads 39 and none of the 39 case arms is
-> `verify-kind` — the flag rides inside the `emit` case arm, calling the exported seam
+> `verify-kind` â€” the flag rides inside the `emit` case arm, calling the exported seam
 > `compile-check.server.ts#verifyKindDir` (cited by symbol, never by a line number: the
 > numbers drift every wave); a failed leg flips the envelope to
 > `ok:false` + `RT_E_VERIFY_KIND_FAILED`, exit 1).
 
-> **Ref note (W24-B4 · docs lane):** `fixes/150` is a **wave** reference — the per-lane logs
+> **Ref note (W24-B4 Â· docs lane):** `fixes/150` is a **wave** reference â€” the per-lane logs
 > `fixes/150_g*.md` were **never filed** (`fixes/151_watchdog.md:19`: "No `fixes/150_g*.md` logs
 > exist yet (all 5 lanes)"; `:162`: "All 5 lanes owe fixes/150_gN.md logs"). `fixes/151_watchdog.md`
-> §1 is their record. Mentions of `fixes/150 wave G1` in this file mean that wave's G1 lane
-> (`tree-run` + `repair`) — there is no `fixes/150_g1.md` to read.
+> Â§1 is their record. Mentions of `fixes/150 wave G1` in this file mean that wave's G1 lane
+> (`tree-run` + `repair`) â€” there is no `fixes/150_g1.md` to read.
 
 Every subcommand prints a **single JSON object** to stdout (parseable by an AI
 agent) whose envelope always carries `schema_version: 1`, `cmd` and
 `exit_code`, and exits with the machine **exit-code taxonomy** below. Failure
-envelopes additionally carry a `code` — a stable `RT_E_*` id (see **Error
+envelopes additionally carry a `code` â€” a stable `RT_E_*` id (see **Error
 codes (RT_E_*)** below). This file
 is the agent-facing contract: an AI driver (Hermes-style loop) can run a whole
 project end-to-end by reading only the JSON below.
 
-## Asking for help (W49 · 335-4)
+## Asking for help (W49 Â· 335-4)
 
 `--help` / `-h` / `help` print the synopsis as a **SUCCESS**: `ok: true`, exit
 0, with `usage` (the same object the refusal paths carry). A help request is not
 an error, so an agent that branches on the exit code never reads discovery as a
 failure. Name a verb (`--help emit`, `help emit`) to narrow `usage.commands` to
 that verb's single line. Before W49 these three spellings were an empty/unknown
-subcommand — a coded `RT_E_VALIDATION` refusal at exit 1.
+subcommand â€” a coded `RT_E_VALIDATION` refusal at exit 1.
 
 ## Requirements
 
@@ -77,36 +78,36 @@ own location, and resolves `.env` (see "API key resolution") relative to the
 `scripts/run-eval.mjs` (keyed mode) declares the checkout's `<ROOT>/.env` via `RAPIDTOOL_LLM_ENV_FILE`, so the eval driver resolves the same key as the keyed verbs below (341-2).
 
 Keyed verbs (`crew`, `verify`, `prompt`, `chat`, `create`'s `enforceDod` default,
-… ) resolve the key from TWO sources, in this order (W45 · 331-1):
+â€¦ ) resolve the key from TWO sources, in this order (W45 Â· 331-1):
 
-1. **`<working directory>/.env`** — the `DEEPSEEK_API_KEY` entry. Run the CLI from
+1. **`<working directory>/.env`** â€” the `DEEPSEEK_API_KEY` entry. Run the CLI from
    the repo root (the documented invocation) and this is the repo's own `.env`.
-2. **the process environment** — `DEEPSEEK_API_KEY` (on Windows this includes a
+2. **the process environment** â€” `DEEPSEEK_API_KEY` (on Windows this includes a
    User/Machine-scope variable inherited into the shell).
 
 A process `DEEPSEEK_API_KEY` that is **present but blank/whitespace is an
 intentional DISABLE**: it forces the keyless floor and `.env` is NOT consulted.
-Absence is different — an *unset* variable lets `.env` supply the key. This is the
+Absence is different â€” an *unset* variable lets `.env` supply the key. This is the
 repo's keyless-forcing convention (a harness that spawns the CLI with
 `DEEPSEEK_API_KEY: ""` keeps it keyless even when a real `.env` sits in the cwd).
 
 **The `.env` value WINS when both are present (non-blank).** Rationale: the `.env`
 beside the repo is the key store this checkout declares; a stale machine-scope
-variable must never silently shadow it — exactly the defect W45 repaired (a stale
+variable must never silently shadow it â€” exactly the defect W45 repaired (a stale
 User-scope key made every keyed call 401 on a key the operator never chose).
 
 When both sources hold a non-blank, DIFFERENT value the run is not silent: the CLI
 prints a **loud, coded** signal to **stderr** naming BOTH last-4 tails and proceeds
-with the `.env` key —
+with the `.env` key â€”
 
 ```
-[RT_E_LLM_KEY_SHADOWED] DEEPSEEK_API_KEY conflict: the .env key (<path>, tail …xxxx)
-WINS over the process-environment key (tail …yyyy); using the .env key.
+[RT_E_LLM_KEY_SHADOWED] DEEPSEEK_API_KEY conflict: the .env key (<path>, tail â€¦xxxx)
+WINS over the process-environment key (tail â€¦yyyy); using the .env key.
 ```
 
 Only the last 4 characters of any key are ever printed, logged, or returned; the
 full key never appears in an envelope, a telemetry row, or a refusal. A rejected
-credential (HTTP 401) is its own class — `RT_E_LLM_KEY_REJECTED` — and both the
+credential (HTTP 401) is its own class â€” `RT_E_LLM_KEY_REJECTED` â€” and both the
 message and the envelope's `remedy` name the SOURCE the key came from (the `.env`
 path, or "the process environment"), by tail only.
 
@@ -118,31 +119,40 @@ behavior applies unchanged, so tooling that spawns the CLI elsewhere stays keyle
 
 The Vite dev and preview servers run through `scripts/with-app-env.mjs`, which
 declares the repo `.env` to the SERVER-SIDE resolver by setting
-`RAPIDTOOL_LLM_ENV_FILE` (a PATH — never a secret, never `VITE_`) in the child
+`RAPIDTOOL_LLM_ENV_FILE` (a PATH â€” never a secret, never `VITE_`) in the child
 environment. The provider (`src/lib/llm/providers/key-source.server.ts`) applies
-this SAME rule on read, so the console's server functions — e.g. **Spawn crew**
-on `/run/<id>` — resolve the repo `.env` key instead of a stale User-scope one,
+this SAME rule on read, so the console's server functions â€” e.g. **Spawn crew**
+on `/run/<id>` â€” resolve the repo `.env` key instead of a stale User-scope one,
 and a rejected key still names its source. With no declared file the read is a
 plain `process.env` read, so a bare Node / unit-test process is unchanged.
 
 ## Commands
 
 ```bash
-# 1. Create a new project (writes <file>.json atomically; no --out → <slug>.json in the CWD — the intermediate file stays where the shell chains the verbs)
+# 1. Create a new project (writes <file>.json atomically; no --out â†’ <slug>.json in the CWD â€” the intermediate file stays where the shell chains the verbs)
 node --experimental-strip-types scripts/rapidtool-cli.mjs create \
   --brief "Build a field-service dispatch board for HVAC." --name "HVAC Dispatch" --out build.json
 #    --brief takes PROSE, or a PATH that names an EXISTING readable file: BOTH
 #    `--brief <path>` and `--brief @<path>` (the same `@file` convention as
 #    `ingest --report`) READ the file. A YAML-front-matter corpus fixture
 #    (research/eval-corpus/*.md, e.g. house-flip-manager.md) carries its prose
-#    in the `brief:` scalar — a path unwraps that instead of feeding the front
+#    in the `brief:` scalar â€” a path unwraps that instead of feeding the front
 #    matter to the lattice. Any value that is NOT an existing file is the brief
-#    prose, so a path is never silently used as prose (AW45-c07 — the pre-fix
+#    prose, so a path is never silently used as prose (AW45-c07 â€” the pre-fix
 #    bug named the project after the path and mined nouns from the filename).
 node --experimental-strip-types scripts/rapidtool-cli.mjs create \
   --brief research/eval-corpus/house-flip-manager.md --out build.json
 node --experimental-strip-types scripts/rapidtool-cli.mjs create \
   --brief @research/eval-corpus/house-flip-manager.md --out build.json   # equivalent
+#    --kind <app|tool|game|library|service> (W359) stores an EXPLICIT delivery
+#    kind on the record â€” the five-value vocabulary is `types.ts: DELIVERY_KINDS`
+#    and anything else is a usage refusal (exit 1, RT_E_VALIDATION). OMITTING
+#    --kind stores NO kind: the project is created kind-less and the ONE
+#    resolver (`engine.deliveryKindOf`, read from the brief by every consumer)
+#    decides â€” an absent kind never silently becomes `app`. An explicit --kind
+#    wins over that inference (the stored field is read first).
+node --experimental-strip-types scripts/rapidtool-cli.mjs create \
+  --brief research/eval-corpus/arcade-breakout.md --kind game --out build.json
 
 # 2. Advance one phase (deterministic; add --live for real keyless research + optional DeepSeek narrative)
 node --experimental-strip-types scripts/rapidtool-cli.mjs run --project build.json [--live]
@@ -151,8 +161,8 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs run --project build.js
 #    --autopilot auto-approves non-stock, non-forceHuman gates only
 node --experimental-strip-types scripts/rapidtool-cli.mjs gate --project build.json [--autopilot] [--live] [--resynthesize]
 
-# 4. Approve / reject the pending gate (`reject` requires ≥12 characters of --note;
-#    a shorter note is refused — exit 1 RT_E_VALIDATION, nothing written. Both
+# 4. Approve / reject the pending gate (`reject` requires â‰¥12 characters of --note;
+#    a shorter note is refused â€” exit 1 RT_E_VALIDATION, nothing written. Both
 #    verbs require an explicit seat: --seat autopilot (machine) or --i-am-human
 #    (TTY + typed RT_HUMAN_SEAT_TOKEN re-entry; refused off-TTY))
 node --experimental-strip-types scripts/rapidtool-cli.mjs approve --project build.json [--force]
@@ -175,7 +185,7 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs export --project build
 # 9. Emit the runnable scaffold (project files + embedded generated module);
 #    --check adds one compile verdict per emitted file; --run executes the emitted
 #    tree in-loop (parse + every emitted *.spec.ts + entry smoke; exit 1 on red,
-#    exit 0 when green — the envelope still names an unverified declared toolchain);
+#    exit 0 when green â€” the envelope still names an unverified declared toolchain);
 #    --require-verified opts into exit 5 for that green-but-unverified state;
 #    --git lands the emitted tree in its own directory: init when absent, then ONE
 #    Conventional-Commits commit staged from the emitted manifest only (idempotent;
@@ -183,11 +193,11 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs export --project build
 #    combined with --run, a RED run verdict withholds the commit (coded
 #    RT_E_TREE_RUN_FAILED; the emitted tree is still written on disk);
 #    --red-tree banner admits an uncleared red tree-run WITH the unmissable banner
-#    on the emitted README (default refuse — see the Emit section)
+#    on the emitted README (default refuse â€” see the Emit section)
 node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--git] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified]
 
 # 10. Compact JSON-safe snapshot (name, currentPhase, status, phaseCounts, lastGate,
-#     researchCount, memoryCount, vaultReady) — `status` is the honest terminal status:
+#     researchCount, memoryCount, vaultReady) â€” `status` is the honest terminal status:
 #     a seal with failed DoD gates renders `complete_with_failures`, never a clean `complete`
 node --experimental-strip-types scripts/rapidtool-cli.mjs summary --project build.json
 
@@ -216,7 +226,7 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs diagram --project buil
 # 18. Index the project's artifacts (agents: read this before deciding what to fetch)
 node --experimental-strip-types scripts/rapidtool-cli.mjs artifacts --project build.json
 
-# 19. Capability pre-flight: llm / research / runner / node — no project file needed
+# 19. Capability pre-flight: llm / research / runner / node â€” no project file needed
 node --experimental-strip-types scripts/rapidtool-cli.mjs doctor
 
 # 20. Telemetry diagnosis: recent log tail, timeline + most-likely-cause heuristic
@@ -239,58 +249,58 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs mine --dir src/lib [--
 
 # 26. Cross-project JSON pattern store: append one entry (idempotent) / search it
 node --experimental-strip-types scripts/rapidtool-cli.mjs knowledge --store patterns.json \
-  --save '{"project":"hvac","kind":"pattern","title":"Auth refresh pattern","tags":["auth"],"body":"…"}'
+  --save '{"project":"hvac","kind":"pattern","title":"Auth refresh pattern","tags":["auth"],"body":"â€¦"}'
 node --experimental-strip-types scripts/rapidtool-cli.mjs knowledge --store patterns.json --find "auth refresh" [--limit 5]
 
 # 27. Bounded headless wild-mode macro-run + lifecycle (--start enables Wild Mode AND begins
 #     a run; --pause/--resume/--stop control it; default steps an already-active run).
-#     --agent-seal = THE agent seal (313 D1; a WILD-RUN concept — this is the ONLY verb that
+#     --agent-seal = THE agent seal (313 D1; a WILD-RUN concept â€” this is the ONLY verb that
 #     accepts it): classifier-as-approver (coded [seat agent-seal] rows, never a human seat),
 #     bounded classifier-reject retries, and ONE DoD-repair pass on a hard-DoD red.
 #     approve/gate/run/resume/unattended REFUSE --agent-seal with RT_E_VALIDATION + the
-#     pointer back here — a governance flag is never silently ignored (316 H3).
+#     pointer back here â€” a governance flag is never silently ignored (316 H3).
 node --experimental-strip-types scripts/rapidtool-cli.mjs wild --project build.json [--start] [--steps 24] [--agent-seal]
 
-# 28. Grounded copilot turn over the project (needs DEEPSEEK_API_KEY) — same chat.server.ts
+# 28. Grounded copilot turn over the project (needs DEEPSEEK_API_KEY) â€” same chat.server.ts
 #     function the UI Chat tab calls; --history is an optional JSON array of prior turns
 node --experimental-strip-types scripts/rapidtool-cli.mjs chat --project build.json --ask "What is the isolation policy?" \
   [--history '[{"role":"user","text":"Summarize the architecture."}]']
 
 # 29. E-13 deepen: re-run live research over a COMPLETED research phase (0/7/11) whose gate
-#     failed with p7-research unmet — re-records the phase gate against the deepened corpus
+#     failed with p7-research unmet â€” re-records the phase gate against the deepened corpus
 node --experimental-strip-types scripts/rapidtool-cli.mjs deepen --project build.json [--phase 7]
 
-# 30. The lesson family (fixes/98 §7 — project-local lesson memory ↔ the cross-project
+# 30. The lesson family (fixes/98 Â§7 â€” project-local lesson memory â†” the cross-project
 #     knowledge store; list/propose never write, accept is THE human-gated cross-project
 #     write, supersede/refute are append-only store telemetry)
 node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --list --project build.json [--brief "servo tuning"] [--limit 10]
-node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --propose --brief "raw evidence for the lesson…" [--project NAME] [--kind fix|pattern|note] [--tags a,b] [--title "…"]
+node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --propose --brief "raw evidence for the lessonâ€¦" [--project NAME] [--kind fix|pattern|note] [--tags a,b] [--title "â€¦"]
 node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --accept --project build.json --out lessons.json [--actor NAME] [--limit 5]
 node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --supersede --knowledge-file lessons.json --id K1a2b3c4d [--evidence "newer guidance replaces this"]
 node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --refute --knowledge-file lessons.json --id K1a2b3c4d [--evidence "observed the opposite"]
 
-# 31. tree-run (SHIPPED — fixes/150 wave G1): standalone dir-based treeRun over an EXISTING
-#     emitted dir — read-only, never re-emits over the dir (an edited file is never
-#     clobbered); green → exit 0; red → exit 1 with the first not-ok tail +
+# 31. tree-run (SHIPPED â€” fixes/150 wave G1): standalone dir-based treeRun over an EXISTING
+#     emitted dir â€” read-only, never re-emits over the dir (an edited file is never
+#     clobbered); green â†’ exit 0; red â†’ exit 1 with the first not-ok tail +
 #     RT_E_TREE_RUN_FAILED. --project adds the read-only hash-checked dirDirty report.
-# 32. repair (SHIPPED — fixes/150 wave G1): hash-checked re-import of an EDITED emitted dir
+# 32. repair (SHIPPED â€” fixes/150 wave G1): hash-checked re-import of an EDITED emitted dir
 #     into the ledger (refused paths listed, never silently dropped), re-run the oracle,
 #     bounded repair cycles against the dir (the dir is never re-emitted over); converged
-#     → exit 0 (minted/gate/cycles/import in the envelope), budget exhausted → exit 1
-#     RT_E_REPAIR_FAILED, pre-flight refusal → exit 1 RT_E_VALIDATION (ledger persisted
-#     after every completed run — converged or failed). Keyless: no repair loop runs —
+#     â†’ exit 0 (minted/gate/cycles/import in the envelope), budget exhausted â†’ exit 1
+#     RT_E_REPAIR_FAILED, pre-flight refusal â†’ exit 1 RT_E_VALIDATION (ledger persisted
+#     after every completed run â€” converged or failed). Keyless: no repair loop runs â€”
 #     the deterministic floor stands and the budget exhausts honestly.
-# 33. emit --verify-kind (SHIPPED — fixes/216z · T4.1): opt-in bounded scratch-copy install +
+# 33. emit --verify-kind (SHIPPED â€” fixes/216z Â· T4.1): opt-in bounded scratch-copy install +
 #     the tree's declared build/test leg (webapp/game kinds) in a temp dir. A FLAG of `emit`
 #     (no own case arm); a failed leg flips the envelope to ok:false + RT_E_VERIFY_KIND_FAILED.
-node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir emitted/          # standalone dir-based treeRun — no re-emit
+node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir emitted/          # standalone dir-based treeRun â€” no re-emit
 node --experimental-strip-types scripts/rapidtool-cli.mjs repair --dir emitted/ --project build.json   # re-import edited tree, re-run oracle, bounded repair cycles
 node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json --out emitted/ --verify-kind   # flag of `emit` (no own case arm)
-# 34. eval (W23-L5 · T5.3 — SHIPPED, read-only): the M1–M9 rubric + per-case rows + history
+# 34. eval (W23-L5 Â· T5.3 â€” SHIPPED, read-only): the M1â€“M9 rubric + per-case rows + history
 #     deltas/trend over the keyed-eval harness's own documents (research/eval-out/results.json
 #     + history.json + the run marker; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides
 #     the dir, --history overrides just the trend file, --slug filters to one corpus case).
-#     No keyed calls, no writes, no network, nothing fabricated — a missing history prints as
+#     No keyed calls, no writes, no network, nothing fabricated â€” a missing history prints as
 #     'no history', never a fake 0 delta.
 node --experimental-strip-types scripts/rapidtool-cli.mjs eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]
 #     The HARNESS that WRITES this scorecard is `npm run eval` (scripts/run-eval.mjs). W50
@@ -299,17 +309,17 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs eval [--dir <eval-out>
 #     EVAL_OUT_DIR); to regenerate the tracked scorecard on purpose, name it:
 #     `npm run eval -- --out research/eval-out`.
 
-# 35. resume (T-107.7 — REAL, W36): read the per-phase checkpoint that run/gate wrote beside
+# 35. resume (T-107.7 â€” REAL, W36): read the per-phase checkpoint that run/gate wrote beside
 #     the project dir, admit it (identity + mode + integer phase sanity), hydrate it, and
 #     re-enter at the recorded phase through the same driver; the envelope prints the
-#     snapshot age — never a silent resume. Exit taxonomy identical to gate (2 = parked).
+#     snapshot age â€” never a silent resume. Exit taxonomy identical to gate (2 = parked).
 node --experimental-strip-types scripts/rapidtool-cli.mjs resume --project build.json [--autopilot] [--live]
 
-# 36. unattended (W-47 — REAL, W36): the scheduler-facing drive — re-enters from a checkpoint
+# 36. unattended (W-47 â€” REAL, W36): the scheduler-facing drive â€” re-enters from a checkpoint
 #     when one exists (crash recovery), else starts from the named project file; autopilot +
 #     live until parked. NOT a daemon: a host hook (Windows Task Scheduler / cron) invokes it
 #     on a cadence. 341-6: it passes machineGates, so a stock HITL gate (P4/P5/P8/P9) whose DoD
-#     passes is cleared through the ledgered machine actor (`approve --seat autopilot`) — only a
+#     passes is cleared through the ledgered machine actor (`approve --seat autopilot`) â€” only a
 #     forceHuman gate, or any red DoD gate, still parks (exit 2).
 node --experimental-strip-types scripts/rapidtool-cli.mjs unattended --project build.json
 ```
@@ -320,10 +330,10 @@ gate, then `approve` (or `reject`) that gate explicitly, then `gate` again.
 
 ## Driving to completion (agent loop)
 
-Stock HITL gates (P4, P5, P8, P9) — and any `forceHuman` gate — are **never**
+Stock HITL gates (P4, P5, P8, P9) â€” and any `forceHuman` gate â€” are **never**
 auto-approved, even with `--autopilot` (governance rule R3/B-03). An
-`approve --seat autopilot` on a `forceHuman` gate is refused CODED — exit 1,
-`RT_E_VALIDATION`, remedy = the human door (`--i-am-human` / `reject --note`) —
+`approve --seat autopilot` on a `forceHuman` gate is refused CODED â€” exit 1,
+`RT_E_VALIDATION`, remedy = the human door (`--i-am-human` / `reject --note`) â€”
 never the exit-4 internal class: it is a deterministic governance refusal, not
 a runtime failure. So the honest autopilot loop is:
 
@@ -336,13 +346,13 @@ loop:
 
 `summary.status` is the HONEST terminal status (A4-E2(c), `engine.ts: terminalStatusOf`): a
 record's own `status` becomes `complete` as soon as P12 synthesizes, BEFORE its gate runs, so a
-run that seals with one or more FAILED DoD gates renders `complete_with_failures` — never a clean
+run that seals with one or more FAILED DoD gates renders `complete_with_failures` â€” never a clean
 `complete` chip. Treat both as terminal when you drive; read `summary.failedGates` /
 `sealedWithFailures` (and the exit 1 + `RT_E_GATES_FAILED`) to tell them apart.
 
 **`refusalCode` (W49 boundary).** A drive verb's envelope carries `refusalCode`
 when the invocation recorded a coded P6-synthesis refusal and still advanced on
-the deterministic floor — most importantly a keyed 401, which surfaces as
+the deterministic floor â€” most importantly a keyed 401, which surfaces as
 `RT_E_LLM_KEY_REJECTED`. It rides under its own name because `code` is reserved
 for a failed command: `ok:true` + `refusalCode` means *the step succeeded and a
 refusal was recorded during it*. The field is absent when no refusal happened.
@@ -353,14 +363,14 @@ An agent that drives RapidTool blind should read `ok` for the command's fate and
 
 Off by default. When on, research phases (P0/P7/P11) attempt:
 
-1. **Real keyless web search** — `freeWebSearch` (DuckDuckGo Lite → Wikipedia
+1. **Real keyless web search** â€” `freeWebSearch` (DuckDuckGo Lite â†’ Wikipedia
    fallback); Tavily when `TAVILY_API_KEY` is present in `process.env`.
-2. **DeepSeek phase narrative** — `completeDeepSeek` when `DEEPSEEK_API_KEY` is
+2. **DeepSeek phase narrative** â€” `completeDeepSeek` when `DEEPSEEK_API_KEY` is
    present in `process.env`.
 
 Every failure degrades gracefully to the deterministic result; no output is ever
 fabricated. `DEEPSEEK_API_KEY` (and the other knobs) are resolved from
-**`<working directory>/.env` first, then the process environment** — the `.env` value WINS when
+**`<working directory>/.env` first, then the process environment** â€” the `.env` value WINS when
 both are non-blank (the ambient key loses behind the coded `RT_E_LLM_KEY_SHADOWED` signal, tails
 only), and a present-but-blank process value is an intentional keyless disable. The full rule and
 provenance rule are in "API key resolution" above; run the CLI from the repo root to use the repo's
@@ -369,10 +379,10 @@ own `.env`.
 ## Vault (`vault`)
 
 Builds the project's **Obsidian-style knowledge vault**: one `.md` file per
-atomic note (memory rows, artifacts, research findings — via
+atomic note (memory rows, artifacts, research findings â€” via
 `vault.ts: buildVaultNotes`) plus an `_index.md` Map-of-Content hub
 (`vault.ts: vaultIndex`). Files are written into `--out <dir>` (default
-`<home>/RapidTool Software/<slug>/vault` — `<home>` = `os.homedir()`, `<slug>`
+`<home>/RapidTool Software/<slug>/vault` â€” `<home>` = `os.homedir()`, `<slug>`
 = the project name slugified exactly like the packet/JSON downloads, so the
 vault sits beside the emitted software under `<home>/RapidTool Software/<slug>/`;
 when the home location is unwritable it falls back to `<cwd>/<slug>/vault`;
@@ -385,17 +395,17 @@ always produces byte-identical files.
 
 `count` = number of atomic note files written (`_index.md` not counted). If the
 vault module (`src/lib/vault.ts`) is not present yet, the command fails cleanly:
-`{ "ok": false, "error": "…" }`, exit **4** (`RT_E_INTERNAL` — a missing/broken
+`{ "ok": false, "error": "â€¦" }`, exit **4** (`RT_E_INTERNAL` â€” a missing/broken
 module is a runtime failure in the arm's own catch, per the taxonomy below).
 Note files carry YAML frontmatter
 (`id/title/kind/phase/tags/score/source/url`) + the note body + a `## Links`
 section of resolved `[[wikilinks]]`; the MOC lists every note grouped by kind
-with wikilink rows, plus a tag index — Obsidian/Logseq-importable.
+with wikilink rows, plus a tag index â€” Obsidian/Logseq-importable.
 
 ## Search (`search`)
 
 Token-overlap search over the project's vault notes
-(`vault.ts: searchVault` — pure and deterministic; no network, no LLM).
+(`vault.ts: searchVault` â€” pure and deterministic; no network, no LLM).
 `--query` is required; `--limit` defaults to 10 (max 200). Hits are mapped to
 their agent-facing shape, best score first:
 
@@ -414,23 +424,23 @@ their agent-facing shape, best score first:
 ## Crew (`crew`)
 
 Runs the **advisory multi-agent crew** over the project's current phase
-(`crew.server.ts: runCrewServer`, dynamically imported — bare-Node friendly).
+(`crew.server.ts: runCrewServer`, dynamically imported â€” bare-Node friendly).
 The crew plans/researches/designs/reviews but never approves, rejects, or
 advances: its output is advisory. Requires `DEEPSEEK_API_KEY`; `--max-steps`
-caps turns (default 12, server clamps 1–24).
+caps turns (default 12, server clamps 1â€“24).
 
 ```json
 {
   "ok": true,
-  "messages": [ { "role": "planner", "type": "plan", "content": "…", "artifacts": [] } ],
-  "artifacts": [ { "phase": 4, "title": "…", "body": "…" } ],
+  "messages": [ { "role": "planner", "type": "plan", "content": "â€¦", "artifacts": [] } ],
+  "artifacts": [ { "phase": 4, "title": "â€¦", "body": "â€¦" } ],
   "stopped": "done"
 }
 ```
 
-No key → honest failure, exit 3 (backend not configured):
-`{ "ok": false, "reason": "not-configured", "code": "RT_E_LLM_NOT_CONFIGURED", "error": "… — set DEEPSEEK_API_KEY (repo .env or process environment) to enable the crew" }`.
-An agent should treat this as *actionable*, not as a crash — the machine never
+No key â†’ honest failure, exit 3 (backend not configured):
+`{ "ok": false, "reason": "not-configured", "code": "RT_E_LLM_NOT_CONFIGURED", "error": "â€¦ â€” set DEEPSEEK_API_KEY (repo .env or process environment) to enable the crew" }`.
+An agent should treat this as *actionable*, not as a crash â€” the machine never
 fabricates a session. A runtime/backend failure exits 4; a rejected credential
 carries `RT_E_LLM_KEY_REJECTED` and names the key's source (see "API key
 resolution").
@@ -439,8 +449,8 @@ resolution").
 
 Machine-run **verify-fix loop** over `project.generatedSource` against
 `project.brief` (`verify.server.ts: verifyAndFixServer`, dynamically imported):
-DeepSeek writes executable boolean oracle cases → the local bounded Node runner
-executes them → on failure DeepSeek patches the source → re-run, up to
+DeepSeek writes executable boolean oracle cases â†’ the local bounded Node runner
+executes them â†’ on failure DeepSeek patches the source â†’ re-run, up to
 `maxIterations` (3). Only a real machine-run pass mints `status: "passed"`.
 Requires `DEEPSEEK_API_KEY`. Fails fast (exit 1) when the project has no
 `generatedSource` yet (codegen phases never ran).
@@ -449,10 +459,10 @@ Requires `DEEPSEEK_API_KEY`. Fails fast (exit 1) when the project has no
 routes to the REAL **tree-run** path instead of the single-module CommonJS
 harness (which cannot load the emitted ESM `import`/`export` and used to surface
 an opaque `RT_E_UNKNOWN`): the tree is emitted to a probe dir and its own specs +
-entry are executed. A green tree-run → `status: "passed"`; a red tree →
+entry are executed. A green tree-run â†’ `status: "passed"`; a red tree â†’
 `status: "failed"` (exit 1) with the tree-run failure tail as `evidence`; a
 tree-run seam that could not execute at all refuses with a coded top-level
-`RT_E_RUNNER_FAILED` (exit 4) — never `RT_E_UNKNOWN`.
+`RT_E_RUNNER_FAILED` (exit 4) â€” never `RT_E_UNKNOWN`.
 
 `--apply` persists the outcome into the project file: a **passed** verdict
 stamps `lastTest` (label `"tested"` + evidence hash) and appends a `verify`
@@ -460,7 +470,7 @@ artifact; **failed/error** append a `verify.fail` artifact; **not-configured**
 changes NOTHING (never a partial write). Without `--apply` the verdict is
 printed but nothing is persisted.
 
-Passed — exit 0:
+Passed â€” exit 0:
 
 ```json
 {
@@ -468,16 +478,16 @@ Passed — exit 0:
   "status": "passed",
   "iterations": 1,
   "evidence": "3/3 machine-run cases passed on iteration 1",
-  "finalSource": "…",
+  "finalSource": "â€¦",
   "cases": [ { "id": "case-1", "expression": "exports.add(2, 3) === 5" } ]
 }
 ```
 
 Anything else is a failure with the full outcome preserved plus an `error`
-string: `{ "ok": false, "status": "failed" | "error" | "not-configured", "iterations": N, "evidence": "…", "error": "…" }`.
-Exit mapping follows the taxonomy: a **failed** verdict → exit 1 (fix the
-evidence and re-run), **not-configured** → exit 3 (RT_E_LLM_NOT_CONFIGURED —
-surface the key requirement), backend **error** → exit 4. An agent loops on
+string: `{ "ok": false, "status": "failed" | "error" | "not-configured", "iterations": N, "evidence": "â€¦", "error": "â€¦" }`.
+Exit mapping follows the taxonomy: a **failed** verdict â†’ exit 1 (fix the
+evidence and re-run), **not-configured** â†’ exit 3 (RT_E_LLM_NOT_CONFIGURED â€”
+surface the key requirement), backend **error** â†’ exit 4. An agent loops on
 `status !== "passed"` (for `not-configured`, surface the key requirement to the
 user; for `failed`, ingest the evidence and steer the next phase).
 
@@ -485,17 +495,17 @@ user; for `failed`, ingest the evidence and steer the next phase).
 
 Writes the project out as a **runnable scaffold** (`headless.ts: emitProject`):
 project files for the kind (e.g. `package.json`/`tsconfig.json`) with the
-generated module embedded — the CODE→RUNNABLE-APP path. No build step; the
+generated module embedded â€” the CODEâ†’RUNNABLE-APP path. No build step; the
 scaffold is emitted runnable for the caller.
 
 `--out <dir>` selects the output folder (default `<home>/RapidTool Software/<slug>/`,
 CWD fallback when the home location is unwritable). A second emit over an existing
-folder **overwrites in place and says so** (`overwritten: true` + a warning — whole
+folder **overwrites in place and says so** (`overwritten: true` + a warning â€” whole
 files are replaced, nothing is merged or appended). `--check` runs the per-file
 compile-check seam over the just-emitted dir (the same `check` below) and
-carries one verdict per file. `--run` executes the emitted tree **in-loop** —
+carries one verdict per file. `--run` executes the emitted tree **in-loop** â€”
 per-file parse verdicts + every emitted `tests/*.spec.ts` under the bounded
-runner + one kind-entry smoke (`compile-check.server.ts: treeRun`) — and appends
+runner + one kind-entry smoke (`compile-check.server.ts: treeRun`) â€” and appends
 the `TreeRunOutcome`; a red tree exits 1 (a red tree is never a clean emit). A
 GREEN tree whose declared `typecheck`/`build` could not be resolved/run is `ok: true` but
 **unverified**: it exits **0** and carries `unverified: true`, `declaredScriptsVerified: false`,
@@ -503,38 +513,38 @@ and `unverifiedDeclaredScripts: [...]`. This is NOT the usual fresh-emit state: 
 scripts resolve from the RapidTool repo's own `node_modules/` (the normal case), `treeRun` runs
 them and reports `declaredScriptsVerified: true` at exit 0. The unverified state appears only when
 those scripts genuinely cannot be resolved/run; pass `--require-verified` to make that state exit 5
-instead of 0 (not 1 — nothing ran red). `--require-verified` requires `--run` in the same invocation
-(there is no verdict to judge otherwise — it is refused `RT_E_VALIDATION` rather than silently
+instead of 0 (not 1 â€” nothing ran red). `--require-verified` requires `--run` in the same invocation
+(there is no verdict to judge otherwise â€” it is refused `RT_E_VALIDATION` rather than silently
 ignored). Install/link the tree's deps and re-run `--run` to reach a
 verified `declaredScriptsVerified: true`.
-All files parse → exit 0 with
-`{ "ok": true, "dir": "…", "count": N, "moduleEmbedded": true|false, "summary": "…" }`.
+All files parse â†’ exit 0 with
+`{ "ok": true, "dir": "â€¦", "count": N, "moduleEmbedded": true|false, "summary": "â€¦" }`.
 With `--check`, any failed file flips the envelope to `ok: false` with the
-verdicts and exit 1 — loud, never a faked all-clear. Missing project /
-emit refusal → exit 1 (`RT_E_PROJECT_MISSING` / `RT_E_VALIDATION`).
+verdicts and exit 1 â€” loud, never a faked all-clear. Missing project /
+emit refusal â†’ exit 1 (`RT_E_PROJECT_MISSING` / `RT_E_VALIDATION`).
 
 `--red-tree <refuse|banner>` selects how an **uncleared red** tree-run trail
-(`p6.tree.failure` with no green run since — the durable `treeRunTrail`) is
-handled at emit time (W14-L2 · OV-15). The default `refuse` returns a coded
+(`p6.tree.failure` with no green run since â€” the durable `treeRunTrail`) is
+handled at emit time (W14-L2 Â· OV-15). The default `refuse` returns a coded
 `RT_E_TREE_RUN_FAILED` refusal *before anything is written* (no partial tree,
 not even an empty emit dir); `banner` emits anyway, prepends the unmissable
 `[!CAUTION]` banner to the emitted `README.md`, and stamps
-`redTreeBanner: true` + `redTree` on the success envelope — the eval path's
+`redTreeBanner: true` + `redTree` on the success envelope â€” the eval path's
 own policy. `banner` is ALSO the one door that materializes a REAL-but-below-floor
-partial (R2-01 · W352): the emitted tree lands WITH a second `[!CAUTION]`
+partial (R2-01 Â· W352): the emitted tree lands WITH a second `[!CAUTION]`
 below-floor banner, the envelope carries `underProducedBanner: true` +
 `underProduced: { code: "RT_E_PLAN_UNDERPRODUCED", detail }`, the top-level
 `code` still reads `RT_E_PLAN_UNDERPRODUCED` and the delivery commit is still
-withheld — so the partial can never pass for a normal artifact. `probe` (no trail
+withheld â€” so the partial can never pass for a normal artifact. `probe` (no trail
 read) stays internal to the driver/journey paths and is **not** exposed here; any
 other value is rejected with `RT_E_VALIDATION`. This flag is what makes the
-refusal message's own advice — *emit with `redTree:"banner"` to ship the
-unmissable banner* — reachable from the CLI.
+refusal message's own advice â€” *emit with `redTree:"banner"` to ship the
+unmissable banner* â€” reachable from the CLI.
 
-`--git` lands the freshly emitted tree as **one git delivery** (fixes/343_3 · 343-3
-§6): `git init` when the directory is not already inside a work tree, then ONE
-Conventional-Commits commit — `feat(<slug>): <first requirement, else the brief's
-first line>` — staged from the **emitted manifest only** (`add -- <files>`). A
+`--git` lands the freshly emitted tree as **one git delivery** (fixes/343_3 Â· 343-3
+Â§6): `git init` when the directory is not already inside a work tree, then ONE
+Conventional-Commits commit â€” `feat(<slug>): <first requirement, else the brief's
+first line>` â€” staged from the **emitted manifest only** (`add -- <files>`). A
 foreign file is reported on `git.foreign[]` and left untracked, never committed;
 the RapidTool host repo is structurally refused, and re-emitting an identical tree
 is an idempotent `git.noop: true` / `committed: false` (never an empty commit).
@@ -543,43 +553,43 @@ machine-callable by design, guarded structurally (it requires the emitted record
 `.rapidtool/project.json` and refuses any path that is not a RapidTool emission).
 A landed delivery returns `ok: true` with `git: { dir, message, committed, noop,
 commit, files, foreign }`; a refusal flips the envelope to `ok: false` + its coded
-reason (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`, …) and exit 1 — **the emitted
+reason (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`, â€¦) and exit 1 â€” **the emitted
 tree still exists on disk**, so the failure is in delivery, never in the build.
 
-> **Committed ≠ verified (C1-06).** A commit is proof of a landed tree, not of a
+> **Committed â‰  verified (C1-06).** A commit is proof of a landed tree, not of a
 > verified product. Every landed `git` block therefore carries
 > `verifiedProduct: true|false` and a `verification` record stating what was
 > ACTUALLY verified: the tree-run verdict + `verdictHash`, the promoted
 > `evidenceHash`, `declaredScriptsVerified`, and `uiWired` (whether the mounted
 > `src/ui/console.tsx` calls a real, non-stub export of the generated module it
-> imports — a static call-presence reading, not behaviour). `verifiedProduct` is
+> imports â€” a static call-presence reading, not behaviour). `verifiedProduct` is
 > `true` only when the run is green AND every declared script executed AND the
 > kind entry ran AND the UI is wired; otherwise `verificationNote` says
 > `NOT fully verified` and `verification.unverifiedReasons` names each gap. This
-> never weakens the substance/red hold above — it stops `committed:true` alone
+> never weakens the substance/red hold above â€” it stops `committed:true` alone
 > from reading as a verified product.
 
-> **Ordering guard (`emit --git` + a judging leg) — W346 · P0-3 + L4.** A commit
+> **Ordering guard (`emit --git` + a judging leg) â€” W346 Â· P0-3 + L4.** A commit
 > is delivered ONLY when every judging leg REQUESTED in this invocation is green;
-> a red/suppressed one WITHHOLDS it — the envelope stays `ok:false`, `git` reports
+> a red/suppressed one WITHHOLDS it â€” the envelope stays `ok:false`, `git` reports
 > `{ committed:false, skipped:true, reason, code }` and a loud `error`, and the
 > emitted tree is still written to disk (delivery withheld, the build kept). The
 > reason names the leg: `plan-underproduced` (R2-01: the delivered tree is below
 > the brief-driven floor and the project's own P6 journal records
-> `RT_E_PLAN_UNDERPRODUCED`, code `RT_E_PLAN_UNDERPRODUCED` — checked FIRST, so a
+> `RT_E_PLAN_UNDERPRODUCED`, code `RT_E_PLAN_UNDERPRODUCED` â€” checked FIRST, so a
 > below-floor tree refuses as an under-produced plan, never as merely empty; the
 > envelope also carries `planUnderproduced: { code, floor, emitted, modules,
 > missing[], detail }` naming the missing declared modules), `tree-run-red` (a red
-> `--run`, code `RT_E_TREE_RUN_FAILED`; W346 · P0-3), `check-red` (a red `--check`,
+> `--run`, code `RT_E_TREE_RUN_FAILED`; W346 Â· P0-3), `check-red` (a red `--check`,
 > code `RT_E_CHECK_FAILED`), `verify-kind-red` (a red `--verify-kind`, code
 > `RT_E_VERIFY_KIND_FAILED`), `substance-empty` (W61 B1: with `--run`, the
-> tree's substance verdict is `"empty"` — no job modules — or the project carries
+> tree's substance verdict is `"empty"` â€” no job modules â€” or the project carries
 > an uncleared red tree-run trail, code `RT_E_SUBSTANCE_EMPTY`), or
 > `foreign-files-left-in-place` (a supported quarantine left the tree mixed). Under
 > the DEFAULT (`--red-tree refuse`) the scaffold refuses the below-floor partial
 > **before it is written**, so the top-level `code` is `RT_E_PLAN_UNDERPRODUCED`
 > with no partial materialized at all; under `--red-tree banner` the REAL partial
-> lands with the caution banner and the SAME top-level code — the refusal is
+> lands with the caution banner and the SAME top-level code â€” the refusal is
 > recorded either way, never a silent pass. The
 > substance hold is checked before `tree-run-red`, so an empty tree refuses with
 > its own specific code. The withheld `git` block's own `code` always matches its
@@ -587,57 +597,57 @@ tree still exists on disk**, so the failure is in delivery, never in the build.
 > reason). The **`substance-empty` / red-trail hold is lifted by the explicit
 > `--allow-empty`** opt-in (a deliberate scaffold-only delivery), which lands the
 > commit as before. A GREEN leg commits exactly as before. **`emit --git` WITHOUT
-> any judging leg also re-verifies** (W352 · R-19): the landing re-runs the tree
+> any judging leg also re-verifies** (W352 Â· R-19): the landing re-runs the tree
 > oracle over the dir immediately before committing and refuses a non-green tree
-> (`RT_E_TREE_RUN_FAILED`, no commit, tree kept) — a commit is evidence of a
+> (`RT_E_TREE_RUN_FAILED`, no commit, tree kept) â€” a commit is evidence of a
 > verified tree. This is the CLI-level mirror of the deliver step's
 > verify-before-commit ordering in
 > [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
 
-> **`--allow-empty` is substance-ONLY (W346 · D5 contract).** It does **not**
+> **`--allow-empty` is substance-ONLY (W346 Â· D5 contract).** It does **not**
 > escape the below-floor refusal. A tree below the brief-driven floor is
-> `plan-underproduced` / `RT_E_PLAN_UNDERPRODUCED` — a SEPARATE refusal from the
+> `plan-underproduced` / `RT_E_PLAN_UNDERPRODUCED` â€” a SEPARATE refusal from the
 > substance hold, raised by the scaffold and echoed here as the deciding `code`.
 > The ONLY door that materializes the partial is `--red-tree banner` (it lands
 > WITH the caution banner and still records `RT_E_PLAN_UNDERPRODUCED`, and the
-> delivery commit stays withheld) — there is deliberately no way to land a
+> delivery commit stays withheld) â€” there is deliberately no way to land a
 > below-floor partial AS "delivered"/clean. (`--allow-empty` still lands an
 > empty-substance or red-trail scaffold, which is a different, honest opt-in.)
 
-`--force` admits an emit into a folder that already holds foreign files — without it the
+`--force` admits an emit into a folder that already holds foreign files â€” without it the
 emit is refused (`RT_E_FOREIGN_FILES`, exit 1, the `foreign` list on the envelope); with it
-the foreign files are moved **aside** into `<dir>/.rapidtool-quarantine/<stamp>/` —
-recoverable, never deleted, and never judged by a later tree-run — and reported on the
-envelope (`quarantined` = the moved rel paths · `quarantineDir` = the stamp dir). A failed
-move is loud: `ok:false` + `RT_E_FOREIGN_FILES` with `quarantineFailed` (R11-f08 · W42).
+the foreign files are moved **aside** into `<dir>/.rapidtool-quarantine/<stamp>/` â€”
+recoverable, never deleted, and never judged by a later tree-run â€” and reported on the
+envelope (`quarantined` = the moved rel paths Â· `quarantineDir` = the stamp dir). A failed
+move is loud: `ok:false` + `RT_E_FOREIGN_FILES` with `quarantineFailed` (R11-f08 Â· W42).
 
-> **Shipped (fixes/216z · T4.1):** opt-in `--verify-kind` — a bounded scratch-copy
+> **Shipped (fixes/216z Â· T4.1):** opt-in `--verify-kind` â€” a bounded scratch-copy
 > install (`npm ci` / `npm install`) + the tree's own declared `build` + `test`
 > scripts for webapp/game kinds in a temp dir (never mutating the emitted dir),
 > asserting the kind's declared build actually runs. It is a **flag of `emit`**,
-> not its own case arm (none of the 39 case arms is `verify-kind` —
+> not its own case arm (none of the 39 case arms is `verify-kind` â€”
 > `grep -c 'case "' scripts/rapidtool-cli.mjs` reads 39); the seam is the exported
 > `compile-check.server.ts#verifyKindDir`, called from the `emit` case arm's `--verify-kind`
-> branch (cite the symbol, not a line — the numbers drift); a failed leg flips the envelope to `ok:false` +
+> branch (cite the symbol, not a line â€” the numbers drift); a failed leg flips the envelope to `ok:false` +
 > `RT_E_VERIFY_KIND_FAILED`. See the
 > [Tree-run and repair (landed); emit verify-kind (landed)](#tree-run-and-repair-landed-emit-verify-kind-landed)
 > section before relying on it.
 
 ## Edit (`edit`)
 
-In-place `str_replace` on ONE emitted tree file (`src/lib/patch.ts` primitive —
+In-place `str_replace` on ONE emitted tree file (`src/lib/patch.ts` primitive â€”
 unique match required, never a silent fuzzy). **DRY-RUN is the default**: the
 would-be diff + before/after hashes are returned and NOTHING is written.
 `--write` (requires `--project <file.json>`) applies atomically (write-then-rename,
 with a containment check on `--file`) only after the ONE policy seam
 (`src/lib/policy.ts` `evaluatePolicy("repair.apply", \`tree:<dir>\`)`) allows the
-seat, then lands ONE attributed ledger row — actor + `decidedVia` provenance +
+seat, then lands ONE attributed ledger row â€” actor + `decidedVia` provenance +
 the patch + before/after hashes. Ambiguous / missing / no-op matches are coded
 refusals (`RT_E_VALIDATION`, exit 1); write or ledger failures exit 4. Dry-run
 needs no `--project` and never writes.
 
 ```bash
-# dry-run (default) — prints the diff, writes nothing:
+# dry-run (default) â€” prints the diff, writes nothing:
 node --experimental-strip-types scripts/rapidtool-cli.mjs edit --dir <dir> --file <relpath> --find "<old>" --replace "<new>"
 # apply + attribute (atomic; policy-gated):
 node --experimental-strip-types scripts/rapidtool-cli.mjs edit --dir <dir> --file <relpath> --find "<old>" --replace "<new>" --write --project <file.json>
@@ -647,85 +657,85 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs edit --dir <dir> --fil
 
 Per-file compile verdicts over an **emitted** directory (`compile-check.server.ts`:
 .js via `node --check`, .ts via the typescript devDep). `emit --check` calls this
-same seam. All files pass → exit 0 (`{ "ok": true, "checked": N, … }`); any file
-fails → exit 1 with the honest per-file verdicts and the check-specific code
+same seam. All files pass â†’ exit 0 (`{ "ok": true, "checked": N, â€¦ }`); any file
+fails â†’ exit 1 with the honest per-file verdicts and the check-specific code
 `RT_E_CHECK_FAILED` (an expected any-fail verdict is never `RT_E_UNKNOWN`);
-a missing `--dir` argument → exit 1 (`RT_E_VALIDATION`); internal error → exit 4
+a missing `--dir` argument â†’ exit 1 (`RT_E_VALIDATION`); internal error â†’ exit 4
 (`RT_E_INTERNAL`). No project file needed.
 
 ## Scan (`scan`)
 
-Advisory error-signal scan over an EXISTING emitted dir — read-only, no project
-needed, and it never re-emits over the dir (W23 L6 · G4 ·
+Advisory error-signal scan over an EXISTING emitted dir â€” read-only, no project
+needed, and it never re-emits over the dir (W23 L6 Â· G4 Â·
 `research/multiagent/249_define_first_specs.md` SPEC 3; OV-21 folds in as rule
 R3). Three lexer-level rules; every finding is a prompt to look, not a verdict:
 
-- **R1 `catch-empty`** — a `catch` clause whose body holds no statement.
-- **R2 `catch-swallowed`** — a `catch` clause with statements but no `throw`,
+- **R1 `catch-empty`** â€” a `catch` clause whose body holds no statement.
+- **R2 `catch-swallowed`** â€” a `catch` clause with statements but no `throw`,
   `RT_E_` mention, `console.`, `.warn(`, `.error(` or `report(` (the allowlist is
   deliberate: a finding is a prompt, not an accusation).
-- **R3 `neutral-return-unimplemented`** (OV-21) — a standalone `return "";` /
+- **R3 `neutral-return-unimplemented`** (OV-21) â€” a standalone `return "";` /
   `return '';` / `return [];` / `return -1;` whose 5 preceding lines name an
-  unimplemented-family marker (`TODO` / `stub` / `placeholder` / …): a silent
+  unimplemented-family marker (`TODO` / `stub` / `placeholder` / â€¦): a silent
   neutral return next to an "unimplemented" comment must require an `RT_E_*`
-  code — or the marker's removal.
+  code â€” or the marker's removal.
 
 ```
 node --experimental-strip-types scripts/rapidtool-cli.mjs scan --dir <emitted-tree-dir>
 ```
 
 Envelope: `{ ok, cmd: "scan", dir, scanned: {files, lines}, findings: [{path, line, rule, snippet, advisory: true}], advisory: true, note, code, exit_code }`.
-Exit **0** clean · **1** findings (the `check-assertion-gaps.mjs` idiom; the
-envelope carries `code: "RT_E_CHECK_FAILED"` — the check family's any-fail class,
-so a findings envelope is never misread as the opaque `RT_E_UNKNOWN`) ·
+Exit **0** clean Â· **1** findings (the `check-assertion-gaps.mjs` idiom; the
+envelope carries `code: "RT_E_CHECK_FAILED"` â€” the check family's any-fail class,
+so a findings envelope is never misread as the opaque `RT_E_UNKNOWN`) Â·
 **1** + `RT_E_VALIDATION` for a missing/unreadable dir, or a dir with zero
 resolvable files (the scan is never silently empty). **Posture: this verb is
 never wired into `scripts/gate.sh`, is never called by `emit`, and blocks
-nothing** — the rules are heuristics, so every finding carries `advisory: true`
-(fixes/218 §3 item 4 / OV-21).
+nothing** â€” the rules are heuristics, so every finding carries `advisory: true`
+(fixes/218 Â§3 item 4 / OV-21).
 
 ## Tree-run and repair (landed); emit verify-kind (landed)
 
 > **Status: `tree-run --dir` and `repair --dir` SHIPPED (fixes/150 wave
 > G1, case arms present, `grep -c 'case "'` = 39). `emit --verify-kind` SHIPPED
-> too (fixes/216z · T4.1) — a flag of `emit`, not its own case arm: none of the
+> too (fixes/216z Â· T4.1) â€” a flag of `emit`, not its own case arm: none of the
 > 39 case arms is `verify-kind` (the flag rides inside `emit`); the scratch-copy
 > install + declared build/test leg is on disk (`verifyKindDir`,
 > `compile-check.server.ts:1566`).**
 
-- **`tree-run --dir <dir>`** (keyless, read-only) — the dir-based oracle runner
+- **`tree-run --dir <dir>`** (keyless, read-only) â€” the dir-based oracle runner
   (`compile-check.server.ts: treeRun`: per-file parse + every emitted
   `tests/*.spec.ts` under the bounded runner + kind-entry smoke) as a standalone
-  verb over **an arbitrary emitted directory, without re-emitting** — the oracle
-  an agent uses after hand-editing an emitted tree. Green tree → exit 0
-  (`{ ok: true, dir, treeRun: { ok: true, … } }`); red → exit 1 with `ok: false`,
+  verb over **an arbitrary emitted directory, without re-emitting** â€” the oracle
+  an agent uses after hand-editing an emitted tree. Green tree â†’ exit 0
+  (`{ ok: true, dir, treeRun: { ok: true, â€¦ } }`); red â†’ exit 1 with `ok: false`,
   the first not-ok tail in `error` and `code: "RT_E_TREE_RUN_FAILED"`. A green
   tree whose declared `typecheck`/`build` did not run still exits 0 and names the
   state on the envelope (`unverified` / `declaredScriptsVerified` /
   `unverifiedDeclaredScripts`); `--require-verified` opts into the strict exit 5.
   `--project <file.json>` adds the read-only, hash-checked `dirDirty` divergence
-  report (ledger tree vs dir bytes — never persisted).
+  report (ledger tree vs dir bytes â€” never persisted).
 - **`repair --dir <dir> --project <file.json> [--budget N]`** (keyed repair loop;
-  default budget = `P6_JOURNEY_DEFAULT_BUDGET`) — the emit→edit→re-emit
+  default budget = `P6_JOURNEY_DEFAULT_BUDGET`) â€” the emitâ†’editâ†’re-emit
   continuation seam (`headless.ts: repairTreeDir`): hash-checked re-import of the
-  edited dir into `project.generatedTree` (per-file fnv1a — changed/unchanged/
+  edited dir into `project.generatedTree` (per-file fnv1a â€” changed/unchanged/
   missing/refused are all reported, refused paths are warnings, never silent
   drops), first `treeRun` verdict **read-only over the dir as-is** (never clobber
-  before reading), then bounded cycles: red tail → one synthesis repair whose
-  context reaches codegen as `deps.treeFailure` → repaired rows applied onto the
-  dir in place (only changed files, never deletes) → re-import → `treeRun`. Green
-  → the tested-equivalent mint + honest P6 gate record + `converged` (exit 0;
+  before reading), then bounded cycles: red tail â†’ one synthesis repair whose
+  context reaches codegen as `deps.treeFailure` â†’ repaired rows applied onto the
+  dir in place (only changed files, never deletes) â†’ re-import â†’ `treeRun`. Green
+  â†’ the tested-equivalent mint + honest P6 gate record + `converged` (exit 0;
   envelope carries `cycles`/`minted`/`gate`/`treeRun`/`import`/`applied`).
-  Budget exhausted → exit 1 with `code: "RT_E_REPAIR_FAILED"` and the first
+  Budget exhausted â†’ exit 1 with `code: "RT_E_REPAIR_FAILED"` and the first
   not-ok tail; pre-flight refusal (unreadable dir / ledger carries no
-  generatedTree) → exit 1 `RT_E_VALIDATION`; internal throw → exit 4. The ledger
-  is persisted after every completed run (converged or failed) — the dir is the
+  generatedTree) â†’ exit 1 `RT_E_VALIDATION`; internal throw â†’ exit 4. The ledger
+  is persisted after every completed run (converged or failed) â€” the dir is the
   artifact and is NEVER re-emitted over. **Keyless honesty:** with no
   `DEEPSEEK_API_KEY` the default synthesis seam is the deterministic floor, so a
-  red dir exhausts the budget honestly (no fake repair, exit 1) — a green dir
+  red dir exhausts the budget honestly (no fake repair, exit 1) â€” a green dir
   still converges at cycle 0 with the mint + honest gate record.
-- **`gate --resynthesize` / `repair --from-gate`** (PR-22 — the recovery door out
-  of a red RUNNING P6, BL-003) — a keyed P6 that failed leaves the project
+- **`gate --resynthesize` / `repair --from-gate`** (PR-22 â€” the recovery door out
+  of a red RUNNING P6, BL-003) â€” a keyed P6 that failed leaves the project
   `running` (no rejected record to `retry`), so plain `gate` re-parks at 0 steps.
   `gate --resynthesize` re-opens the phase (`retry`) and re-enters the P6 journey
   **live**, bounded by the driver's own iteration cap, so the recorded unmet
@@ -733,25 +743,25 @@ nothing** — the rules are heuristics, so every finding carries `advisory: true
   `repair --from-gate` applies the same one bounded re-entry to the EDITED dir
   before the repair cycle. Neither fabricates a green gate: the repaired tree
   faces the same tree-run + real gate probes.
-- **In-run RUNLOCK guard** (PR-16 · B5/C-11) — `run`/`gate`/`resume`/`unattended`
+- **In-run RUNLOCK guard** (PR-16 Â· B5/C-11) â€” `run`/`gate`/`resume`/`unattended`
   stamp the run window and, after the drive, scan the repo's own `src/**` + `scripts/**`
   for mtimes newer than the run start. A change during the run (the BL-010
   overlap) refuses the result with `RT_E_SRC_EDITED_DURING_RUN` + a `runlock`
   block naming the file(s), instead of presenting a clean result produced against
   a moving tree. A frozen window is untouched.
-- **`emit --verify-kind`** (SHIPPED — fixes/216z · T4.1; keyless, network) — opt-in
+- **`emit --verify-kind`** (SHIPPED â€” fixes/216z Â· T4.1; keyless, network) â€” opt-in
   bounded scratch-copy install (`npm ci` / `npm install`) + the tree's declared
   build/test for webapp/game kinds in a temp dir (never mutating the emitted
   dir), asserting the kind's declared build actually runs; exits 0 on a real
   green build, or flips the emit envelope to `ok: false` +
   `RT_E_VERIFY_KIND_FAILED` (exit 1) with the honest install/build `detail`. It
-  is a **flag of `emit`** — no own case arm; the seam is `verifyKindDir`
+  is a **flag of `emit`** â€” no own case arm; the seam is `verifyKindDir`
   (`compile-check.server.ts:1566`).
 
 ## Design (`design`)
 
 Deterministic design system for the project (`design.ts: designTokens` +
-`designHtml`, dynamically imported — same contract style as `vault.ts`). The
+`designHtml`, dynamically imported â€” same contract style as `vault.ts`). The
 tokens object is printed **inline** on stdout so the next builder agent can
 consume palette/typography/spacing directly; pass `--html <file.html>` to also
 materialize a standalone HTML5 preview page embedding the tokens (zero JS, no
@@ -761,27 +771,27 @@ external assets).
 {
   "ok": true,
   "tokens": {
-    "palette": { "name": "logistics · rust", "base": "#9a3412", "tokens": { "bg": "#f5f0e6", "brand": "#9a3412", "…": "…" } },
-    "typography": { "scale": ["12px", "…"], "mono": "ui-monospace, …" },
+    "palette": { "name": "logistics Â· rust", "base": "#9a3412", "tokens": { "bg": "#f5f0e6", "brand": "#9a3412", "â€¦": "â€¦" } },
+    "typography": { "scale": ["12px", "â€¦"], "mono": "ui-monospace, â€¦" },
     "spacing": [4, 8, 12, 16, 24, 32, 48],
     "radius": [4, 8, 12, 16],
-    "shadows": ["…"]
+    "shadows": ["â€¦"]
   },
   "htmlWritten": "C:\\repo\\design.html"
 }
 ```
 
-The token **schema is owned by `design.ts`** (its header freezes it) — treat
+The token **schema is owned by `design.ts`** (its header freezes it) â€” treat
 `tokens` as opaque JSON; the CLI does not reshape it. `htmlWritten` is present
 only when `--html` was given. If the design module is not present yet, the
-command fails cleanly: `{ "ok": false, "error": "…" }`, exit 4 (`RT_E_INTERNAL`)
-— same as the vault module contract.
+command fails cleanly: `{ "ok": false, "error": "â€¦" }`, exit 4 (`RT_E_INTERNAL`)
+â€” same as the vault module contract.
 
 ## Diagram (`diagram`)
 
 Deterministic standalone SVG for the project (`diagram.ts: buildDiagram`,
 dynamically imported). `--kind` is required and must be exactly one of
-`phases` (13-node pipeline P0–P12 with status fills + HITL diamonds),
+`phases` (13-node pipeline P0â€“P12 with status fills + HITL diamonds),
 `architecture` (artifact map in phase bands + spec strip), or `flow` (current
 phase's gate-path flowchart). Anything else is a hard error, exit 1.
 
@@ -791,13 +801,13 @@ phase's gate-path flowchart). Anything else is a hard error, exit 1.
 
 `bytes` = UTF-8 byte length of the SVG. Pass `--out <file.svg>` to persist the
 SVG (then `svgWritten` carries the absolute path); without `--out` only the
-size is reported — stdout stays a single JSON object, so the SVG itself never
-leaks into the stream. Missing module → clean `{ "ok": false, "error": "…" }`,
-exit 4 (`RT_E_INTERNAL` — the arm catch).
+size is reported â€” stdout stays a single JSON object, so the SVG itself never
+leaks into the stream. Missing module â†’ clean `{ "ok": false, "error": "â€¦" }`,
+exit 4 (`RT_E_INTERNAL` â€” the arm catch).
 
 ## Artifacts (`artifacts`)
 
-Pure index of the project's artifacts (no module dependency — always
+Pure index of the project's artifacts (no module dependency â€” always
 available). One row per artifact in stored order:
 
 ```json
@@ -812,14 +822,14 @@ available). One row per artifact in stored order:
 }
 ```
 
-`bytes` = UTF-8 byte length of the artifact body. Bodies are **not** included —
+`bytes` = UTF-8 byte length of the artifact body. Bodies are **not** included â€”
 an agent reads this index to decide which artifact matters next, then fetches
 the full body via `export --project <file.json>` (the whole project JSON) or
 `packet`.
 
 ## Doctor (`doctor`)
 
-**Capability pre-flight** — the only subcommand that needs no project file
+**Capability pre-flight** â€” the only subcommand that needs no project file
 (`headless.ts: doctorStatus`). Probes the environment and reports what is
 actually configured:
 
@@ -830,7 +840,7 @@ scans an emitted tree for leftover job files. Both are read-only; a bare `doctor
 prints the environment alone.
 
 Every envelope also carries the CLI-wide `schema_version`, `cmd` and `exit_code`
-fields (see §Agent contract); the `doctor` payload adds `llm` / `research` /
+fields (see Â§Agent contract); the `doctor` payload adds `llm` / `research` /
 `runner` / `node` / `factory` / `mcp`:
 
 ```json
@@ -842,34 +852,34 @@ fields (see §Agent contract); the `doctor` payload adds `llm` / `research` /
   "runner": { "available": true, "sandbox": false },
   "node": "v22.23.2",
   "factory": { "autonomousSoftwareFactory": false, "awaitingHumanAcceptance": false,
-               "autonomousFactoryV2": false, "fleetAcceptance": { "...": "see §The autonomy reading" } },
+               "autonomousFactoryV2": false, "fleetAcceptance": { "...": "see Â§The autonomy reading" } },
   "mcp": { "envVar": "RAPIDTOOL_MCP_ENABLED", "enabled": false, "configured": false,
            "spawnAttempted": false, "tools": null, "refusal": { "code": "RT_E_MCP_DISABLED" } },
   "exit_code": 0 }
 ```
 
-- `llm` — DeepSeek key present → `configured: true` + the first two configured
+- `llm` â€” DeepSeek key present â†’ `configured: true` + the first two configured
   model ids; otherwise the honest not-configured label above. `keyState` is the
   key's *proven state* on this host (`unverified` until a live probe/scored call
   proves it), never a claim the key works.
-- `research` — Tavily keyed and live-probed (`probed: true`), or the keyless
+- `research` â€” Tavily keyed and live-probed (`probed: true`), or the keyless
   free-search path (duckduckgo/searxng/wikipedia) and its probe; unreachable
   backends say so in `label`.
-- `runner` — whether the bounded local Node runner is available
+- `runner` â€” whether the bounded local Node runner is available
   (`node-runner.server.ts`); `sandbox` stays `false` (Node's Permission Model is
   a real resource bound, not an OS sandbox).
-- `node` — the running Node version.
-- `factory` — the autonomy reading (the human-gated `autonomousSoftwareFactory`
+- `node` â€” the running Node version.
+- `factory` â€” the autonomy reading (the human-gated `autonomousSoftwareFactory`
   flag and the additive machine-only readings beside it); its shape is owned by
-  §The autonomy reading / `src/lib/acceptance.ts`.
-- `mcp` — the owner-gated MCP client, reported honestly: OFF by default
-  (`RAPIDTOOL_MCP_ENABLED` unset) → zero child spawned, `tools: null` with the
+  Â§The autonomy reading / `src/lib/acceptance.ts`.
+- `mcp` â€” the owner-gated MCP client, reported honestly: OFF by default
+  (`RAPIDTOOL_MCP_ENABLED` unset) â†’ zero child spawned, `tools: null` with the
   coded `RT_E_MCP_DISABLED` refusal. Only when enabled AND a server is
   configured is the REAL `tools/list` returned (never fabricated); `--mcp-call`
   additionally runs the read-only round-trip and makes that refusal the
   process's coded failure.
 
-Never throws: a module missing → the honest not-configured/unavailable label;
+Never throws: a module missing â†’ the honest not-configured/unavailable label;
 an unexpected failure exits 4 with `RT_E_INTERNAL`. An agent should run this
 first when a keyed verb exits 3, to confirm *why* before surfacing anything to
 a user.
@@ -879,33 +889,33 @@ a user.
 The **AI-agent diagnostic** verb: one JSON with the project's recent telemetry
 tail (last rows of its NDJSON log), an event timeline, a most-likely-cause
 heuristic, and growth stats. No project file is required; `--project <file.json>`
-points it at that project's `.rapidtool/logs`. Never throws: success → exit 0;
-an unexpected failure → exit 4 with `RT_E_INTERNAL`.
+points it at that project's `.rapidtool/logs`. Never throws: success â†’ exit 0;
+an unexpected failure â†’ exit 4 with `RT_E_INTERNAL`.
 
 ## Retry (`retry`)
 
-Re-opens a **rejected/blocked** phase for another attempt — the rejection note
+Re-opens a **rejected/blocked** phase for another attempt â€” the rejection note
 stays applied and visible in the record, the phase record returns to `ready`,
 and the project leaves `blocked` (`unlockRetry`, the headless mirror of the
 UI's retry affordance).
 
 ```json
-{ "ok": true, "path": "build.json", "summary": { "status": "running", "…": "…" } }
+{ "ok": true, "path": "build.json", "summary": { "status": "running", "â€¦": "â€¦" } }
 ```
 
-Exit 0 on success. Wrong state (project is not `blocked`) → exit 1 with
-`code: "RT_E_PHASE_ILLEGAL"` — nothing is mutated. `retry` is the headless
-recovery after `reject --note "…"` parks the project: `reject` → `retry` →
-`gate` again. **W61 B3:** `retry` also reopens a **red running P6** — a keyed P6
+Exit 0 on success. Wrong state (project is not `blocked`) â†’ exit 1 with
+`code: "RT_E_PHASE_ILLEGAL"` â€” nothing is mutated. `retry` is the headless
+recovery after `reject --note "â€¦"` parks the project: `reject` â†’ `retry` â†’
+`gate` again. **W61 B3:** `retry` also reopens a **red running P6** â€” a keyed P6
 that failed and left the project `running` with a red gate / tree trail / lastTest
-and no `rejected` record — clearing the parked HITL and marking P6 `ready` so the
+and no `rejected` record â€” clearing the parked HITL and marking P6 `ready` so the
 next `run`/`gate` re-attempts it. A project with neither a rejected phase nor a red
 P6 stall refuses with `RT_E_PHASE_ILLEGAL` and mutates nothing (never a silent
 ok:true no-op).
 
 ## Chat (`chat`)
 
-One **grounded copilot turn** over the project — the exact server function the
+One **grounded copilot turn** over the project â€” the exact server function the
 UI Chat tab calls (`chat.server.ts: chatOnceServer`), so context building,
 caps and honesty are byte-identical to the browser path. The reply is grounded
 in the project record (phases, gate verdicts, memory, packet) and carries
@@ -913,18 +923,18 @@ in the project record (phases, gate verdicts, memory, packet) and carries
 to the last 6 turns, 800 chars each).
 
 ```json
-{ "ok": true, "reply": "The isolation policy lives in the P4 artifact…", "grounded": true, "provenance": "…" }
+{ "ok": true, "reply": "The isolation policy lives in the P4 artifactâ€¦", "grounded": true, "provenance": "â€¦" }
 ```
 
-No key → exit 3 with `RT_E_LLM_NOT_CONFIGURED` (crew parity). Malformed or
-non-array `--history`, or a missing `--ask` → exit 1 with
-`RT_E_VALIDATION`. Provider/backend failure → exit 4.
+No key â†’ exit 3 with `RT_E_LLM_NOT_CONFIGURED` (crew parity). Malformed or
+non-array `--history`, or a missing `--ask` â†’ exit 1 with
+`RT_E_VALIDATION`. Provider/backend failure â†’ exit 4.
 
 ## Deepen (`deepen`)
 
 **E-13 recovery** for a **completed research phase (0/7/11)** whose recorded
 gate failed with `p7-research` unmet (a deterministic P7 run honestly records
-that dead-end — this is the recovery the UI's own fallback text points at:
+that dead-end â€” this is the recovery the UI's own fallback text points at:
 "re-run research from the CLI instead"). Re-runs the live research layer over
 the completed phase: appends one deduplicated corpus entry + research
 artifacts, logs `research.deepened`, and **re-records the phase gate** with a
@@ -933,15 +943,15 @@ an unchanged no-op never rewrites the file.
 
 ```json
 { "ok": true, "path": "build.json", "phase": 7, "changed": true,
-  "liveUnavailable": true, "log": "… · 0 finding(s) · live research unavailable (not configured or failed)" }
+  "liveUnavailable": true, "log": "â€¦ Â· 0 finding(s) Â· live research unavailable (not configured or failed)" }
 ```
 
 `--phase` defaults to the current phase; pass `--phase 7` explicitly to deepen
 an earlier completed research phase. `liveUnavailable: true` + a warn log is
 the honest bare-Node outcome when the live backends cannot run (never
-fabricated findings) — the gate re-records against the existing corpus either
-way. Phase not in 0/7/11 or not complete → exit 1 with
-`code: "RT_E_PHASE_ILLEGAL"`; a non-numeric `--phase` → exit 1 with
+fabricated findings) â€” the gate re-records against the existing corpus either
+way. Phase not in 0/7/11 or not complete â†’ exit 1 with
+`code: "RT_E_PHASE_ILLEGAL"`; a non-numeric `--phase` â†’ exit 1 with
 `RT_E_VALIDATION`.
 
 ## Harvest (`harvest`)
@@ -951,7 +961,7 @@ dynamically imported). Query building uses `deepseek-v4-flash` (`json: true`)
 **only** when `DEEPSEEK_API_KEY` is present and the call succeeds; otherwise it
 falls back to a deterministic keyword floor and the envelope's `querySource`
 flag honestly says `"keyword"` (never `"llm"`). Harvesting itself is keyless
-(`freeWebSearch` → GitHub candidates → at most **4** direct
+(`freeWebSearch` â†’ GitHub candidates â†’ at most **4** direct
 `raw.githubusercontent.com` / GitHub-API fetches within a **12 s** budget).
 Each row carries its per-hit `provenance`; `license` is present only when the
 GitHub-API spot-check actually returned one.
@@ -963,33 +973,33 @@ GitHub-API spot-check actually returned one.
   "rows": [
     { "kind": "research", "provenance": "harvest", "repo": "acme/field-service",
       "title": "acme/field-service", "url": "https://github.com/acme/field-service",
-      "snippet": "# Field Service …", "license": "MIT", "hitProvenance": "github-raw" }
+      "snippet": "# Field Service â€¦", "license": "MIT", "hitProvenance": "github-raw" }
   ],
-  "queries": ["field service dispatch github open source", "…"],
+  "queries": ["field service dispatch github open source", "â€¦"],
   "querySource": "keyword",
-  "notes": ["fetch budget (4) reached — 2 candidate(s) left unfetched"]
+  "notes": ["fetch budget (4) reached â€” 2 candidate(s) left unfetched"]
 }
 ```
 
 **Honesty contract:** this command never fabricates a repo, license, or
 snippet. Unreachable backends yield `rows: []` plus explanatory `notes` and
-**exit 0** — the honest empty payload is the outcome (there is no
+**exit 0** â€” the honest empty payload is the outcome (there is no
 "not-configured" failure mode: search is keyless). A missing/invalid project
 file exits 1 as usual.
 
 ## Swarm (`swarm`)
 
 Deterministic **advisory swarm critique** of the current phase
-(`swarm.ts: swarmPlan` — pure state analysis; no LLM turn is dispatched).
+(`swarm.ts: swarmPlan` â€” pure state analysis; no LLM turn is dispatched).
 Output is advisory: it never mutates the project, never advances
 `currentPhase`, and the DoD gate remains the only approver.
 
 ```json
 {
   "ok": true, "advisory": true, "phase": 0,
-  "critiques": [ { "role": "lead-architect", "verdict": "revise", "findings": ["…"], "artifact": {…} } ],
-  "refinedPlan": "Advisory swarm pass — P0 …\nverdicts: 0 keep · 2 revise\n…",
-  "artifacts": [ … ]
+  "critiques": [ { "role": "lead-architect", "verdict": "revise", "findings": ["â€¦"], "artifact": {â€¦} } ],
+  "refinedPlan": "Advisory swarm pass â€” P0 â€¦\nverdicts: 0 keep Â· 2 revise\nâ€¦",
+  "artifacts": [ â€¦ ]
 }
 ```
 
@@ -1003,58 +1013,58 @@ missing module).
 deepseek-v4-flash `json:true`). Returns a full `ExpandedSpec`
 (`requirements` / `edgeCases` / `errorHandling` / `typeSignatures` /
 `dataFlow` / `negativeConstraints`). `--policies a,b,c` appends negative
-constraints (capped: 12 policies × 240 chars; brief capped at 4000 chars).
+constraints (capped: 12 policies Ã— 240 chars; brief capped at 4000 chars).
 
 ```json
-{ "ok": true, "spec": { "requirements": ["…"], "edgeCases": ["…"], "typeSignatures": ["…"], "…": [] } }
+{ "ok": true, "spec": { "requirements": ["â€¦"], "edgeCases": ["â€¦"], "typeSignatures": ["â€¦"], "â€¦": [] } }
 ```
 
-No key → `{ "ok": false, "reason": "not-configured", "code": "RT_E_LLM_NOT_CONFIGURED", … }`, **exit 3**
-(crew parity). Model/parse failure → **exit 4**.
+No key â†’ `{ "ok": false, "reason": "not-configured", "code": "RT_E_LLM_NOT_CONFIGURED", â€¦ }`, **exit 3**
+(crew parity). Model/parse failure â†’ **exit 4**.
 
 ## Bench (`bench`)
 
-Synthetic **estimate suite** over the project (`bench.ts` pure estimators —
+Synthetic **estimate suite** over the project (`bench.ts` pure estimators â€”
 tokens, projected time, complexity, failure points). Every estimate is a
 heuristic and the envelope carries the disclaimer verbatim; it is never
 presented as a measured run.
 
 ```json
 { "ok": true,
-  "disclaimer": "synthetic dry-run estimate — heuristic, not a measured run",
-  "token": { "estimate": true, "tokenEstimate": 1630, "…": "…" },
-  "time": { "estimate": true, "minutes": 124, "…": "…" },
-  "complexity": { "estimate": true, "score": 3, "…": "…" },
-  "failurePoints": { "estimate": true, "count": 2, "advisories": ["…"] } }
+  "disclaimer": "synthetic dry-run estimate â€” heuristic, not a measured run",
+  "token": { "estimate": true, "tokenEstimate": 1630, "â€¦": "â€¦" },
+  "time": { "estimate": true, "minutes": 124, "â€¦": "â€¦" },
+  "complexity": { "estimate": true, "score": 3, "â€¦": "â€¦" },
+  "failurePoints": { "estimate": true, "count": 2, "advisories": ["â€¦"] } }
 ```
 
-Exit 0. No key, no network — always available.
+Exit 0. No key, no network â€” always available.
 
 ## Mine (`mine`)
 
 Bounded **structural codebase map** of a real directory (`ast-mine.ts:
-mineCodebase` + `conventionsMap` — file structure, imports, exports,
+mineCodebase` + `conventionsMap` â€” file structure, imports, exports,
 dependency graph, naming conventions). No project file needed: `--dir` is
 required, `--limit` caps mapped files (default 200). The walk skips
 `node_modules` / `.git` / `dist` / `build` / `coverage` / `out` / `.vite` and
 non-source extensions, honors a 2 MB byte budget + 512 KB/file cap, and
-**reports every skip** (`skipped.excluded` / `tooLarge` / `overLimit`) —
+**reports every skip** (`skipped.excluded` / `tooLarge` / `overLimit`) â€”
 never silent.
 
 ```json
 { "ok": true, "dir": "C:\\repo\\src\\lib", "fileCount": 5,
-  "files": [ { "path": "…", "body": "…" } ],
-  "map": { "files": [ … ], "dependencyGraph": [ … ] },
-  "conventions": { … }, "skipped": { "excluded": 1, "tooLarge": 0, "overLimit": ["…"] } }
+  "files": [ { "path": "â€¦", "body": "â€¦" } ],
+  "map": { "files": [ â€¦ ], "dependencyGraph": [ â€¦ ] },
+  "conventions": { â€¦ }, "skipped": { "excluded": 1, "tooLarge": 0, "overLimit": ["â€¦"] } }
 ```
 
-Unreadable directory → `{ "ok": false, "error": "mine: …", "code": "RT_E_VALIDATION" }`, **exit 1**.
+Unreadable directory â†’ `{ "ok": false, "error": "mine: â€¦", "code": "RT_E_VALIDATION" }`, **exit 1**.
 Note: `files[].body` is included so an agent can feed the sources onward;
 the structural claim is pattern-level, not an AST.
 
 ## Knowledge (`knowledge`)
 
-Cross-project **JSON pattern store** (`knowledge.ts: KnowledgeStore` —
+Cross-project **JSON pattern store** (`knowledge.ts: KnowledgeStore` â€”
 append-only, content-fingerprinted, idempotent). Exactly one of `--save` or
 `--find` is required, plus `--store <file.json>`.
 
@@ -1062,49 +1072,49 @@ append-only, content-fingerprinted, idempotent). Exactly one of `--save` or
 # append (duplicate saves are idempotent no-ops: appended: false)
 rapidtool-cli.mjs knowledge --store patterns.json \
   --save '{"project":"hvac","kind":"pattern","title":"Auth refresh pattern","tags":["auth"],"body":"rotate tokens before expiry"}'
-# { "ok": true, "entry": { "id": "K1b801808", "…": "…" }, "appended": true }
+# { "ok": true, "entry": { "id": "K1b801808", "â€¦": "â€¦" }, "appended": true }
 
 # deterministic FusionRank-style lexical search
 rapidtool-cli.mjs knowledge --store patterns.json --find "auth refresh" --limit 5
-# { "ok": true, "count": 1, "matches": [ { "entry": { … }, "score": 1 } ] }
+# { "ok": true, "count": 1, "matches": [ { "entry": { â€¦ }, "score": 1 } ] }
 ```
 
-Malformed `--save` JSON or a shape missing `title`/`tags` →
-`{ "ok": false, "error": "…", "code": "RT_E_VALIDATION" }`, **exit 1**. The store
+Malformed `--save` JSON or a shape missing `title`/`tags` â†’
+`{ "ok": false, "error": "â€¦", "code": "RT_E_VALIDATION" }`, **exit 1**. The store
 file is append-only: a corrupt existing store is refused, never overwritten.
 
 ## Lessons (`lesson`)
 
-The **human-gated cross-project learning verbs** (fixes/98 §7 — the read-back
+The **human-gated cross-project learning verbs** (fixes/98 Â§7 â€” the read-back
 and promotion code lives in `knowledge.ts`: `topLessonRows` /
 `acceptedLessonEntry` / `buildSupersedeEntry`, M5-4). One verb, exactly one
 action flag; every arm is deterministic. The project-local lesson rows live in
 `--project`'s `memory` (tags carry `lesson` + a class like `vague-brief` /
-`verify-failure` / `drift` + a level `L1`–`L5`); the cross-project rows live in
+`verify-failure` / `drift` + a level `L1`â€“`L5`); the cross-project rows live in
 the append-only `knowledge` store files.
 
 | action | flags | semantics |
 | --- | --- | --- |
-| `--list` | `--project <file.json>` `[--brief <text>]` `[--limit N]` | **Read-only** (never writes, `readOnly: true`): the project's lesson-tagged rows with kind/class/level/phase/score/evidence detail. `--brief` ranks them against that brief via `topLessonRows` (fusionRank — the same read-back semantics the tier-2 seams use; default top 10); without `--brief` they come score-desc / id-asc (all rows unless `--limit`). `rankedBy` states which order was used. |
-| `--propose` | `--brief <text>` `[--project NAME]` `[--kind fix\|pattern\|note]` `[--tags a,b]` `[--title "…"]` | Bounded flash **DRAFT only — never writes**. Keyed (`DEEPSEEK_API_KEY` set): ONE bounded DeepSeek turn (json mode, small cap) polishes the draft. Keyless (or a failed keyed turn): the deterministic `proposeLessonFallback` draft, labeled `source: "draft (keyless)"` in the envelope — never fabricated, everything traces to the brief. `--project` is the origin project's NAME for the draft's `project` field (never a file to load). Save the reviewed draft with `knowledge --store <file.json> --save '<draft-json>'`. |
-| `--accept` | `--project <file.json>` `--out <knowledge.json>` `[--actor NAME]` `[--limit N]` | **THE human-gated cross-project write**: promotes the project's top `topLessonRows` (ranked against its brief) into the store at `--out` via `acceptedLessonEntry` — the actor (default `$RAPIDTOOL_ACTOR` / `$USERNAME` / `$USER` / `cli-human`) is recorded IN each row (`actor:<name>` tag + body provenance line), so re-accept of identical rows by the same actor is an idempotent no-op (`appended: false`) and a different actor's accept is a distinct row. No machine path appends to the store. A project with no lesson rows, or a missing `--out`, is an honest refusal listing the flag — **exit 1** `RT_E_VALIDATION`. |
-| `--supersede` | `--knowledge-file <knowledge.json>` `--id <K…>` `[--evidence <text>]` `[--by human\|machine]` | Append-only supersede (98 §6.2): `buildSupersedeEntry` + `savePattern` + `markSuperseded` — a NEW row declares the old entry dead; the old row stays on disk for audit but is filtered from every read-back. `--evidence` (alias: `--reason`) rides verbatim in the superseding row's body; absent → `"(no reason recorded)"`. Unknown id → **exit 1** `RT_E_VALIDATION`. |
-| `--refute` | `--knowledge-file <knowledge.json>` `--id <K…>` `[--evidence <text>]` | One counter-evidence unit via `bumpCounterEvidence` (writer-only telemetry; content fields untouched). Read-back score decays by half per unit; at `LESSON_RETIRE_COUNTER` (3) the row is retired from read-back (kept on disk). The response echoes `counterEvidence`, `retired` and the optional `evidence` (store rows record counts only — keep reasons in your own ledger). Unknown id → **exit 1** `RT_E_VALIDATION`. |
+| `--list` | `--project <file.json>` `[--brief <text>]` `[--limit N]` | **Read-only** (never writes, `readOnly: true`): the project's lesson-tagged rows with kind/class/level/phase/score/evidence detail. `--brief` ranks them against that brief via `topLessonRows` (fusionRank â€” the same read-back semantics the tier-2 seams use; default top 10); without `--brief` they come score-desc / id-asc (all rows unless `--limit`). `rankedBy` states which order was used. |
+| `--propose` | `--brief <text>` `[--project NAME]` `[--kind fix\|pattern\|note]` `[--tags a,b]` `[--title "â€¦"]` | Bounded flash **DRAFT only â€” never writes**. Keyed (`DEEPSEEK_API_KEY` set): ONE bounded DeepSeek turn (json mode, small cap) polishes the draft. Keyless (or a failed keyed turn): the deterministic `proposeLessonFallback` draft, labeled `source: "draft (keyless)"` in the envelope â€” never fabricated, everything traces to the brief. `--project` is the origin project's NAME for the draft's `project` field (never a file to load). Save the reviewed draft with `knowledge --store <file.json> --save '<draft-json>'`. |
+| `--accept` | `--project <file.json>` `--out <knowledge.json>` `[--actor NAME]` `[--limit N]` | **THE human-gated cross-project write**: promotes the project's top `topLessonRows` (ranked against its brief) into the store at `--out` via `acceptedLessonEntry` â€” the actor (default `$RAPIDTOOL_ACTOR` / `$USERNAME` / `$USER` / `cli-human`) is recorded IN each row (`actor:<name>` tag + body provenance line), so re-accept of identical rows by the same actor is an idempotent no-op (`appended: false`) and a different actor's accept is a distinct row. No machine path appends to the store. A project with no lesson rows, or a missing `--out`, is an honest refusal listing the flag â€” **exit 1** `RT_E_VALIDATION`. |
+| `--supersede` | `--knowledge-file <knowledge.json>` `--id <Kâ€¦>` `[--evidence <text>]` `[--by human\|machine]` | Append-only supersede (98 Â§6.2): `buildSupersedeEntry` + `savePattern` + `markSuperseded` â€” a NEW row declares the old entry dead; the old row stays on disk for audit but is filtered from every read-back. `--evidence` (alias: `--reason`) rides verbatim in the superseding row's body; absent â†’ `"(no reason recorded)"`. Unknown id â†’ **exit 1** `RT_E_VALIDATION`. |
+| `--refute` | `--knowledge-file <knowledge.json>` `--id <Kâ€¦>` `[--evidence <text>]` | One counter-evidence unit via `bumpCounterEvidence` (writer-only telemetry; content fields untouched). Read-back score decays by half per unit; at `LESSON_RETIRE_COUNTER` (3) the row is retired from read-back (kept on disk). The response echoes `counterEvidence`, `retired` and the optional `evidence` (store rows record counts only â€” keep reasons in your own ledger). Unknown id â†’ **exit 1** `RT_E_VALIDATION`. |
 
-Exactly two action flags in one call → **exit 1** `RT_E_VALIDATION`. `list` and
+Exactly two action flags in one call â†’ **exit 1** `RT_E_VALIDATION`. `list` and
 `propose` never touch the project file or any store; `accept`/`supersede`/`refute`
 write only their `--out`/`--knowledge-file` store (append-only, atomic
-write-then-rename, merge-on-save — concurrent appends never clobber).
+write-then-rename, merge-on-save â€” concurrent appends never clobber).
 
 ```json
 { "ok": true, "action": "list", "project": "Servo Rig", "readOnly": true, "rankedBy": "fusion-rank",
   "count": 2, "rows": [ { "id": "lesson-verify-failure-1a2b3c4d", "kind": "semantic", "class": "verify-failure",
-  "level": "L3", "phase": 6, "score": 0.4, "evidence": "calibrate servo loop tuning gains …", "tags": ["lesson", "verify-failure", "L3"] } ] }
-{ "ok": true, "action": "propose", "mode": "keyless", "source": "draft (keyless)", "draft": { "project": "(proposed)", "kind": "note", "title": "…", "tags": ["lesson"], "body": "…" } }
-{ "ok": true, "action": "accept", "store": "…\\lessons.json", "actor": "cli-human", "promoted": 2,
-  "rows": [ { "entryId": "K1a2b3c4d", "appended": true, "lessonRow": "lesson-verify-failure-…", "title": "Lesson L3 verify-failure" } ] }
+  "level": "L3", "phase": 6, "score": 0.4, "evidence": "calibrate servo loop tuning gains â€¦", "tags": ["lesson", "verify-failure", "L3"] } ] }
+{ "ok": true, "action": "propose", "mode": "keyless", "source": "draft (keyless)", "draft": { "project": "(proposed)", "kind": "note", "title": "â€¦", "tags": ["lesson"], "body": "â€¦" } }
+{ "ok": true, "action": "accept", "store": "â€¦\\lessons.json", "actor": "cli-human", "promoted": 2,
+  "rows": [ { "entryId": "K1a2b3c4d", "appended": true, "lessonRow": "lesson-verify-failure-â€¦", "title": "Lesson L3 verify-failure" } ] }
 { "ok": true, "action": "supersede", "supersedingId": "K9f8e7d6c", "appended": true, "superseded": { "id": "K1a2b3c4d", "supersededBy": ["K9f8e7d6c"] } }
-{ "ok": true, "action": "refute", "id": "K1a2b3c4d", "counterEvidence": 1, "retired": false, "evidence": "…" }
+{ "ok": true, "action": "refute", "id": "K1a2b3c4d", "counterEvidence": 1, "retired": false, "evidence": "â€¦" }
 ```
 
 ## Wild (`wild`)
@@ -1116,54 +1126,54 @@ offers. **Mutating:** a run-state change is persisted back to `--project`
 
 | flag | meaning |
 | --- | --- |
-| *(none)* | **Step** an already-active run: one `engine.wildStep` loop per call (default 24 steps, `--steps` clamps 1–48). The loop stops on any non-`advanced` outcome (`paused` / `completed` / `noop`) — wild mode NEVER fabricates progress: gate decisions degrade to the deterministic DoD floor or pause with an honest log. |
-| `--start` | **Enable Wild Mode AND begin a run** (store `setWildMode` + `startWildRun` parity): stamps the canonical active `wildRun`, logs `wild.start`, then runs the bounded loop above. This is the only way to reach wild mode from the CLI — without it a fresh project can never run. Refuses an already-active run (`RT_E_PHASE_ILLEGAL`, exit 1). A project already `complete` → exit 0 `outcome: "noop"`, `steps: 0`, nothing written. |
+| *(none)* | **Step** an already-active run: one `engine.wildStep` loop per call (default 24 steps, `--steps` clamps 1â€“48). The loop stops on any non-`advanced` outcome (`paused` / `completed` / `noop`) â€” wild mode NEVER fabricates progress: gate decisions degrade to the deterministic DoD floor or pause with an honest log. |
+| `--start` | **Enable Wild Mode AND begin a run** (store `setWildMode` + `startWildRun` parity): stamps the canonical active `wildRun`, logs `wild.start`, then runs the bounded loop above. This is the only way to reach wild mode from the CLI â€” without it a fresh project can never run. Refuses an already-active run (`RT_E_PHASE_ILLEGAL`, exit 1). A project already `complete` â†’ exit 0 `outcome: "noop"`, `steps: 0`, nothing written. |
 | `--pause` | Pause an active run (`pause: true`, `active` stays true, `wild.paused` ledger row). Idempotent on an already-paused run (`changed: false`). |
-| `--resume` | Resume a paused run (`pause: false` + `wild.resume` ledger row) **and continue it**: a bounded macro-run follows, exactly as bare `wild` steps (the console `startWildRun` PA-01 resume — a paused run's driver has exited, so an unpause alone would be a no-op). Idempotent on a non-paused run (no loop runs). |
+| `--resume` | Resume a paused run (`pause: false` + `wild.resume` ledger row) **and continue it**: a bounded macro-run follows, exactly as bare `wild` steps (the console `startWildRun` PA-01 resume â€” a paused run's driver has exited, so an unpause alone would be a no-op). Idempotent on a non-paused run (no loop runs). |
 | `--stop` | Stop the run (store `stopWildRun` parity: `active: false`, `stoppedAt` stamped, pause cleared, `wild.stop` ledger row). Idempotent on an already-stopped run. |
 
 `--agent-seal` beside `--pause`/`--stop` is refused coded (`RT_E_VALIDATION`,
 exit 1): those actions only mutate run state and never drive the loop, so the
 governance flag would be silently absorbed. It is accepted (and threaded) by
-`--start`, `--resume`, and the bare step — the actions that drive.
+`--start`, `--resume`, and the bare step â€” the actions that drive.
 
 ```json
 { "ok": true, "path": "build.json", "action": "start", "outcome": "paused", "steps": 5,
-  "changed": true, "summary": { … }, "note": "…" }
+  "changed": true, "summary": { â€¦ }, "note": "â€¦" }
 ```
 
-A success envelope never carries `error` — a run detail rides as `note`, never the
+A success envelope never carries `error` â€” a run detail rides as `note`, never the
 dual `ok:true` + `error` shape (185-H1; failures use the coded `ok:false` shape below).
 The keyless macro-run loop parks honestly at the first stock gate with
-`outcome: "paused"` (the classifier cannot self-approve a human gate) — an
+`outcome: "paused"` (the classifier cannot self-approve a human gate) â€” an
 agent then `approve`s/rejects the gate and `wild --resume` continues the run.
 
-Wild mode off, no active run, or a lifecycle flag on the wrong state →
-`{ "ok": false, "reason": "not-wild" | "not-active" | "already-active", "code": "RT_E_PHASE_ILLEGAL", … }`, **exit 1**
+Wild mode off, no active run, or a lifecycle flag on the wrong state â†’
+`{ "ok": false, "reason": "not-wild" | "not-active" | "already-active", "code": "RT_E_PHASE_ILLEGAL", â€¦ }`, **exit 1**
 (nothing was run, nothing was persisted). More than one of
-`--start|--pause|--resume|--stop` → exit 1 with `RT_E_VALIDATION`.
+`--start|--pause|--resume|--stop` â†’ exit 1 with `RT_E_VALIDATION`.
 
-## Resume and unattended (`resume` · `unattended`)
+## Resume and unattended (`resume` Â· `unattended`)
 
 `run`/`gate` write a **bounded checkpoint** on every committed phase beside the project dir
-(`<dir>/.rapidtool/checkpoint.json` — `checkpoint.server.ts`); a COMPLETE seal clears it. Both
+(`<dir>/.rapidtool/checkpoint.json` â€” `checkpoint.server.ts`); a COMPLETE seal clears it. Both
 verbs below are REAL drives wired through the same `runUntilGate` loop the original run used.
 
-- **`resume --project <file.json|dir>`** (T-107.7) — read → admit → hydrate → re-enter. The
+- **`resume --project <file.json|dir>`** (T-107.7) â€” read â†’ admit â†’ hydrate â†’ re-enter. The
   admission is coded (`checkpointAdmits`): the snapshot's project id must match (a file
   argument pins the expected id, so an id reused by a different brief fails closed), the mode
-  must match this process (`keyless`/`keyed` — a keyed snapshot never resumes keyless), and
-  `run.phase`/`run.step` must be integers ≥ 0 with the recorded phase present in the
+  must match this process (`keyless`/`keyed` â€” a keyed snapshot never resumes keyless), and
+  `run.phase`/`run.step` must be integers â‰¥ 0 with the recorded phase present in the
   snapshot's own phase records. The envelope carries `checkpoint: { path, savedAt, ageMs,
-  resumedFrom }` — the snapshot age is always printed, resume is never silent. Exit taxonomy
+  resumedFrom }` â€” the snapshot age is always printed, resume is never silent. Exit taxonomy
   identical to `gate` (2 = parked; 1 = hard-DoD block / red-gate seal).
-- **`unattended --project <file.json|dir>`** (W-47) — the scheduler-facing drive: re-enter
+- **`unattended --project <file.json|dir>`** (W-47) â€” the scheduler-facing drive: re-enter
   from a checkpoint when one exists, else start from the project file; forces autopilot +
-  live. **NOT a daemon** — there is no scheduler/queue in-product: an external hook (Windows
+  live. **NOT a daemon** â€” there is no scheduler/queue in-product: an external hook (Windows
   Task Scheduler / cron) invokes this verb on a cadence, and each invocation is idempotent
   (it resumes instead of restarting). 341-6: it passes `machineGates`, so a stock HITL gate (P4/P5/P8/P9)
   whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`); only a
-  `forceHuman` gate, or any red DoD gate, still parks (exit 2) — never a fake completion.
+  `forceHuman` gate, or any red DoD gate, still parks (exit 2) â€” never a fake completion.
   The multi-brief wrapper that drains an intake directory and then delivers each
   completed project (it VERIFIES with `emit --run`, then COMMITS with a separate
   `emit --git` only on a green verdict) is
@@ -1176,7 +1186,7 @@ lifecycle: `wild --resume` is the wild-mode pause/resume action, unrelated to ru
 > Honest follow-ups (do not claim them done): the shared `HISTORY_CAPS` across store/io/checkpoint
 > (`A1-03` of `wave_plans/W34/code-notes.md`, landed partially in `fixes/281`). *(The former
 > plan-before-first-mutation review entry is retired: `stageWildPlan` is the one staging site for both
-> wild drivers and parks at `wild.plan_review` before the first mutation — `engine.ts:4398`,
+> wild drivers and parks at `wild.plan_review` before the first mutation â€” `engine.ts:4398`,
 > `store.ts:1357`, `headless.ts:5365/5592`; the browser reviewer is null and records the honest
 > "not configured" review.)*
 
@@ -1188,13 +1198,13 @@ scheduler-facing story was missing (fixes/344 F-18): **ONE bounded tick** that
 drains a brief intake and, per brief, runs the real CLI verbs
 
 ```
-create  →  unattended (machine seat)  →  emit --run (verify)  →  emit --git (commit)
+create  â†’  unattended (machine seat)  â†’  emit --run (verify)  â†’  emit --git (commit)
 ```
 
 The deliver step **re-executes the emitted tree first** (`emit --run`: per-file
 parse + every emitted spec + the kind-entry smoke). Only a GREEN tree-run reaches
 the separate `emit --git` commit, so a red delivery-time re-run leaves **no
-commit** on disk — a commit alone is never evidence the artifact was built or
+commit** on disk â€” a commit alone is never evidence the artifact was built or
 tested, and a red tree's commit never exists.
 
 It is the only "walk away and it ships" path in the repo, and it is honest about
@@ -1204,29 +1214,29 @@ with the CLI's own coded reason.
 
 **Intake / workspace.** Exactly one of:
 
-- `--intake <dir>` — a directory of brief files (`*.md` / `*.txt` / `*.brief`),
+- `--intake <dir>` â€” a directory of brief files (`*.md` / `*.txt` / `*.brief`),
   sorted; each file is one brief. A leading `name:` front-matter scalar names the
   project, else the file stem does. The CLI's own `--brief @<path>` handling
   unwraps a corpus fixture's `brief:` front-matter scalar.
-- `--queue <file.json>` — `[{ "name": ..., "brief": "<prose>" | "@<path>" }]`
+- `--queue <file.json>` â€” `[{ "name": ..., "brief": "<prose>" | "@<path>" }]`
   (also `{ "briefs": [...] }`).
 
-`--work <dir>` is **required** — the factory workspace: it holds
+`--work <dir>` is **required** â€” the factory workspace: it holds
 `<work>/state/factory-state.json` (the durable checkpoint) and a per-project
 directory `<work>/<slug>/` with `build.json` + `emitted/`. `--limit N` bounds the
 briefs that do work in one tick; `--dry-run` plans and writes nothing; `--retry`
 re-attempts a parked/stalled item (an explicit human decision).
 
 **Checkpoint, resume, idempotence.** The factory persists the state after every
-step, so a killed process **resumes rather than restarts** — a `driving` item
+step, so a killed process **resumes rather than restarts** â€” a `driving` item
 re-enters `unattended`, which itself resumes from the phase checkpoint the drive
 writes beside the project (`<dir>/.rapidtool/checkpoint.json`). A brief already
 `delivered` is **skipped**. If a brief's bytes changed under an existing record,
-the item is reported as `changed` and left for a human — never silently re-run.
+the item is reported as `changed` and left for a human â€” never silently re-run.
 A corrupt state file is refused, never overwritten.
 
 **Never invents success.** Delivery is claimed only after TWO real calls prove it:
-`emit --run` re-runs the emitted tree GREEN (`treeRun.ok: true` — the tree was
+`emit --run` re-runs the emitted tree GREEN (`treeRun.ok: true` â€” the tree was
 re-executed at delivery time, not merely committed), and ONLY THEN the separate
 `emit --git` lands a real commit (`committed: true`, or the idempotent
 `noop: true` with a real `.git` on disk). Verification precedes the commit: a RED
@@ -1236,19 +1246,19 @@ persisted `delivery` record carries that verdict's evidence (`treeRun.ok`,
 when `--run` promoted one). Every other terminal is reported with its code and
 left for a human:
 
-- `parked` — exit 2 from `unattended`: the machine seat is exhausted at a
+- `parked` â€” exit 2 from `unattended`: the machine seat is exhausted at a
   `forceHuman` gate (or a `blocked` project). A person must `approve`/`reject`.
-- `stalled` — exit 1: a hard DoD block (`RT_E_GATE_PENDING`), a red-gate complete
-  seal (`RT_E_GATES_FAILED` — a red seal is never a clean 0), a checkpoint
+- `stalled` â€” exit 1: a hard DoD block (`RT_E_GATE_PENDING`), a red-gate complete
+  seal (`RT_E_GATES_FAILED` â€” a red seal is never a clean 0), a checkpoint
   refusal, or a delivery refusal (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`,
-  `RT_E_TREE_RUN_FAILED` — a red re-run at delivery time — …).
-- `failed` — a runtime/backend failure (exit 3/4), retried on the next tick until
+  `RT_E_TREE_RUN_FAILED` â€” a red re-run at delivery time â€” â€¦).
+- `failed` â€” a runtime/backend failure (exit 3/4), retried on the next tick until
   the bounded attempt cap, then left for a human.
 
 **Honest limits (do not claim these are automated).** The factory does not repair
 a red gate and does not clear a `forceHuman` gate. A **keyless** drive is the
 deterministic floor, which cannot synthesise a brief-conformant module, so it
-seals with the P6 DoD gate red and is reported `stalled` — keyless walk-away
+seals with the P6 DoD gate red and is reported `stalled` â€” keyless walk-away
 therefore does **not** deliver; it produces an honest, coded stall for a human.
 A keyed drive defaults DoD enforcement ON and may still miss the P6 DoD (the
 synthesis is not guaranteed), which is likewise reported, never papered over.
@@ -1268,7 +1278,7 @@ npm run factory -- --intake "C:\briefs" --work "C:\factory" --limit 3
 
 ### Host-hook recipe (Windows Task Scheduler / cron)
 
-The factory is a **bounded tick**, not a daemon — schedule it. Each run is
+The factory is a **bounded tick**, not a daemon â€” schedule it. Each run is
 idempotent, so a missed tick simply does the work on the next one.
 
 **Windows Task Scheduler** (every 30 minutes; adjust paths; `cmd /c` +
@@ -1292,7 +1302,7 @@ The key resolution is the CLI's own (repo `.env` wins over the process env): a
 keyed hook must run the command from the repo root (as above) so the funded
 `.env` key applies; a keyless hook sets a **present-but-blank** `DEEPSEEK_API_KEY`
 (the process env's keyless disable) so the deterministic floor runs. Measured
-provider usage from a tick can be captured with the provider's opt-in log — set
+provider usage from a tick can be captured with the provider's opt-in log â€” set
 `RAPIDTOOL_LLM_USAGE_LOG=<file>` in the hook's environment; the factory forwards
 its environment to every child, and each completed provider call appends one
 JSON line (model + token counts, never a prompt or key).
@@ -1300,7 +1310,7 @@ JSON line (model + token counts, never a prompt or key).
 ## Cross-process campaign ledger (opt-in)
 
 `RAPIDTOOL_TOKEN_CAP` binds **one process**, so a campaign driven as N separate
-CLI invocations is not bounded (N × cap). For a bounded campaign, opt in with a
+CLI invocations is not bounded (N Ã— cap). For a bounded campaign, opt in with a
 persistent ledger file:
 
 ```
@@ -1324,7 +1334,7 @@ the envelope is byte-identical (no `campaignLedger` key).
 This CLI is designed to be driven by an AI agent (e.g. a Hermes-style loop),
 so the contract is strict and stable:
 
-- **Every subcommand prints exactly ONE JSON object to stdout** — no progress
+- **Every subcommand prints exactly ONE JSON object to stdout** â€” no progress
   lines, no banners, no stack traces. Human-facing chatter goes nowhere;
   parse stdout, branch on the JSON.
 - **Exit 0** = the command executed and produced its payload
@@ -1333,30 +1343,30 @@ so the contract is strict and stable:
   still distinguishes a fully verified toolchain from an unverified one via
   `unverified` / `declaredScriptsVerified` / `unverifiedDeclaredScripts`.
 - **Exit 1** = the command could not execute (bad/missing args, missing
-  project file) — stdout is `{ "ok": false, "error": "…" }`.
+  project file) â€” stdout is `{ "ok": false, "error": "â€¦" }`.
   `run`/`gate` also exit 1 (code `RT_E_GATES_FAILED`, `sealedWithFailures:
   true`) when the run sealed COMPLETE with one or more recorded FAILED DoD
-  gates — a red-gate completion is never a clean exit 0. **W61 B3:** `run`/`gate`
+  gates â€” a red-gate completion is never a clean exit 0. **W61 B3:** `run`/`gate`
   also exit 1 (code `RT_E_GATE_PENDING`) when the invocation advanced NOTHING
-  (`steps: 0`) and did not reach a designed park or a clean seal — a stalled red
+  (`steps: 0`) and did not reach a designed park or a clean seal â€” a stalled red
   P6 is surfaced coded instead of a silent `ok:true` re-park at 0 steps (reopen
   it with `retry`).
 - **Exit 2** = `run`/`gate` parked the project at a HITL gate or in `blocked`
-  (full state is on stdout — `approve`/`reject`/`retry` next).
-- **Exit 3** = a backend is not configured — no `DEEPSEEK_API_KEY` where one is
+  (full state is on stdout â€” `approve`/`reject`/`retry` next).
+- **Exit 3** = a backend is not configured â€” no `DEEPSEEK_API_KEY` where one is
   required (`RT_E_LLM_NOT_CONFIGURED`).
-- **Exit 4** = backend or internal runtime failure — including a missing/broken
+- **Exit 4** = backend or internal runtime failure â€” including a missing/broken
   optional module in the vault/design/diagram arms (envelope carries the
   `RT_E_*` code).
 - **Exit 5** (`emit --run` / `tree-run` only, **opt-in**) = the tree is GREEN but
-  its DECLARED project scripts (e.g. `typecheck`, `build`) could not be resolved/run — the
+  its DECLARED project scripts (e.g. `typecheck`, `build`) could not be resolved/run â€” the
   emitted toolchain is UNVERIFIED, not failed. `ok` stays `true` (nothing ran
   red, and the tested-mint is unaffected) and the envelope carries
   `unverified: true`, `declaredScriptsVerified: false`, and
   `unverifiedDeclaredScripts: [...]` naming exactly which scripts did not run.
   **The default is exit 0** for that state. Note (corrected 2026-10-03 by the 345-F1 docs-truth
   fix): a fresh emit whose declared scripts resolve from the RapidTool repo's own `node_modules/`
-  is **verified** (`declaredScriptsVerified: true`, exit 0) — the unverified state is the residual
+  is **verified** (`declaredScriptsVerified: true`, exit 0) â€” the unverified state is the residual
   case, not the fresh-emit default. Pass `--require-verified` to opt INTO the strict exit 5 for
   your gate; resolve/link the tree's deps and re-run `--run` to reach a verified
   state (exit 0 with `declaredScriptsVerified: true`). Exit 5 is deliberately
@@ -1364,138 +1374,138 @@ so the contract is strict and stable:
 - `summary` carries agent hints: `researchCount` (cited findings across live
   corpus rounds; 0 on deterministic runs), `memoryCount` (atomic memory rows),
   and `vaultReady` (true when `src/lib/vault.ts` exists AND the project already
-  holds note-able content — i.e. `vault` will succeed).
+  holds note-able content â€” i.e. `vault` will succeed).
 - **A value-taking flag is never silently ignored.** A value flag passed with
-  no value (`--limit`, `--phase`, `--name`, `--steps`, `--budget`, `--dir`, …)
+  no value (`--limit`, `--phase`, `--name`, `--steps`, `--budget`, `--dir`, â€¦)
   parses as a bare `true`; the CLI refuses it before dispatch with exit 1 +
   `RT_E_VALIDATION`, naming the flag and the two spellings. A **documented
   numeric** flag (`--limit`, `--phase`, `--steps`, `--max-steps`, `--budget`)
   whose value is present but not a non-negative integer is refused the same way
-  — before W49 it was silently dropped (live: `search --limit abc` exited 0 on
+  â€” before W49 it was silently dropped (live: `search --limit abc` exited 0 on
   the default, `deepen --phase abc` fell back to the live phase and reported a
   misleading phase error). Boolean flags (`--live`, `--apply`, `--force`,
   `--start`, `--require-verified`, the `lesson`/`wild` action flags) are
   unaffected. This closes the valueless-flag asymmetry of the 330/331 waves one
-  class at a time (S3 · W46 · 332-4; numeric class W49 · 335-4). The empty-value
+  class at a time (S3 Â· W46 Â· 332-4; numeric class W49 Â· 335-4). The empty-value
   spelling (`--token-ledger=`) is the same class and is refused identically (it
   used to silently disable the cross-process campaign cap). An **unknown flag**
   (`--gti`, or a per-verb flag misplaced on another verb) is likewise refused
-  coded before dispatch — `parseArgs` stores ANY `--x` as a key, and an inert key
+  coded before dispatch â€” `parseArgs` stores ANY `--x` as a key, and an inert key
   used to ride to the verb as if it had applied. `--steps 0` is refused as a
-  usage error (the documented bound is positive, 1–48).
+  usage error (the documented bound is positive, 1â€“48).
 - **A usage refusal names its own fix.** `remedy` rides every coded refusal;
   for a CLI usage error (`missing required --flag`, an unknown verb, a bad
-  `--red-tree`/`--kind`/`--tree` value, …) it is the CLI's own concrete fix, not
+  `--red-tree`/`--kind`/`--tree` value, â€¦) it is the CLI's own concrete fix, not
   the registry's `RT_E_VALIDATION` action (which speaks to the engine validating
-  model output). `--help <verb>` lists the verb's accepted flags (W49 · 335-4).
+  model output). `--help <verb>` lists the verb's accepted flags (W49 Â· 335-4).
 
 ## Error codes (RT_E_*)
 
-Every `{ "ok": false, … }` envelope carries `code`, a stable machine-readable
+Every `{ "ok": false, â€¦ }` envelope carries `code`, a stable machine-readable
 error id produced by `classifyError` (`src/lib/errors.ts`) from the human
-`error` text. Codes never replace the exit-code taxonomy above — they refine
+`error` text. Codes never replace the exit-code taxonomy above â€” they refine
 it: the same exit code can carry different codes, and agents should branch on
 `code` first, `exit_code` second. Adding the optional `code` field is additive
 for JSON consumers (they already branch on `ok`/`error`), so `schema_version`
-stays `1` — schema-version bumps are reserved for breaking envelope changes.
+stays `1` â€” schema-version bumps are reserved for breaking envelope changes.
 
-The classifier matches a small set of signals — a thrown `RT_E_*` code passes
+The classifier matches a small set of signals â€” a thrown `RT_E_*` code passes
 through; `ENOENT`; abort/timeout prose; report rejection by error name; the
 OS/network errno families (`EACCES`/`EPERM`, `ENOSPC`, `EADDRINUSE`, connect/DNS,
-a bare `fetch failed`); a failed `JSON.parse` → `RT_E_VALIDATION` — so a subset
-of codes appears on CLI envelopes today: project-file load failures →
-`RT_E_PROJECT_MISSING`; rejected reports → `RT_E_REPORT_INVALID` /
-`RT_E_REPORT_PHASE_MISMATCH`; `emit`/`check` failures → `RT_E_FOREIGN_FILES` /
-`RT_E_CHECK_FAILED`; exit-3 (backend not configured, crew/verify/prompt) →
+a bare `fetch failed`); a failed `JSON.parse` â†’ `RT_E_VALIDATION` â€” so a subset
+of codes appears on CLI envelopes today: project-file load failures â†’
+`RT_E_PROJECT_MISSING`; rejected reports â†’ `RT_E_REPORT_INVALID` /
+`RT_E_REPORT_PHASE_MISMATCH`; `emit`/`check` failures â†’ `RT_E_FOREIGN_FILES` /
+`RT_E_CHECK_FAILED`; exit-3 (backend not configured, crew/verify/prompt) â†’
 `RT_E_LLM_NOT_CONFIGURED`; unmatched prose falls back to the caller's domain
 code, else `RT_E_UNKNOWN`. The remaining codes are engine/UI-domain and
 surface in `src/lib` results or the console instead. The canonical registry is
-`ERROR_CODE_DOC` in `src/lib/errors.ts`; this table mirrors it — the full
+`ERROR_CODE_DOC` in `src/lib/errors.ts`; this table mirrors it â€” the full
 registry, one row per code, `typical exit_code` from the taxonomy above:
 
-**The lesson/wild pillar subcommands add NO new codes** — they reuse the existing
+**The lesson/wild pillar subcommands add NO new codes** â€” they reuse the existing
 registry: `harvest` never fails for missing keys (keyless; honest-empty rows +
 exit 0), `knowledge`/`mine`/`lesson` pin `RT_E_VALIDATION` for malformed input
 (exit 1), `wild` pins `RT_E_PHASE_ILLEGAL` for not-wild/not-active refusals (exit 1), and
-`prompt` exits 3 → `RT_E_LLM_NOT_CONFIGURED` exactly like `crew`/`verify`.
-The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set their codes
-**directly in their case arms** (not via the classifier): red tree →
-`RT_E_TREE_RUN_FAILED`, exhausted repair → `RT_E_REPAIR_FAILED`.
+`prompt` exits 3 â†’ `RT_E_LLM_NOT_CONFIGURED` exactly like `crew`/`verify`.
+The emitâ†’editâ†’re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set their codes
+**directly in their case arms** (not via the classifier): red tree â†’
+`RT_E_TREE_RUN_FAILED`, exhausted repair â†’ `RT_E_REPAIR_FAILED`.
 
 | code | meaning | agentAction | typical exit_code |
 | --- | --- | --- | --- |
-| `RT_E_UNKNOWN` | No classifier matched — the failure is opaque. | Inspect the raw message and the call site, then re-surface the failure with the closest specific code instead of guessing. | 1–4 (fallback) |
+| `RT_E_UNKNOWN` | No classifier matched â€” the failure is opaque. | Inspect the raw message and the call site, then re-surface the failure with the closest specific code instead of guessing. | 1â€“4 (fallback) |
 | `RT_E_PROJECT_MISSING` | The referenced project (id or file) does not exist or cannot be loaded. | Check the project id/path against the registry; create or import the project first, or report an honest not-found to the user. | 1 |
 | `RT_E_PHASE_ILLEGAL` | An operation targeted a phase that is not legal from the current state (unknown id, out of order, or sealed priors). | Re-read currentPhase against the phase graph (canEnter/priorsSealed) and either pick the correct next phase or explain why the requested one is not reachable yet. | 1 or 4 (engine-thrown via run/gate) |
 | `RT_E_GATE_PENDING` | The operation requires a resolved gate, but a HITL gate is still pending. | Route the project through the open HITL prompt (approve/reject with feedback); do not auto-advance and never fabricate a decision. | 1 (approve/reject state guard) |
 | `RT_E_REPORT_INVALID` | An ingested agent report failed shape validation. | Fix the report to match the AgentReport schema (phase 0-12, status enum, non-empty summary) and re-submit; never mutate project state. | 1 |
 | `RT_E_REPORT_PHASE_MISMATCH` | A report targeted a phase other than the live current phase. | Re-emit the report for project.currentPhase, or advance the project to the phase the report covers first. | 1 |
-| `RT_E_RUNNER_UNAVAILABLE` | The bounded code runner is not configured in this environment. | Fall back to the deterministic self-test path and label lastTest as self-test — never present a fallback as a real run. | 3 (verify/exec domain) |
+| `RT_E_RUNNER_UNAVAILABLE` | The bounded code runner is not configured in this environment. | Fall back to the deterministic self-test path and label lastTest as self-test â€” never present a fallback as a real run. | 3 (verify/exec domain) |
 | `RT_E_RUNNER_FAILED` | The runner executed but failed (refused, timed out, non-zero exit, or spawn failure). | Read the runner's stdout/stderr evidence, fix the generated module, and re-run before claiming any test verdict. | 4 (verify/exec domain) |
 | `RT_E_CHECK_FAILED` | The compile-check pass found emitted files that do not parse (per-file verdicts carried on the result). | Read the per-file verdicts, fix the offending emitted modules at the generator, and re-emit before building further. | 1 (emit --check / `check`) |
 | `RT_E_LLM_NOT_CONFIGURED` | No DeepSeek API key is present, so no LLM call can run. | Return the honest not-configured fallback (deterministic path), never fabricate model text, and tell the user to set DEEPSEEK_API_KEY. | 3 |
 | `RT_E_LLM_TIMEOUT` | The LLM call exceeded its deadline. | Retry once if the task is idempotent, otherwise fall back to the deterministic path and report the timeout honestly. | 4 (crew/verify backend) |
 | `RT_E_LLM_REJECTED` | The LLM provider refused the request (401 auth, 402 billing, 429 rate limit, invalid params, or empty content). | Do not retry blindly; check key/balance/parameters, and surface the provider's own message to the user. | 4 (crew/verify backend) |
-| `RT_E_LLM_NO_BALANCE` | The LLM provider refused the call because the account balance is exhausted (the provider's HTTP 402 / "Insufficient Balance" — a wallet class, not a generic refusal). | Stop consuming this account: do not retry (billing is not transient) and read NO keyed score from a run in this state — top up the account or switch keys, re-pass the fundedness probe, then re-run. | 4 (crew/verify backend) |
-| `RT_E_LLM_KEY_REJECTED` | The LLM provider rejected the API key it was sent (HTTP 401 authentication failure) — the credential is invalid/revoked, not the request. | Fix the key at the source named in the message and `remedy` (the `.env` path or the process environment, tail-only), confirm which source wins under "API key resolution", then re-run; never paste the full key into logs. | 4 (crew/verify backend) |
-| `RT_E_LLM_KEY_SHADOWED` | A conflicting ambient `DEEPSEEK_API_KEY` and the `.env` key are both present and differ — the `.env` key wins by documented precedence and the ambient key was ignored (surfaced on stderr, never silently shadowed). | No action is needed to proceed; to silence the signal, clear the stale ambient variable (Windows: remove the User-scope `DEEPSEEK_API_KEY`) or make it match the `.env` key. Compare by last-4 tails only. | - (diagnostic; never fails the run) |
+| `RT_E_LLM_NO_BALANCE` | The LLM provider refused the call because the account balance is exhausted (the provider's HTTP 402 / "Insufficient Balance" â€” a wallet class, not a generic refusal). | Stop consuming this account: do not retry (billing is not transient) and read NO keyed score from a run in this state â€” top up the account or switch keys, re-pass the fundedness probe, then re-run. | 4 (crew/verify backend) |
+| `RT_E_LLM_KEY_REJECTED` | The LLM provider rejected the API key it was sent (HTTP 401 authentication failure) â€” the credential is invalid/revoked, not the request. | Fix the key at the source named in the message and `remedy` (the `.env` path or the process environment, tail-only), confirm which source wins under "API key resolution", then re-run; never paste the full key into logs. | 4 (crew/verify backend) |
+| `RT_E_LLM_KEY_SHADOWED` | A conflicting ambient `DEEPSEEK_API_KEY` and the `.env` key are both present and differ â€” the `.env` key wins by documented precedence and the ambient key was ignored (surfaced on stderr, never silently shadowed). | No action is needed to proceed; to silence the signal, clear the stale ambient variable (Windows: remove the User-scope `DEEPSEEK_API_KEY`) or make it match the `.env` key. Compare by last-4 tails only. | - (diagnostic; never fails the run) |
 | `RT_E_RESEARCH_UNAVAILABLE` | The live web-research backend is not configured or unreachable. | Proceed with the deterministic corpus, set liveUnavailable so the documented gate waiver applies, and never present fabricated findings as real research. | 3 (engine live-overlay domain) |
 | `RT_E_VALIDATION` | Input or model output failed validation and cannot be used. | Reject the payload, state the concrete validation rule that failed, and ask for corrected input instead of guessing. | 1 |
-| `RT_E_RATCHET_METRIC_UNAVAILABLE` | A pinned quality-ratchet floor could not be measured — the producer ran but produced no usable reading. | Re-run the named producer and read its output; if the artifact is genuinely absent say so with RT_E_PROJECT_MISSING, and if a reader's shape changed fix the reader instead of the floor. | — (measurement domain, `scripts/quality-ratchet.mjs`; **no CLI arm**) |
+| `RT_E_RATCHET_METRIC_UNAVAILABLE` | A pinned quality-ratchet floor could not be measured â€” the producer ran but produced no usable reading. | Re-run the named producer and read its output; if the artifact is genuinely absent say so with RT_E_PROJECT_MISSING, and if a reader's shape changed fix the reader instead of the floor. | â€” (measurement domain, `scripts/quality-ratchet.mjs`; **no CLI arm**) |
 | `RT_E_INTERNAL` | Unexpected internal failure (transport, serialization, server). | Log the full error, retry once if it may be transient, and escalate with the raw message rather than paraphrasing. | 4 |
-| `RT_E_GATES_FAILED` | The run sealed COMPLETE while one or more recorded DoD gates stand FAILED — a red-gate seal, never a clean one. | Read summary.failedGates (the census), repair the failing phase(s) and re-run — do not treat this exit as a successful completion or ship the artifact as-is. | 1 (run/gate red-gate complete) |
-| `RT_E_TREE_RUN_FAILED` | `tree-run --dir` (or `emit --run`) executed the tree and it is RED — not all parse/spec/entry verdicts are ok. | Read the envelope's first not-ok tail, fix the emitted file(s) in the dir, re-run — never treat a red tree as clean. | 1 (tree-run / emit --run red tree) |
-| `RT_E_REPAIR_FAILED` | `repair --dir` exhausted its cycle budget without a green tree-run — the deterministic floor stands, no fake repair was applied. | Read the failure tail/refusal in the envelope, hand-edit the dir or tighten the brief, re-run repair. | 1 (repair budget exhausted) |
-| `RT_E_VERIFY_KIND_FAILED` | `emit --verify-kind` ran the bounded scratch-copy install + the declared build/test leg and it ended red (fixes/216z · T4.1). | Read the honest install/build `detail` and fix the emitted scaffold or the emitted package. | 1 (emit --verify-kind) |
-| `RT_E_BUDGET_EXHAUSTED` | A journey or wild run hit its hard cycle/token budget and stopped without converging (also: the opt-in cross-process campaign ledger refused because `spent >= cap`). | Read the last tree-failure tail, raise the budget only with a human decision, or repair the generator — never mint converged after exhaustion. | 1 (campaign-ledger preflight, `rapidtool-cli.mjs` — corrected here; an engine-thrown stop surfaces through `run`/`gate`) |
+| `RT_E_GATES_FAILED` | The run sealed COMPLETE while one or more recorded DoD gates stand FAILED â€” a red-gate seal, never a clean one. | Read summary.failedGates (the census), repair the failing phase(s) and re-run â€” do not treat this exit as a successful completion or ship the artifact as-is. | 1 (run/gate red-gate complete) |
+| `RT_E_TREE_RUN_FAILED` | `tree-run --dir` (or `emit --run`) executed the tree and it is RED â€” not all parse/spec/entry verdicts are ok. | Read the envelope's first not-ok tail, fix the emitted file(s) in the dir, re-run â€” never treat a red tree as clean. | 1 (tree-run / emit --run red tree) |
+| `RT_E_REPAIR_FAILED` | `repair --dir` exhausted its cycle budget without a green tree-run â€” the deterministic floor stands, no fake repair was applied. | Read the failure tail/refusal in the envelope, hand-edit the dir or tighten the brief, re-run repair. | 1 (repair budget exhausted) |
+| `RT_E_VERIFY_KIND_FAILED` | `emit --verify-kind` ran the bounded scratch-copy install + the declared build/test leg and it ended red (fixes/216z Â· T4.1). | Read the honest install/build `detail` and fix the emitted scaffold or the emitted package. | 1 (emit --verify-kind) |
+| `RT_E_BUDGET_EXHAUSTED` | A journey or wild run hit its hard cycle/token budget and stopped without converging (also: the opt-in cross-process campaign ledger refused because `spent >= cap`). | Read the last tree-failure tail, raise the budget only with a human decision, or repair the generator â€” never mint converged after exhaustion. | 1 (campaign-ledger preflight, `rapidtool-cli.mjs` â€” corrected here; an engine-thrown stop surfaces through `run`/`gate`) |
 | `RT_E_ABORTED` | The process received SIGTERM/SIGINT and stamped acceptance:aborted before exit. | Resume from the persisted cursor if one exists; do not treat the run as accepted or failed. | 1 (chat abort; signal stamps exit 130/143) |
 | `RT_E_BUSY` | Another writer holds the project file lock (saveProject O_EXCL). | Wait and retry the save; do not overwrite or delete the .lock file while a writer is live. | 1 (emit/save lock refusal) |
-| `RT_E_FOREIGN_FILES` | emit refused because the target dir contains foreign files that are not leftover tests/ (also: a forced emit's quarantine move failed — `quarantineFailed`). | Pass --force only if you accept the foreign files moving aside into `<dir>/.rapidtool-quarantine/<stamp>/`, or emit into a clean directory. | 1 (emit --force refusal / quarantine move failure) |
-| `RT_E_PERMISSION_DENIED` | The OS denied access to a file or directory (EACCES/EPERM). | Fix the path's permissions or run from a location the process may write to; do not retry the same path unchanged. | 1–4 (classified in place) |
-| `RT_E_DISK_FULL` | A write failed because the filesystem has no space left (ENOSPC). | Free space or point the output at another volume before retrying; never report the write as done. | 1–4 (classified in place) |
-| `RT_E_PORT_IN_USE` | A server could not bind because the address/port is already in use (EADDRINUSE). | Stop the process holding the port or bind a different port; do not kill processes blindly. | 1–4 (classified in place) |
-| `RT_E_NETWORK_UNREACHABLE` | A network call never reached its target — DNS miss, refused or reset connection, unreachable host (includes undici's bare "fetch failed"). | Check the target host/port and connectivity; retry once if the failure may be transient, then report the unreachable endpoint honestly instead of fabricating the remote result. | 1–4 (classified in place) |
-| `RT_E_GIT_UNAVAILABLE` | The git binary is not available in this environment, so the git landing tail cannot run. | Report the absence honestly and leave the tree uninitialized — install git, or run where git exists; never fake a landing or hand-roll repository metadata. | 1 (`emit --git` delivery tail; live emitter in `src/lib/git.server.ts`) |
-| `RT_E_CHECKPOINT_MISSING` | T-107.7: `resume`/`unattended` found no checkpoint at <projectDir>/.rapidtool/checkpoint.json — the run never committed a phase with a known project dir, or a COMPLETE seal cleared it (there is no successor state to re-enter). | Continue with the normal run verbs — `gate`/`run --project` writes a fresh checkpoint on every committed phase (`unattended` starts from the project file when no checkpoint exists); re-run `resume` only after a run has committed a phase beside that dir. Never invent a resumption. | 1 (resume/unattended re-entry) |
-| `RT_E_NOT_IMPLEMENTED` | The requested capability is a coded SHELL: its seam exists (types/parsing/refusal paths in place) but the full logic is not wired yet — the message names the owning TODO row. | Treat the refusal as the honest state of the build: read the named TODO(<row-id>) / lane log, implement that row, and re-run; never work around it by fabricating the missing behavior. | — (no live emitter today) |
-| `RT_E_AUTH_SCHEMA_MISSING` | Sign-in is enabled (VITE_AUTH_ENABLED is not "false") but no migration creates the Better Auth "user" table — migrations/auth/*.sql is never applied (neither the deploy migrator nor the PGLite fallback descends into it). | Copy the auth schema into the migrated directory (`cp migrations/auth/0001_auth.sql migrations/0001_auth.sql`, plus any later migrations/auth/*.sql in name order), restart, and re-run; or set VITE_AUTH_ENABLED=false to run without sign-in. Never let the app serve sign-in against a schema-less database. | 1 (migrate/build preflight) |
-| `RT_E_MCP_DISABLED` | F1 (R8-f11 / R13-f06): the MCP runtime client is owner-gated and DISABLED by default — no child process is spawned and zero network I/O is performed until the owner sets RAPIDTOOL_MCP_ENABLED=1. The JSON-RPC 2.0 stdio transport itself IS implemented (`src/lib/mcp.server.ts`, 340-1); the trust gate, not a missing transport, is why nothing runs. | Do not simulate MCP discovery or fabricate tool lists: wait for the owner's trust decision, then set RAPIDTOOL_MCP_ENABLED=1 and re-run the read-only tools/list discovery (the stdio transport is implemented — `src/lib/mcp.server.ts`). | 1 (`doctor --mcp-call` / `doctorMcp`; live emitter) |
-| `RT_E_PATH_KIND_MISMATCH` | The path is the wrong KIND of filesystem entry — a directory where a file was required (EISDIR) or a non-directory where a directory was required (ENOTDIR). | Point the operation at the right kind of path (a file for a file read, a directory for a dir-scoped write) or move the blocking entry aside; do not retry the same path unchanged and never report it as missing. | 1–4 (classified in place — EISDIR/ENOTDIR) |
-| `RT_E_IMPORT_TOO_LARGE` | An import payload exceeded the paste-size cap (in characters) before any parse work — a hostile or corrupt paste the tool refuses to allocate. | Shrink the payload, or — only for a byte source that already holds it (the file loader) — raise the cap via `importProject(…, { maxChars })`; never parse an unbounded paste. | — (engine domain, `src/lib/io.ts`; surfaces in `src/lib` results / the console) |
-| `RT_E_SUBSTANCE_EMPTY` | A generated run/tree carries no substantive coverage of the brief — its core-noun hits are empty or only connective prose, even though a shallow file/arch count may have passed. | Do not treat the run as product-complete: read the substance census (core-noun hits, real vs stub/alias modules), re-synthesize the missing surface, and re-run; never lower the bar to make a hollow tree pass. | 1 (`emit --run --git` substance hold, `substance-empty`) |
-| `RT_E_PLAN_UNDERPRODUCED` | The brief demands more deliverable surface (features/entities/artifacts) than the plan produced — the run planned or emitted fewer substantively-covered items than the brief requires. | Read the per-brief requirement census, expand synthesis to cover the named deliverables, and re-run; never seal under-production as COMPLETE or trim the brief to match a thin plan. This is the code the below-floor refusal and the delivery floor-seal carry (`--red-tree banner` lands the bannered partial UNDER it, commit still withheld). | 1 (emit: the below-floor refusal before any write / the floor seal) |
-| `RT_E_DUPLICATE_EXPORT` | A generated barrel re-exports the SAME member from two providers (TypeScript TS2308 / a duplicate export) — the module collides at load, not merely at typecheck. | Resolve the collision through the frozen export registry (one canonical provider per name) or refuse the offending chunk — never drop the export that satisfies a required signature to silence the error, and never rewrite the barrel by hand. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_USE_BEFORE_DECL` | A block-scoped binding is read in a generated module before its declaration (TypeScript TS2448) — the tree loads into a temporal-dead-zone error even when the per-chunk check passed. | Run the deterministic tree normalizer's dependency order / pure store hoist; if the read cannot be ordered without changing semantics, refuse with the bounded repair — never reorder a side-effecting declaration. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_MONEY_SEMANTICS` | A money-named or money-documented export accumulates a quantity (qty/quantity/count) with no price/unit-cost operand — arithmetic that is syntactically valid and brief-worded but returns the wrong amount. | Re-derive the helper from the entity's price field, or run the one bounded money-semantics repair; never accept the quantity-sum as a green result, and never let a deterministic validator pass arithmetic it did not measure. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_README_PARITY` | An emitted README's "What ships in this scaffold" manifest lists a path that does not exist on disk — the artifact contradicts itself about its own contents. | Filter the manifest rows to the files actually emitted and render an explicit "declared, NOT emitted" sub-table for the rest; never leave a manifest row that reads as shipped when the file is absent. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_SRC_EDITED_DURING_RUN` | A run observed `src/**` (or `scripts/**`) modified after the run began (RUNLOCK / BL-010) — the run's build artifacts and verdicts were produced against a tree that changed underneath it. | Discard the suspect run's evidence: stop the run, name the changed file(s), re-run against the frozen tree; never treat a concurrently-edited run as a clean measurement. | 1 (run/gate/tree-run RUNLOCK refusal) |
-| `RT_E_UI_UNWIRED` | A mounted UI (the emitted console) imports a generated surface but calls no real generated export — the product's interface is unwired from its own logic, even when the tree typechecks. | Consume the single product predicate `realGeneratedExportWiring`: wire the UI to CALL a real generated export, or mark the delivery unverified; never seal an unwired console as a product. | — (engine/dod domain; surfaces in `src/lib` results / the console) |
-| `RT_E_SPEC_SKIP_VACUOUS` | An emitted behavioural oracle is skip-dominated (mostly `test.skip` rows against a handful of live rows), so `npm test` exit 0 is vacuity, not behaviour. | Emit an oracle whose live assertions dominate and tie a module read to a concrete value; never count a skip-dominated green as tested or as behaviour. | — (engine tree-run leg — the tree reddens as `RT_E_TREE_RUN_FAILED`) |
-| `RT_E_SPEC_VACUOUS` | An emitted spec runs green under `node --test` but carries no behavioural assertion (load-only, or only shape/presence probes such as `typeof x === 'function'`), so its exit 0 is vacuity — the bounded spec leg refuses it even though the tree's own `npm test` reports pass. | Emit a spec with at least one assertion that ties a call/return (or a property of it) to a concrete expected value; never read the declared `npm test` exit 0 as behaviour when the spec leg refused it for vacuity — the disagreement between the two executions is the finding. | — (engine tree-run leg — the tree reddens as `RT_E_TREE_RUN_FAILED`) |
-| `RT_E_CLAIM_UNVERIFIED` | A delivery record claims a product (git committed) without stating its real verification — no verification block and no `unverified` flag, though its evidence is absent. | State the verification block / `unverifiedReasons` in the delivery envelope, or mark the delivery unverified; never let an unverified commit read as a verified product. | — (engine delivery-gate domain, `src/lib/dod.ts` / `packet.ts`) |
-| `RT_E_GIT_CODE_INCONSISTENT` | A withheld git envelope's nested `git.code`/`git.reason` names a different deciding reason than the top-level code (e.g. `substance-empty` beside `RT_E_TREE_RUN_FAILED`). | Set the withheld envelope's `git.code` to the deciding withhold code so nested and top-level agree; never leave the envelope contradicting its own verdict. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_SYNTH_DEFAULT_DISARMED` | The synthesis policy's armed chunk-resample default was silently re-disarmed (candidate count <= 1) — a revert of the enabled reliability lever while the resolver still consumes the constant. | Restore the armed default (`P6_SYNTH_CHUNK_RETRY_CANDIDATES` > 1) or make an explicit opt-out; never silently re-disarm the resample lever. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_SYNTH_RESAMPLE_UNBOUNDED` | A per-chunk, fail-fast, or whole-tree resample loop lacks the finite `P6_SYNTH_CANDIDATES_MAX` clamp — retries can run unbounded and blow the token budget. | Clamp every resample loop bound to the finite cap (>= 2 armed, <= 4 the cost bound); never run an unbounded resample. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_REFUSAL_COVERAGE_LOST` | A re-pinned refusal-path suite lost its genuine coded refusal assertion (a deleted/weakened `p6.synthesis.refused` made to pass) — the refusal floor is no longer pinned. | Restore the coded refusal assertion in the touched suite and keep the refused/coded-reason counts at or above their floor; never let a re-pin drop or loosen a refusal. | — (guard `expectedCode`; `scripts/guards/*` + `scripts/prevention/cassettes/refusal-coverage.json`) |
-| `RT_E_SYNTH_RESUME_NOT_REUSED` | An accepted chunk was re-synthesized (paid for again) instead of being reused, though `ctx.resumeAccepted` was populated for the repair cycle. | Thread the previous cycle's accepted chunks into `ctx.resumeAccepted` and reuse any path present in `resumeByPath` with 0 synthesis prompts; never re-buy an accepted chunk. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_JSX_IN_TS` | An emitted `.ts` module contains JSX or names the global `JSX` namespace (TypeScript TS2503) — the JSX transform applies to `.tsx` only, so the tree fails its own typecheck. | Move JSX into a `.tsx` chunk or emit plain TypeScript; never ship a `.ts` module that references the JSX namespace or raw JSX. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_VERIFIED_PRODUCT_UNEVIDENCED` | A committed delivery claims `verifiedProduct` without the recorded verification block / evidence conjunction that backs the claim. | State `verifiedProduct` as exactly the recorded evidence conjunction (or `false` with reasons); never claim a verified product without the evidence. | — (guard `expectedCode`; `scripts/guards/*`) |
-| `RT_E_DEFAULT_CHECK_BASELINE_LOST` | A default-check baseline dropped a sample's `workingApp` score — only the flattering sample is pinned, so the recorded variance is erased. | Pin every sample's score (including the weaker one) with its `artifactComplete` flag; never drop a sample to make the baseline look better. | — (guard `expectedCode`; `scripts/guards/*` + `scripts/prevention/cassettes/rubric-baselines.json`) |
+| `RT_E_FOREIGN_FILES` | emit refused because the target dir contains foreign files that are not leftover tests/ (also: a forced emit's quarantine move failed â€” `quarantineFailed`). | Pass --force only if you accept the foreign files moving aside into `<dir>/.rapidtool-quarantine/<stamp>/`, or emit into a clean directory. | 1 (emit --force refusal / quarantine move failure) |
+| `RT_E_PERMISSION_DENIED` | The OS denied access to a file or directory (EACCES/EPERM). | Fix the path's permissions or run from a location the process may write to; do not retry the same path unchanged. | 1â€“4 (classified in place) |
+| `RT_E_DISK_FULL` | A write failed because the filesystem has no space left (ENOSPC). | Free space or point the output at another volume before retrying; never report the write as done. | 1â€“4 (classified in place) |
+| `RT_E_PORT_IN_USE` | A server could not bind because the address/port is already in use (EADDRINUSE). | Stop the process holding the port or bind a different port; do not kill processes blindly. | 1â€“4 (classified in place) |
+| `RT_E_NETWORK_UNREACHABLE` | A network call never reached its target â€” DNS miss, refused or reset connection, unreachable host (includes undici's bare "fetch failed"). | Check the target host/port and connectivity; retry once if the failure may be transient, then report the unreachable endpoint honestly instead of fabricating the remote result. | 1â€“4 (classified in place) |
+| `RT_E_GIT_UNAVAILABLE` | The git binary is not available in this environment, so the git landing tail cannot run. | Report the absence honestly and leave the tree uninitialized â€” install git, or run where git exists; never fake a landing or hand-roll repository metadata. | 1 (`emit --git` delivery tail; live emitter in `src/lib/git.server.ts`) |
+| `RT_E_CHECKPOINT_MISSING` | T-107.7: `resume`/`unattended` found no checkpoint at <projectDir>/.rapidtool/checkpoint.json â€” the run never committed a phase with a known project dir, or a COMPLETE seal cleared it (there is no successor state to re-enter). | Continue with the normal run verbs â€” `gate`/`run --project` writes a fresh checkpoint on every committed phase (`unattended` starts from the project file when no checkpoint exists); re-run `resume` only after a run has committed a phase beside that dir. Never invent a resumption. | 1 (resume/unattended re-entry) |
+| `RT_E_NOT_IMPLEMENTED` | The requested capability is a coded SHELL: its seam exists (types/parsing/refusal paths in place) but the full logic is not wired yet â€” the message names the owning TODO row. | Treat the refusal as the honest state of the build: read the named TODO(<row-id>) / lane log, implement that row, and re-run; never work around it by fabricating the missing behavior. | â€” (no live emitter today) |
+| `RT_E_AUTH_SCHEMA_MISSING` | Sign-in is enabled (VITE_AUTH_ENABLED is not "false") but no migration creates the Better Auth "user" table â€” migrations/auth/*.sql is never applied (neither the deploy migrator nor the PGLite fallback descends into it). | Copy the auth schema into the migrated directory (`cp migrations/auth/0001_auth.sql migrations/0001_auth.sql`, plus any later migrations/auth/*.sql in name order), restart, and re-run; or set VITE_AUTH_ENABLED=false to run without sign-in. Never let the app serve sign-in against a schema-less database. | 1 (migrate/build preflight) |
+| `RT_E_MCP_DISABLED` | F1 (R8-f11 / R13-f06): the MCP runtime client is owner-gated and DISABLED by default â€” no child process is spawned and zero network I/O is performed until the owner sets RAPIDTOOL_MCP_ENABLED=1. The JSON-RPC 2.0 stdio transport itself IS implemented (`src/lib/mcp.server.ts`, 340-1); the trust gate, not a missing transport, is why nothing runs. | Do not simulate MCP discovery or fabricate tool lists: wait for the owner's trust decision, then set RAPIDTOOL_MCP_ENABLED=1 and re-run the read-only tools/list discovery (the stdio transport is implemented â€” `src/lib/mcp.server.ts`). | 1 (`doctor --mcp-call` / `doctorMcp`; live emitter) |
+| `RT_E_PATH_KIND_MISMATCH` | The path is the wrong KIND of filesystem entry â€” a directory where a file was required (EISDIR) or a non-directory where a directory was required (ENOTDIR). | Point the operation at the right kind of path (a file for a file read, a directory for a dir-scoped write) or move the blocking entry aside; do not retry the same path unchanged and never report it as missing. | 1â€“4 (classified in place â€” EISDIR/ENOTDIR) |
+| `RT_E_IMPORT_TOO_LARGE` | An import payload exceeded the paste-size cap (in characters) before any parse work â€” a hostile or corrupt paste the tool refuses to allocate. | Shrink the payload, or â€” only for a byte source that already holds it (the file loader) â€” raise the cap via `importProject(â€¦, { maxChars })`; never parse an unbounded paste. | â€” (engine domain, `src/lib/io.ts`; surfaces in `src/lib` results / the console) |
+| `RT_E_SUBSTANCE_EMPTY` | A generated run/tree carries no substantive coverage of the brief â€” its core-noun hits are empty or only connective prose, even though a shallow file/arch count may have passed. | Do not treat the run as product-complete: read the substance census (core-noun hits, real vs stub/alias modules), re-synthesize the missing surface, and re-run; never lower the bar to make a hollow tree pass. | 1 (`emit --run --git` substance hold, `substance-empty`) |
+| `RT_E_PLAN_UNDERPRODUCED` | The brief demands more deliverable surface (features/entities/artifacts) than the plan produced â€” the run planned or emitted fewer substantively-covered items than the brief requires. | Read the per-brief requirement census, expand synthesis to cover the named deliverables, and re-run; never seal under-production as COMPLETE or trim the brief to match a thin plan. This is the code the below-floor refusal and the delivery floor-seal carry (`--red-tree banner` lands the bannered partial UNDER it, commit still withheld). | 1 (emit: the below-floor refusal before any write / the floor seal) |
+| `RT_E_DUPLICATE_EXPORT` | A generated barrel re-exports the SAME member from two providers (TypeScript TS2308 / a duplicate export) â€” the module collides at load, not merely at typecheck. | Resolve the collision through the frozen export registry (one canonical provider per name) or refuse the offending chunk â€” never drop the export that satisfies a required signature to silence the error, and never rewrite the barrel by hand. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_USE_BEFORE_DECL` | A block-scoped binding is read in a generated module before its declaration (TypeScript TS2448) â€” the tree loads into a temporal-dead-zone error even when the per-chunk check passed. | Run the deterministic tree normalizer's dependency order / pure store hoist; if the read cannot be ordered without changing semantics, refuse with the bounded repair â€” never reorder a side-effecting declaration. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_MONEY_SEMANTICS` | A money-named or money-documented export accumulates a quantity (qty/quantity/count) with no price/unit-cost operand â€” arithmetic that is syntactically valid and brief-worded but returns the wrong amount. | Re-derive the helper from the entity's price field, or run the one bounded money-semantics repair; never accept the quantity-sum as a green result, and never let a deterministic validator pass arithmetic it did not measure. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_README_PARITY` | An emitted README's "What ships in this scaffold" manifest lists a path that does not exist on disk â€” the artifact contradicts itself about its own contents. | Filter the manifest rows to the files actually emitted and render an explicit "declared, NOT emitted" sub-table for the rest; never leave a manifest row that reads as shipped when the file is absent. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_SRC_EDITED_DURING_RUN` | A run observed `src/**` (or `scripts/**`) modified after the run began (RUNLOCK / BL-010) â€” the run's build artifacts and verdicts were produced against a tree that changed underneath it. | Discard the suspect run's evidence: stop the run, name the changed file(s), re-run against the frozen tree; never treat a concurrently-edited run as a clean measurement. | 1 (run/gate/tree-run RUNLOCK refusal) |
+| `RT_E_UI_UNWIRED` | A mounted UI (the emitted console) imports a generated surface but calls no real generated export â€” the product's interface is unwired from its own logic, even when the tree typechecks. | Consume the single product predicate `realGeneratedExportWiring`: wire the UI to CALL a real generated export, or mark the delivery unverified; never seal an unwired console as a product. | â€” (engine/dod domain; surfaces in `src/lib` results / the console) |
+| `RT_E_SPEC_SKIP_VACUOUS` | An emitted behavioural oracle is skip-dominated (mostly `test.skip` rows against a handful of live rows), so `npm test` exit 0 is vacuity, not behaviour. | Emit an oracle whose live assertions dominate and tie a module read to a concrete value; never count a skip-dominated green as tested or as behaviour. | â€” (engine tree-run leg â€” the tree reddens as `RT_E_TREE_RUN_FAILED`) |
+| `RT_E_SPEC_VACUOUS` | An emitted spec runs green under `node --test` but carries no behavioural assertion (load-only, or only shape/presence probes such as `typeof x === 'function'`), so its exit 0 is vacuity â€” the bounded spec leg refuses it even though the tree's own `npm test` reports pass. | Emit a spec with at least one assertion that ties a call/return (or a property of it) to a concrete expected value; never read the declared `npm test` exit 0 as behaviour when the spec leg refused it for vacuity â€” the disagreement between the two executions is the finding. | â€” (engine tree-run leg â€” the tree reddens as `RT_E_TREE_RUN_FAILED`) |
+| `RT_E_CLAIM_UNVERIFIED` | A delivery record claims a product (git committed) without stating its real verification â€” no verification block and no `unverified` flag, though its evidence is absent. | State the verification block / `unverifiedReasons` in the delivery envelope, or mark the delivery unverified; never let an unverified commit read as a verified product. | â€” (engine delivery-gate domain, `src/lib/dod.ts` / `packet.ts`) |
+| `RT_E_GIT_CODE_INCONSISTENT` | A withheld git envelope's nested `git.code`/`git.reason` names a different deciding reason than the top-level code (e.g. `substance-empty` beside `RT_E_TREE_RUN_FAILED`). | Set the withheld envelope's `git.code` to the deciding withhold code so nested and top-level agree; never leave the envelope contradicting its own verdict. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_SYNTH_DEFAULT_DISARMED` | The synthesis policy's armed chunk-resample default was silently re-disarmed (candidate count <= 1) â€” a revert of the enabled reliability lever while the resolver still consumes the constant. | Restore the armed default (`P6_SYNTH_CHUNK_RETRY_CANDIDATES` > 1) or make an explicit opt-out; never silently re-disarm the resample lever. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_SYNTH_RESAMPLE_UNBOUNDED` | A per-chunk, fail-fast, or whole-tree resample loop lacks the finite `P6_SYNTH_CANDIDATES_MAX` clamp â€” retries can run unbounded and blow the token budget. | Clamp every resample loop bound to the finite cap (>= 2 armed, <= 4 the cost bound); never run an unbounded resample. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_REFUSAL_COVERAGE_LOST` | A re-pinned refusal-path suite lost its genuine coded refusal assertion (a deleted/weakened `p6.synthesis.refused` made to pass) â€” the refusal floor is no longer pinned. | Restore the coded refusal assertion in the touched suite and keep the refused/coded-reason counts at or above their floor; never let a re-pin drop or loosen a refusal. | â€” (guard `expectedCode`; `scripts/guards/*` + `scripts/prevention/cassettes/refusal-coverage.json`) |
+| `RT_E_SYNTH_RESUME_NOT_REUSED` | An accepted chunk was re-synthesized (paid for again) instead of being reused, though `ctx.resumeAccepted` was populated for the repair cycle. | Thread the previous cycle's accepted chunks into `ctx.resumeAccepted` and reuse any path present in `resumeByPath` with 0 synthesis prompts; never re-buy an accepted chunk. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_JSX_IN_TS` | An emitted `.ts` module contains JSX or names the global `JSX` namespace (TypeScript TS2503) â€” the JSX transform applies to `.tsx` only, so the tree fails its own typecheck. | Move JSX into a `.tsx` chunk or emit plain TypeScript; never ship a `.ts` module that references the JSX namespace or raw JSX. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_VERIFIED_PRODUCT_UNEVIDENCED` | A committed delivery claims `verifiedProduct` without the recorded verification block / evidence conjunction that backs the claim. | State `verifiedProduct` as exactly the recorded evidence conjunction (or `false` with reasons); never claim a verified product without the evidence. | â€” (guard `expectedCode`; `scripts/guards/*`) |
+| `RT_E_DEFAULT_CHECK_BASELINE_LOST` | A default-check baseline dropped a sample's `workingApp` score â€” only the flattering sample is pinned, so the recorded variance is erased. | Pin every sample's score (including the weaker one) with its `artifactComplete` flag; never drop a sample to make the baseline look better. | â€” (guard `expectedCode`; `scripts/guards/*` + `scripts/prevention/cassettes/rubric-baselines.json`) |
 
 *(Re-derived 2026-10-15 by `fix-preview`: `ERROR_CODE_DOC` in `src/lib/errors.ts` carries **56** codes
-and every one now has a row above — diff `ERROR_CODES` against this table to check. Codes raised in
+and every one now has a row above â€” diff `ERROR_CODES` against this table to check. Codes raised in
 `src/**` or `scripts/**` but **absent from the registry** are a registry gap owed to a wave that owns
 `errors.ts`; they are deliberately NOT documented here, because the registry is canonical.)*
 
-*(W358 `close-taxonomy`, 2026-10-15: **57** codes — `fix-preview` registered nothing; this wave landed the
+*(W358 `close-taxonomy`, 2026-10-15: **57** codes â€” `fix-preview` registered nothing; this wave landed the
 one owed registry line, `RT_E_RATCHET_METRIC_UNAVAILABLE` (the ratchet's own cause), so the table grew by
-that row. The `typical exit_code` cell is the **contract**: a number, a range (`1–4`), or an alternation
-(`1 or 4`) asserts the exit class of a code that reaches a CLI envelope; `—` / `-` asserts the **no CLI
-arm** class — the code is produced inside `src/lib`/`scripts` and never rides a CLI envelope, so no exit
+that row. The `typical exit_code` cell is the **contract**: a number, a range (`1â€“4`), or an alternation
+(`1 or 4`) asserts the exit class of a code that reaches a CLI envelope; `â€”` / `-` asserts the **no CLI
+arm** class â€” the code is produced inside `src/lib`/`scripts` and never rides a CLI envelope, so no exit
 class may be claimed for it. `scripts/cli-exit-taxonomy.test.mjs` DERIVES `EXIT_BY_CODE` from these cells
-(a `—`/`-` cell must map to `null`, never to a number) and asserts the table and the map agree in both
+(a `â€”`/`-` cell must map to `null`, never to a number) and asserts the table and the map agree in both
 directions, so a cell and its mapping cannot drift apart. This table and `ERROR_CODE_DOC` must also name
-the same code set — the same guard checks it.)*
+the same code set â€” the same guard checks it.)*
 
 ## Full agent loop (Hermes-style)
 
@@ -1508,14 +1518,14 @@ B="node --experimental-strip-types scripts/rapidtool-cli.mjs"
 $B create --brief "Build a field-service dispatch board for HVAC." --name "HVAC Dispatch" --out build.json
 # 2. deterministic research phases until the first stock HITL gate (P4) parks
 $B gate --project build.json                       # {ok, summary, steps, stopped}
-# 3. human/agent decision on the parked gate → approve (or reject --note "…")
+# 3. human/agent decision on the parked gate â†’ approve (or reject --note "â€¦")
 $B approve --project build.json                    # {ok, summary}
-# 4. a rejected gate parks the project as blocked — retry re-opens the phase
+# 4. a rejected gate parks the project as blocked â€” retry re-opens the phase
 $B retry --project build.json                      # {ok, summary.status: running}
-# 5. loop gate → approve until complete or blocked
+# 5. loop gate â†’ approve until complete or blocked
 #    (stock gates P4/P5/P8/P9 and forceHuman gates are NEVER auto-approved)
 # 6. ingest an external agent's report at any time (append-only)
-$B ingest --project build.json --report '{"phase":4,"status":"complete","summary":"…","artifacts":[{"title":"…","body":"…"}]}'
+$B ingest --project build.json --report '{"phase":4,"status":"complete","summary":"â€¦","artifacts":[{"title":"â€¦","body":"â€¦"}]}'
 # 7. run the advisory crew over the current phase (only with DEEPSEEK_API_KEY)
 $B crew --project build.json --max-steps 12        # feed artifacts back via ingest
 # 8. verify the generated source once codegen phases have run
@@ -1523,7 +1533,7 @@ $B verify --project build.json                     # loop on status != "passed"
 # 9. vault + search the accumulated knowledge
 $B vault --project build.json --out vault/
 $B search --project build.json --query "OAuth scopes"
-# 10. list artifacts → decide what to fetch next (rows: id/phase/kind/title/bytes)
+# 10. list artifacts â†’ decide what to fetch next (rows: id/phase/kind/title/bytes)
 $B artifacts --project build.json
 # 11. design tokens (+ a standalone HTML preview with --html) for the next builder
 $B design --project build.json --html design.html
@@ -1532,7 +1542,7 @@ $B diagram --project build.json --kind architecture --out architecture.svg
 # 13. compile the agent packet / snapshot / full export for handoff
 $B packet --project build.json --out packet.md
 $B export --project build.json --out final.json
-# 14. bounded live-source harvest for the brief (real repos/licenses — never fabricated)
+# 14. bounded live-source harvest for the brief (real repos/licenses â€” never fabricated)
 $B harvest --project build.json                    # {ok, rows[], querySource, notes[]}
 # 15. advisory swarm critique of the current phase (pure state analysis)
 $B swarm --project build.json                      # {ok, critiques[], refinedPlan}
@@ -1541,13 +1551,13 @@ $B bench --project build.json                      # {ok, token, time, complexit
 # 17. structural map of a real directory (bounded; skips reported)
 $B mine --dir src/lib --limit 200                   # {ok, files[], map, conventions, skipped}
 # 18. cross-project pattern store (append / search)
-$B knowledge --store patterns.json --save '{"project":"p","kind":"pattern","title":"…","tags":["x"],"body":"…"}'
+$B knowledge --store patterns.json --save '{"project":"p","kind":"pattern","title":"â€¦","tags":["x"],"body":"â€¦"}'
 $B knowledge --store patterns.json --find "auth refresh"
-# 19. the human-gated lesson family — list (read-only) / accept (THE cross-project write)
-$B lesson --list --project build.json [--brief "…"]          # {ok, readOnly: true, rows[]}
+# 19. the human-gated lesson family â€” list (read-only) / accept (THE cross-project write)
+$B lesson --list --project build.json [--brief "â€¦"]          # {ok, readOnly: true, rows[]}
 $B lesson --accept --project build.json --out lessons.json --actor NAME   # {ok, promoted, rows[]}
 # 20. wild mode: enable + begin a run; approve/reject parked gates; resume/stop
-$B wild --project build.json --start --steps 24   # {ok, outcome, steps, summary} — parks at the first human gate
+$B wild --project build.json --start --steps 24   # {ok, outcome, steps, summary} â€” parks at the first human gate
 $B wild --project build.json --resume             # continue after the gate decision
 # 21. grounded copilot turn over the project (only with DEEPSEEK_API_KEY)
 $B chat --project build.json --ask "What is the isolation policy?"   # {ok, reply, provenance}
@@ -1566,7 +1576,7 @@ loop:
   approve(project)                       # human decision on the stock gate
 verify(project)                          # only when summary.currentPhase >= 10
 vault(project); search(project, query)   # knowledge layer for the next agent
-artifacts(project)                       # index → pick the artifact to fetch next
+artifacts(project)                       # index â†’ pick the artifact to fetch next
 design(project, html?)                   # design tokens (+ optional HTML page)
 diagram(project, kind, out?)             # SVG: phases / architecture / flow
 ```
@@ -1580,38 +1590,38 @@ command leaves the project file untouched. `wild`/`deepen` persist only when
 the run state actually changed (an idempotent no-op control never rewrites the
 file). `knowledge --save`, `lesson --accept` (its `--out` store),
 `lesson --supersede` / `lesson --refute` (their `--knowledge-file`) mutate
-cross-project STORE files only — the project file is never touched.
+cross-project STORE files only â€” the project file is never touched.
 
 ## Tests
 
-This file is pinned by **two legs** — the `npm test` pair (`ls scripts/*.test.mjs` + the
+This file is pinned by **two legs** â€” the `npm test` pair (`ls scripts/*.test.mjs` + the
 `src/lib/**/*.test.ts` suite; both canonical commands are `package.json`'s `test` script):
 
 ```bash
 npm test                                                 # both legs, in order
-# leg 1 — the scripts suite (24 contract suites), incl. THIS file's doc-contract pins:
+# leg 1 â€” the scripts suite (24 contract suites), incl. THIS file's doc-contract pins:
 node --test "scripts/**/*.test.mjs"
-# leg 2 — the engine suite (`headless.test.ts` + `harvest.test.ts` are part of it):
+# leg 2 â€” the engine suite (`headless.test.ts` + `harvest.test.ts` are part of it):
 node --experimental-strip-types --test "src/lib/**/*.test.ts"
 ```
 
-## The `approve` seat — `--i-am-human` + the out-of-band `RT_HUMAN_SEAT_TOKEN` (216 · TA-2 · R5-f12 two-channel)
+## The `approve` seat â€” `--i-am-human` + the out-of-band `RT_HUMAN_SEAT_TOKEN` (216 Â· TA-2 Â· R5-f12 two-channel)
 
 Every HITL approval is recorded under an explicit **actor seat**, so a machine
 path can never mint `decidedBy: "human"` (the pre-216 behaviour: `approve()`
 hardcoded a human actor for every caller, including the eval harness).
 
-- **Default seat (no seat claimed)** → `decidedBy: "autopilot"`, seat
+- **Default seat (no seat claimed)** â†’ `decidedBy: "autopilot"`, seat
   `harness`; the ledger row's note carries the `[seat harness]` tag. This is
   what an unattended/agent process gets. Consequence: a plain approve can
-  never override a `forceHuman` gate (e.g. a failed P6 sandbox) — such a gate
+  never override a `forceHuman` gate (e.g. a failed P6 sandbox) â€” such a gate
   needs the human seat below plus `--force`.
-- **Human seat** → `decidedBy: "human"`, seat `human-cli-i-am-human`. The seat
-  needs TWO channels (R5-f12 — the two-channel claim, `humanSeatClaim`):
-  - **Channel A — possession/claim:** the person at the keyboard exports
+- **Human seat** â†’ `decidedBy: "human"`, seat `human-cli-i-am-human`. The seat
+  needs TWO channels (R5-f12 â€” the two-channel claim, `humanSeatClaim`):
+  - **Channel A â€” possession/claim:** the person at the keyboard exports
     `RT_HUMAN_SEAT_TOKEN` in their own shell; that environment value is the
     EXPECTED side.
-  - **Channel B — presence/confirmation:** the CLI prompts on stderr and the
+  - **Channel B â€” presence/confirmation:** the CLI prompts on stderr and the
     person RE-ENTERS the same token; the typed value is the PRESENTED side.
 
   A TTY-typed `approve` thus presents BOTH pieces of evidence:
@@ -1622,33 +1632,33 @@ hardcoded a human actor for every caller, including the eval harness).
      export RT_HUMAN_SEAT_TOKEN="$(head -c 24 /dev/urandom | base64)"
      node --experimental-strip-types scripts/rapidtool-cli.mjs approve \
        --project build.json --i-am-human
-     # → Confirm human seat — re-enter RT_HUMAN_SEAT_TOKEN:  (type it again)
+     # â†’ Confirm human seat â€” re-enter RT_HUMAN_SEAT_TOKEN:  (type it again)
      ```
      On a match the row's note reads
      `[seat human-cli-i-am-human] out-of-band RT_HUMAN_SEAT_TOKEN verified`.
 
   A **non-TTY** `--i-am-human` is refused outright (exit 1, `RT_E_VALIDATION`):
-  there is no second channel to type into, so no human row may be minted — use
+  there is no second channel to type into, so no human row may be minted â€” use
   the autopilot seat (`gate --autopilot`) for machine approval. With a typo'd,
   empty, or non-matching re-entry/env, the call REFUSES: exit 1, envelope
-  `code: "RT_E_VALIDATION"`, the message naming `RT_HUMAN_SEAT_TOKEN` — and
+  `code: "RT_E_VALIDATION"`, the message naming `RT_HUMAN_SEAT_TOKEN` â€” and
   **nothing is written** (the project stays parked at the gate, no ledger row,
   no human actor). A seat claim without its out-of-band evidence never lands.
   Ceiling (honest): an accountability control under the ledger-trust assumption
   (same-OS-user processes can read env/files), **not** a security boundary.
 
-### The same seat on `reject` (322 · F-1)
+### The same seat on `reject` (322 Â· F-1)
 
-The reject door carries the identical discipline: exactly one seat — `--seat autopilot`
+The reject door carries the identical discipline: exactly one seat â€” `--seat autopilot`
 (`decidedBy: "autopilot"`, seat harness) or `--i-am-human` (the human two-channel claim,
-TTY only). A bare `reject` (either TTY state) is refused CODED — exit 1, `RT_E_VALIDATION`,
-with both seat doors in the remedy — and the chosen actor is stamped on the minted ledger
+TTY only). A bare `reject` (either TTY state) is refused CODED â€” exit 1, `RT_E_VALIDATION`,
+with both seat doors in the remedy â€” and the chosen actor is stamped on the minted ledger
 row + `lastGate`, so a machine reject can never mint `decidedBy: "human"` (the pre-322
 behaviour: `rejectHitl` hardcoded the human stamp for every caller; live bytes
 `live1/05_sealed_reject_note.out`).
 
 The token is deliberately out-of-band: do not bake it into scripts, config
-files, `package.json`, or the project JSON — a process that merely inherited an
+files, `package.json`, or the project JSON â€” a process that merely inherited an
 agent's environment does not hold it (and cannot type it). `approve` is the only
 verb that REQUIRES the human seat (non-TTY calls); the same two-channel claim
 backs `fixtures --approve` and `edit --write` when `--i-am-human` is passed; the
