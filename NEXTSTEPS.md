@@ -247,6 +247,7 @@ and found nothing. So it is a **new project**, not an existing one to upload.
 
 | Path | What |
 |---|---|
+| `SETUP.md` | **Dependencies + the full step-by-step to install, verify and run it** (start here on a new machine) |
 | `AGENTS.md` | The repo working contract (read it first, after this file) |
 | `START-HERE.md` · `RUNBOOK.md` | Orientation · the human operator's runbook |
 | `src/lib/` | The engine (13-phase machine, gates, synthesis, emission) |
