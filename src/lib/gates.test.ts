@@ -262,7 +262,12 @@ describe("gateArtifact", () => {
     assert.equal(a.kind, "gate");
     assert.equal(a.phase, 4);
     assert.equal(a.title, "DoD gate — P4");
-    assert.match(a.body, /Evidence hash: 12345678/);
+    // A3-E15: the rendered label must say WHAT the value is — a verdict-vector
+    // fingerprint, not content evidence. The old "Evidence hash:" label read as
+    // artifact evidence a reader could trust; it never was one.
+    assert.match(a.body, /Verdict fingerprint .*: 12345678/);
+    assert.ok(!a.body.includes("Evidence hash:"), "the misleading label is gone");
+    assert.match(a.body, /NOT artifact content/);
     assert.match(a.body, /\*\*Result: FAIL\*\*/);
     assert.match(a.body, /- p4-approved/);
     assert.ok(a.id.startsWith("gate-p4-"));
@@ -758,9 +763,10 @@ describe("P0-03/P0-04/P0-05 artifact honesty (fixes/97)", () => {
     assert.ok(!/Durable checkpoint key|RRF\(k=60\)|cross-encoder re-rank/.test(mem.body));
     // D3: the P2 memory body now narrates the PRODUCT's state (brief nouns),
     // not the engine's mechanism — with the honest persistence boundary.
-    assert.match(mem.body, /Records:/);
+    assert.match(mem.body, /Records( \(brief-derived nouns\))?:/);
     assert.match(mem.body, /dispatch|board|field/);
-    assert.match(mem.body, /no specific database or durable store is claimed/);
+    // 352: the honesty line was tightened to a flat declaration statement.
+    assert.match(mem.body, /no (specific )?database or durable store is claimed/);
 
     const p3 = applyPhaseResult(seedProject(), 3);
     const mcp = phaseArtifact(p3, 3, "mcp");
@@ -789,7 +795,7 @@ describe("P0-03/P0-04/P0-05 artifact honesty (fixes/97)", () => {
     // D3/P0-04: declared capabilities are the brief-derived surfaces map with
     // the honest declared-not-bound boundary, never a bare string.
     assert.ok(Array.isArray(parsed11.surfaces), "surfaces list present");
-    assert.match(String(parsed11.note ?? ""), /declared, not bound at runtime/);
+    assert.match(String(parsed11.note ?? ""), /not bound at runtime/);
   });
 
   it("P4 gate prompt confirms the implemented boundary, never an unimplemented policy (P0-05 S1)", () => {
@@ -1067,6 +1073,104 @@ describe("fixes/144 M2 — p6-arch probe over generatedTree (archTrace)", () => 
   it("isStubSource pins real code as not a stub", () => {
     assert.equal(isStubSource("export function createBoard() { return { id: 'b1' }; }"), false);
     assert.equal(isReexportOnlySource("export function createBoard() { return 1; }"), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-05 product-quality lane — the vacuous p6-arch pass, surfaced
+// honestly. An absent tree still passes (the keyless floor is NOT hard-broken,
+// no bar is lowered), but `runGate` now reports the SKIP in its `advisories`
+// list and `gateArtifact` renders it, so a no-tree state cannot read as
+// product-complete.
+// ---------------------------------------------------------------------------
+describe("2026-10-05 — p6-arch vacuous-pass advisory (no bar change)", () => {
+  it("keeps the absent-tree PASS and adds a SKIP advisory naming it", () => {
+    const floor = fullRun();
+    const r = runGate(floor, 6);
+    assert.ok(!r.unmet.some((g) => g.id === "p6-arch"), "p6-arch still passes (bar unchanged)");
+    const a = r.advisories.find((x) => x.id === "p6-arch");
+    assert.ok(a, "the vacuous pass carries an advisory");
+    assert.match(a!.note, /SKIP/);
+    assert.match(a!.note, /NOT product-complete/);
+    assert.equal(archTrace(floor).present, false);
+    assert.equal(archProductComplete(archTrace(floor)), false);
+  });
+
+  // A3-E7 (2026-10-06): the narrow fail-closed guard caught only a dangling
+  // `p6.synthesis.attempt`; a recorded terminal `p6.synthesis.refused` (and a
+  // never-attempted keyless floor) still passed VACUOUSLY, so a refused keyed
+  // synthesis read as a passing architecture probe. A refusal now FAILS the
+  // probe; the pure keyless floor keeps its advisory PASS.
+  it("A3-E7: an absent tree after an attempted-and-refused synthesis FAILS p6-arch", () => {
+    const refused: Project = {
+      ...fullRun(),
+      logs: [
+        { ts: 1, phase: 6 as PhaseId, level: "warn" as const, event: "p6.synthesis.attempt", detail: "chunk 0/3 attempt 1" },
+        { ts: 2, phase: 6 as PhaseId, level: "warn" as const, event: "p6.synthesis.refused", detail: "RT_E_LLM_REJECTED · refused" },
+      ],
+    };
+    const r = runGate(refused, 6);
+    assert.ok(r.unmet.some((g) => g.id === "p6-arch"), "a refused synthesis is under-production, not a skip");
+    const u = r.unmet.find((g) => g.id === "p6-arch")!;
+    assert.match(u.reason ?? "", /RT_E_PLAN_UNDERPRODUCED/);
+    assert.match(u.reason ?? "", /REFUSED/);
+
+    // A dangling attempt (no terminal outcome) still fails closed.
+    const dangling: Project = {
+      ...fullRun(),
+      logs: [
+        { ts: 1, phase: 6 as PhaseId, level: "warn" as const, event: "p6.synthesis.attempt", detail: "chunk 0/3 attempt 1" },
+      ],
+    };
+    assert.ok(runGate(dangling, 6).unmet.some((g) => g.id === "p6-arch"), "a dangling attempt fails closed");
+
+    // The PURE keyless floor (no synthesis log at all) keeps its SKIP pass.
+    const floor = runGate(fullRun(), 6);
+    assert.ok(!floor.unmet.some((g) => g.id === "p6-arch"), "the keyless floor still passes");
+    assert.ok(floor.advisories.some((x) => x.id === "p6-arch"), "…as a SKIP advisory");
+  });
+
+  it("a tree-carrying PASS has no p6-arch advisory (only qualified passes are reported)", () => {
+    const p = archProject(archTree([ARCH_BOARD_FILE, ARCH_COLUMN_FILE]));
+    const r = runGate(p, 6);
+    assert.ok(!r.unmet.some((g) => g.id === "p6-arch"), "tree passes");
+    assert.ok(!r.advisories.some((x) => x.id === "p6-arch"), "a real tree pass is unqualified");
+  });
+
+  it("a FAILED p6-arch reports in `unmet`, never as an advisory", () => {
+    const p = archProject(archTree([ARCH_BOARD_FILE])); // addColumn file absent
+    const r = runGate(p, 6);
+    assert.ok(r.unmet.some((g) => g.id === "p6-arch"), "p6-arch fails");
+    assert.ok(!r.advisories.some((x) => x.id === "p6-arch"), "a fail is not an advisory");
+  });
+
+  it("the advisory never changes the evidence hash (verdict-vector only)", () => {
+    const floor = fullRun();
+    const a = runGate(floor, 6);
+    const b = runGate({ ...floor }, 6);
+    assert.equal(a.evidenceHash, b.evidenceHash, "advisory is not hashed");
+  });
+
+  it("recordGateInto renders the SKIP in the recorded gate artifact body", () => {
+    const floor = fullRun();
+    const recorded = recordGateInto(floor, 6);
+    const art = recorded.artifacts.find((x) => x.kind === "gate" && x.phase === 6);
+    assert.ok(art, "gate artifact recorded");
+    assert.match(art!.body, /Qualified passes \(\*\*NOT\*\* product-complete\)/);
+    assert.match(art!.body, /p6-arch: SKIP/);
+  });
+
+  it("gateArtifact renders an advisory section only when one is passed", () => {
+    const clean = gateArtifact(0, { pass: true, unmet: [], evidenceHash: "abcdef01" });
+    assert.ok(!clean.body.includes("Qualified passes"), "ordinary pass is unchanged");
+    const withNote = gateArtifact(6, {
+      pass: true,
+      unmet: [],
+      evidenceHash: "abcdef01",
+      advisories: [{ id: "p6-arch", criterion: "c", note: "SKIP — no tree" }],
+    });
+    assert.match(withNote.body, /Qualified passes/);
+    assert.match(withNote.body, /p6-arch: SKIP — no tree/);
   });
 });
 
@@ -1350,6 +1454,146 @@ describe("345 F2 (V1-M2) — runGate refuses an unregistered phase with a coded 
       assert.equal(r.unmet[0].id, `unregistered-${phase}`, "the refusal is coded by phase id");
       assert.match(r.unmet[0].reason ?? "", /outside the registered gate graph/);
       assert.equal(r.evidenceHash, String(fnv1a(`unregistered:${phase}`)));
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-05 — the DoD EVIDENCE-CLASS reading (additive, honours the honesty
+// contract). A green gate now records WHAT it verified, so a green P6 gate
+// cannot be read as "the emitted product builds": p6-verified accepts executed
+// tree-run spec tests (NOT the emitted package.json's declared typecheck/build),
+// and p6-arch accepts a structural mapping that may be a no-tree SKIP.
+// ---------------------------------------------------------------------------
+describe("2026-10-05 — runGate records the accepted evidence class (additive, no bar change)", () => {
+  it("a green P6 gate reports executed-tree-tests and productBuildVerified:false", () => {
+    const done = promote(fullRun());
+    const r = runGate(done, 6);
+    assert.equal(r.pass, true, "the promoted run's P6 gate is green");
+    assert.ok(
+      r.evidenceClass.classes.includes("executed-tree-tests"),
+      `p6-verified accepts executed tree-run tests; got ${JSON.stringify(r.evidenceClass.classes)}`,
+    );
+    assert.equal(
+      r.evidenceClass.productBuildVerified,
+      false,
+      "no P6 criterion builds the emitted package — a green gate must not read as build-verified",
+    );
+    assert.match(r.evidenceClass.note, /NOT run/);
+    // The per-criterion class is right where it matters.
+    const byId = new Map(r.evidenceClass.byCriterion.map((c) => [c.id, c]));
+    assert.equal(byId.get("p6-verified")?.class, "executed-tree-tests");
+    assert.equal(byId.get("p6-test")?.class, "executed-self-test");
+    assert.equal(byId.get("p6-arch")?.class, "structural-tree-map");
+  });
+
+  it("the evidence class never changes the verdict or the evidence hash", () => {
+    const a = runGate(fullRun(), 6);
+    const b = runGate({ ...fullRun() }, 6);
+    assert.equal(a.pass, b.pass);
+    assert.equal(a.evidenceHash, b.evidenceHash, "evidenceClass is not hashed (verdict-vector only)");
+    assert.deepEqual(a.unmet.map((u) => u.id), b.unmet.map((u) => u.id));
+  });
+
+  it("a floor run's P6 reading does not claim executed tree tests", () => {
+    const r = runGate(fullRun(), 6); // keyless floor: p6-verified unmet
+    assert.ok(!r.evidenceClass.classes.includes("executed-tree-tests"));
+    assert.equal(r.evidenceClass.productBuildVerified, false);
+  });
+
+  it("gateArtifact renders the evidence-class section only when supplied", () => {
+    const without = gateArtifact(6, { pass: true, unmet: [], evidenceHash: "abcdef01" });
+    assert.ok(!without.body.includes("Evidence class"), "an ordinary call is unchanged");
+    const withClass = gateArtifact(6, {
+      pass: true,
+      unmet: [],
+      evidenceHash: "abcdef01",
+      evidenceClass: {
+        byCriterion: [],
+        classes: ["executed-tree-tests"],
+        productBuildVerified: false,
+        note: "green evidence is EXECUTED tree-run spec tests, not a BUILT product",
+      },
+    });
+    assert.match(withClass.body, /Evidence class \(what a PASS verified\)/);
+    assert.match(withClass.body, /product build verified: no/);
+  });
+
+  it("recordGateInto stamps the evidence class into the recorded gate artifact", () => {
+    const recorded = recordGateInto(promote(fullRun()), 6);
+    const art = recorded.artifacts.find((x) => x.kind === "gate" && x.phase === 6);
+    assert.ok(art, "gate artifact recorded");
+    assert.match(art!.body, /Evidence class \(what a PASS verified\)/);
+    assert.match(art!.body, /product build verified: no/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-06 � the ACTIONABLE evidence-class qualifier (item 2). A green gate
+// whose met evidence is all non-executed (artifact-presence / ledger /
+// structural / lexical) is qualified weak with RT_E_CLAIM_UNVERIFIED and the
+// gate artifact renders it � a green seal can never be read as "the product
+// builds" when nothing ran.
+// ---------------------------------------------------------------------------
+describe("2026-10-06 � evidence-class qualification is actionable (no bar change)", () => {
+  it("a green gate resting on artifact-presence only is qualified weak", () => {
+    const p = { ...fullRun(), artifacts: [{ id: "a", phase: 3, kind: "mcp", title: "mcp", body: "contract" }] } as Project;
+    const r = runGate(p, 3);
+    assert.equal(r.pass, true, "P3's artifact criterion is met");
+    assert.deepEqual(r.evidenceClass.classes, ["artifact-presence"]);
+    assert.equal(r.evidenceClass.qualification?.weak, true, "presence-only evidence is weak");
+    assert.equal(r.evidenceClass.qualification?.code, "RT_E_CLAIM_UNVERIFIED");
+    assert.match(r.evidenceClass.qualification?.note ?? "", /NON-EXECUTED/);
+  });
+
+  it("a gate whose met evidence includes executed evidence is NOT qualified weak", () => {
+    const r = runGate(promote(fullRun()), 6);
+    assert.ok(r.evidenceClass.classes.includes("executed-tree-tests"));
+    assert.equal(r.evidenceClass.qualification?.weak, false);
+    assert.equal(r.evidenceClass.qualification?.code, null);
+  });
+
+  it("gateArtifact renders the QUALIFIED line only when the evidence is weak", () => {
+    const weak = gateArtifact(3, {
+      pass: true,
+      unmet: [],
+      evidenceHash: "abcdef01",
+      evidenceClass: {
+        byCriterion: [],
+        classes: ["artifact-presence"],
+        productBuildVerified: false,
+        note: "green evidence classes: artifact-presence",
+        qualification: { weak: true, note: "NON-EXECUTED evidence only", code: "RT_E_CLAIM_UNVERIFIED" },
+      },
+    });
+    assert.match(weak.body, /\*\*QUALIFIED\*\*/);
+    assert.match(weak.body, /RT_E_CLAIM_UNVERIFIED/);
+
+    const ordinary = gateArtifact(3, {
+      pass: true,
+      unmet: [],
+      evidenceHash: "abcdef01",
+      evidenceClass: {
+        byCriterion: [],
+        classes: ["executed-tree-tests"],
+        productBuildVerified: false,
+        note: "executed",
+        qualification: { weak: false, note: "", code: null },
+      },
+    });
+    assert.ok(!ordinary.body.includes("QUALIFIED"), "an executed pass is not qualified");
+  });
+
+  it("the new kind-aware criteria record the product-surface-map evidence class", () => {
+    const items = DOD[6];
+    for (const id of ["p6-web-surface", "p6-game-surface", "p6-runnable-entry"]) {
+      const item = items.find((i) => i.id === id);
+      assert.ok(item, `${id} is registered (appended)`);
+      assert.equal(item!.evidenceClass, "product-surface-map", `${id} class`);
+    }
+    // Additive: every pre-existing P6 criterion is still present (none removed).
+    for (const id of ["p6-test", "p6-source", "p6-artifact", "p6-verified", "p6-brief-fit", "p6-arch"]) {
+      assert.ok(items.some((i) => i.id === id), `${id} was not removed`);
     }
   });
 });

@@ -23,7 +23,7 @@
 // phase would print as a clean pass). Every verdict is an honest LABEL, never
 // an approval, and never a gate input.
 // ---------------------------------------------------------------------------
-import { DOD, runGate } from "./dod.ts";
+import { DOD, approvedDecisionRow, runGate } from "./dod.ts";
 import { fnv1a } from "./algorithms.ts";
 import type { JsonLog, PhaseId, Project } from "./types.ts";
 
@@ -69,17 +69,16 @@ function phaseRecord(project: Project, phase: number): Project["phases"][number]
 }
 
 /**
- * Decision-ledger read mirroring dod.ts's private `approvalActor` rule (that
- * helper is not exported there, so the rule is restated here rather than
- * edited into a file this lane does not own): who actually decided this phase,
- * read from the ledger — never inferred from a phase-record status (P0-02).
+ * Decision-ledger read — the SAME rule the DoD gate probe uses (A3-E14). This
+ * consumes `dod.approvedDecisionRow` (the append-only journal's NEWEST approve
+ * row, re-validated against the policy seam) instead of restating the rule with
+ * an `.find`, which named the OLDEST approve row and re-validated nothing — so
+ * `blocked:hitl` could name a stale / policy-rejected actor while the gate probe
+ * rejected it. Read from the ledger; never inferred from a phase-record status
+ * (P0-02).
  */
 function approvalRow(project: Project, phase: number) {
-  return (
-    (Array.isArray(project?.decisions) ? project.decisions : []).find(
-      (d) => d && d.phase === phase && d.decision === "approve",
-    ) ?? null
-  );
+  return project && typeof project === "object" ? approvedDecisionRow(project, phase) : null;
 }
 
 /**

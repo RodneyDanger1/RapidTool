@@ -483,10 +483,24 @@ describe("fixes/252 (W19-L1 · OV-13 + OV-29) — keyed live failures leave code
         headers: { "content-type": "application/json" },
       });
     if (/wikipedia\.org/.test(url) && /list=search/.test(url)) {
-      return json({ query: { search: [{ title: "Rapid tool", snippet: "<b>stub</b> finding" }] } });
+      // ON-TOPIC for seedProject()'s field-service/HVAC brief: the overlay now
+      // applies the engine's relevance filter, so an unrelated hit (the old
+      // "Rapid tool") is correctly dropped and this pin would be vacuous.
+      return json({
+        query: {
+          search: [
+            {
+              title: "Field-service dispatch software",
+              snippet: "<b>field service</b> dispatch jobs, techs, parts and same-day routing",
+            },
+          ],
+        },
+      });
     }
     if (/wikipedia\.org/.test(url) && /prop=extracts/.test(url)) {
-      return json({ query: { pages: { "1": { extract: "Stub extract body." } } } });
+      return json({
+        query: { pages: { "1": { extract: "Field-service dispatch software coordinates jobs, techs and parts." } } },
+      });
     }
     return new Response("stub: refusal", { status: 401 });
   }) as typeof fetch;

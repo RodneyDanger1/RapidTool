@@ -12,8 +12,16 @@ import type { ErrorCode } from "./errors.ts";
 // Every token is a word-boundary identifier; bare `fetch`/`WebSocket`/`self`/
 // `window` are banned too (A13) — the sync path runs in the page global, so a
 // bare `fetch(` is a real network escape, not just `window.fetch(`.
+// `enum` (this wave) is NOT a runtime primitive but a TypeScript-ONLY construct
+// with runtime emission, so a candidate that carries `enum X {}` is refused
+// here rather than shipped: Node's type-stripping (`--experimental-strip-types`
+// / the default on Node >= 22.18) cannot erase it and dies with
+// `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`, breaking the whole emitted tree. It is a
+// reserved word in JS, so it can never be a legitimate identifier — the ban is
+// a pure false-negative fix with no false-positive cost (a `enum` inside a
+// literal/comment is masked out below like every other token).
 const FORBIDDEN =
-  /\b(process|require|globalThis|window|self|fetch|WebSocket|XMLHttpRequest|eval|Function|import|document|localStorage|indexedDB)\b/;
+  /\b(process|require|globalThis|window|self|fetch|WebSocket|XMLHttpRequest|eval|Function|import|document|localStorage|indexedDB|enum)\b/;
 
 /** Exported denylist for keyed-synthesis producers (P0-01 Part B validation). */
 export const FORBIDDEN_PRIMITIVES = FORBIDDEN;
@@ -27,17 +35,57 @@ export const FORBIDDEN_PRIMITIVES = FORBIDDEN;
  * cascaded (322 X1 evidence: first divergence update.ts:692; 447-char tail +
  * whole sibling files masked out of the tree union). Lexical split only — not
  * a parser: a `/` opens a regex right after an operator/opening delimiter or a
- * regex-legal keyword (never after an identifier, literal, `)` or `]`).
+ * regex-legal keyword, or after a `)` that closes a control-statement header —
+ * never after an identifier, literal or `]`).
  */
+
+/** Control-statement keywords whose `)` terminates a header after which a `/`
+ *  begins a statement (a regex literal), never a division. */
+const CONTROL_HEADER_KEYWORDS: ReadonlySet<string> = new Set([
+  "if", "while", "for", "with", "switch", "catch",
+]);
+
+/**
+ * Does the `)` at `closeIdx` close a control-statement header (`if (…)`,
+ * `while (…)`, `for (…)`, …)? Walks back to the matching `(` (paren depth on
+ * the RAW source — a paren inside a nested string is a best-effort lexical
+ * limit, not a parser) and reads the identifier immediately before it. A real
+ * function call can never precede its own `(` with one of the pinned reserved
+ * words, so this only ever WIDENS regex detection for the one position where a
+ * regex statement is legal — it can not mask a genuine division. Pure.
+ */
+function closesControlHeader(src: string, closeIdx: number): boolean {
+  let depth = 0;
+  for (let k = closeIdx; k >= 0; k--) {
+    const ch = src[k];
+    if (ch === ")") depth++;
+    else if (ch === "(") {
+      depth--;
+      if (depth !== 0) continue;
+      let e = k - 1;
+      while (e >= 0 && /\s/.test(src[e]!)) e--;
+      let s = e;
+      while (s >= 0 && /[A-Za-z]/.test(src[s]!)) s--;
+      return CONTROL_HEADER_KEYWORDS.has(src.slice(s + 1, e + 1));
+    }
+  }
+  return false;
+}
+
 function regexLiteralEnd(src: string, i: number): number {
   let k = i - 1;
   while (k >= 0 && (src[k] === " " || src[k] === "\t")) k--;
   const prev = k < 0 ? "\n" : src[k];
   const keyword =
-    /\b(return|typeof|case|in|of|new|delete|void|instanceof|do|else|yield|await)$/.test(
-      src.slice(Math.max(0, k - 12), k + 1),
+    /\b(return|typeof|case|in|of|new|delete|void|instanceof|do|else|yield|await|throw)$/.test(
+      src.slice(Math.max(0, k - 13), k + 1),
     );
-  if (prev !== "\n" && !"(,=:[!&|?{};+-*%^~<>".includes(prev) && !keyword) return -1;
+  // A `/window/`-style regex as an `if`/`while` BODY: the header's `)` is a
+  // complete syntactic unit, so the following `/` starts a statement. Reading
+  // it as division left the regex body VISIBLE and refused legitimate code that
+  // merely matched the word inside its own pattern (false positive, this wave).
+  const controlHeader = prev === ")" && closesControlHeader(src, k);
+  if (prev !== "\n" && !"(,=:[!&|?{};+-*%^~<>".includes(prev) && !keyword && !controlHeader) return -1;
   // 325 A3: `+`/`-` open a regex only as a BINARY operator. `i++ / 2` is a
   // division (the TS lexer says so), but the sign pair read as an operator
   // position and the scanner then consumed to the next `/` on the line —
@@ -72,69 +120,112 @@ function regexLiteralEnd(src: string, i: number): number {
 }
 
 /**
- * Masks string literals ('…', "…", `…` — incl. `${…}` interpolation bodies)
- * and comments (line and block comments) with spaces, so FORBIDDEN scans code tokens only.
- * Replacing with same-length spaces preserves token separation (a string can
- * never weld two code identifiers together into a banned word). Defense note:
- * this lexical mask is not a parser — the denylist is defense-in-depth for the
- * sync engine-template path only. The worker-isolate boundary this comment
- * once pointed to (runSandboxed, "the real boundary for non-template source")
- * is deprecated as a product executor (E-29): the Node host has no DOM Worker
- * and runSandboxed has zero product call sites — see its deprecation note.
+ * Masks string literals ('…', "…", `…`) and comments (line and block comments)
+ * with spaces, so FORBIDDEN scans code tokens only. Replacing with same-length
+ * spaces preserves token separation (a string can never weld two code
+ * identifiers together into a banned word).
+ *
+ * 350 (this wave): a TEMPLATE literal's `${…}` interpolation body is CODE, not
+ * text — `` `${globalThis.location}` `` really does read the global. The old
+ * masker blanked the WHOLE backtick span (interpolations included), so a
+ * forbidden primitive that lived only inside `${…}` escaped the scan (a false
+ * negative observed in candidates). Now the literal TEXT stays masked while each
+ * interpolation body is scanned as code, nesting-aware (a nested template's own
+ * interpolation recurses). Defense note: this lexical mask is not a parser —
+ * the denylist is defense-in-depth for the sync engine-template path.
+ *
+ * The worker-isolate boundary this comment once pointed to (runSandboxed, "the
+ * real boundary for non-template source") is deprecated as a product executor
+ * (E-29): the Node host has no DOM Worker and runSandboxed has zero product
+ * call sites — see its deprecation note.
  */
 /** Masks string literals and comments with spaces (exported for P0-01 brief-fit probes). */
 export function maskLiteralsAndComments(src: string): string {
   const n = src.length;
-  let out = "";
-  let i = 0;
-  while (i < n) {
-    const c = src[i];
-    const next = src[i + 1];
-    if (c === "/" && next === "/") {
-      while (i < n && src[i] !== "\n") {
-        out += " ";
-        i++;
-      }
-      continue;
-    }
-    if (c === "/" && next === "*") {
-      const end = src.indexOf("*/", i + 2);
-      const stop = end === -1 ? n : end + 2;
-      out += " ".repeat(stop - i);
-      i = stop;
-      continue;
-    }
-    if (c === "/" && next !== "/" && next !== "*") {
-      // 322 X1 (P6): regex-literal branch — see regexLiteralEnd above.
-      const end = regexLiteralEnd(src, i);
-      if (end !== -1) {
-        out += " ".repeat(end - i);
-        i = end;
+  const out = new Array<string>(n).fill(" ");
+  /** Mask a '…'/"…" span at its opening quote; returns the index AFTER the
+   *  closing quote (or EOF). Escapes are skipped, as before. */
+  const maskQuoted = (start: number): number => {
+    const quote = src[start];
+    let j = start + 1;
+    while (j < n) {
+      if (src[j] === "\\") {
+        j += 2;
         continue;
       }
+      if (src[j] === quote) return j + 1;
+      j++;
     }
-    if (c === '"' || c === "'" || c === "`") {
-      const quote = c;
-      let j = i + 1;
-      while (j < n) {
-        if (src[j] === "\\") {
-          j += 2;
+    return n;
+  };
+  /** Mask a `…${code}…` template at its opening backtick. Literal text stays
+   *  spaces; each `${…}` body is scanned as CODE (visible again). Returns the
+   *  index AFTER the closing backtick. */
+  const maskTemplate = (start: number): number => {
+    let j = start + 1;
+    while (j < n) {
+      const ch = src[j]!;
+      if (ch === "\\") {
+        j += 2;
+        continue;
+      }
+      if (ch === "`") return j + 1;
+      if (ch === "$" && src[j + 1] === "{") {
+        j = scanCode(j + 2, true);
+        continue;
+      }
+      j++;
+    }
+    return n;
+  };
+  /** Scan a CODE region, masking literals/comments/regexes in place and copying
+   *  real code characters into `out`. With `stopOnBrace`, returns just past the
+   *  `}` that closes the current template interpolation. */
+  const scanCode = (start: number, stopOnBrace: boolean): number => {
+    let j = start;
+    let depth = 0;
+    while (j < n) {
+      const c = src[j]!;
+      if (stopOnBrace && c === "}" && depth === 0) return j + 1;
+      const next = src[j + 1];
+      if (c === "/" && next === "/") {
+        while (j < n && src[j] !== "\n") j++;
+        continue;
+      }
+      if (c === "/" && next === "*") {
+        const end = src.indexOf("*/", j + 2);
+        j = end === -1 ? n : end + 2;
+        continue;
+      }
+      if (c === "/") {
+        // 322 X1 (P6): regex-literal branch — see regexLiteralEnd above.
+        const end = regexLiteralEnd(src, j);
+        if (end !== -1) {
+          j = end;
           continue;
         }
-        if (src[j] === quote) {
-          j++;
-          break;
-        }
-        j++;
       }
-      out += " ".repeat(Math.min(j, n) - i);
-      i = Math.min(j, n);
-      continue;
+      if (c === '"' || c === "'") {
+        j = maskQuoted(j);
+        continue;
+      }
+      if (c === "`") {
+        j = maskTemplate(j);
+        continue;
+      }
+      if (stopOnBrace) {
+        if (c === "{" || c === "(" || c === "[") depth++;
+        else if (c === ")" || c === "]") {
+          if (depth > 0) depth--;
+        } else if (c === "}") depth--;
+      }
+      out[j] = c;
+      j++;
     }
-    out += c;
-    i++;
-  }
-  return out;
+    return j;
+  };
+  scanCode(0, false);
+  return out.join("");
 }
 
 /**
@@ -425,15 +516,108 @@ export const BRIEF_CORE_REGISTER: ReadonlySet<string> = new Set([
   "price", "enquiry", "alert", "restock", "booking", "shift", "rota",
   "appointment", "calendar", "scheduler", "flower", "florist", "bouquet",
   "bakery", "bread", "delivery",
+  // W62 C1-07: the live engine.DOMAIN_TERMS values the register was missing —
+  // engine.test.ts now pins that every DOMAIN_TERMS value is present here, so
+  // a new domain term cannot silently drift out of the brief-fit core set.
+  "landing", "seo", "brand", "content", "blog", "brochure",
+  "basket", "cart", "pos", "till", "counter", "shelf",
+  "ios", "android", "tablet", "native", "touchscreen", "viewport",
+  "one-handed", "tab-bar",
 ]);
 
-/** Identifier-valid, non-stopword tokens of one raw label (lowercased). */
+/**
+ * fixes/348 (measurement fix): the minimum length of a CORE token. A 1-2 char
+ * token can never be a meaningful product identifier (`no`, `mn`, `id`, `ui`);
+ * requiring ≥3 keeps the core to words a tree can actually carry. Applied to
+ * CORE only — `briefNounHits.required` (the advisory denominator) is unchanged.
+ */
+export const BRIEF_CORE_MIN_CHARS = 3;
+
+/**
+ * fixes/348 (measurement fix): file stems owned by the SCAFFOLD, not by the
+ * brief's product. `planSpecGraph` emits structural nodes whose files are the
+ * emitter's own modules (`src/ui/console.tsx`, `src/api/routes.ts`,
+ * `src/state/store.ts`, `tests/oracle.spec.ts`, `src/domain/<domain>.ts`), and
+ * their stems (`console`, `spec`, `oracle`, `routes`, `store`) used to be folded
+ * into the core set even though the brief never names them — so the gate demanded
+ * the tree carry the harness's own filenames. Excluded here.
+ */
+export const SCAFFOLD_OWNED_STEMS: ReadonlySet<string> = new Set([
+  "console", "oracle", "spec", "routes", "store", "custom_software", "customsoftware",
+]);
+
+/**
+ * fixes/348 (measurement fix): generic capitalized words that a heading/title
+ * capitalizes as prose (`Full Website Redesign`), not as a proper noun / product
+ * term. Excluded from the heading proper-noun core so a generic modifier is not
+ * measured as if the brief named a product concept.
+ */
+export const BRIEF_GENERIC_CAPITALS: ReadonlySet<string> = new Set([
+  "full", "new", "best", "top", "free", "live", "real", "next", "last", "first",
+  "other", "same", "only", "just", "more", "most", "all", "note", "notes", "overview",
+]);
+
+/**
+ * fixes/348 (measurement fix): function words whose presence marks a bold run as
+ * a SENTENCE FRAGMENT (`**no prices anywhere**`) rather than a product label
+ * (`**Purchase requests**`). A multi-word bold run containing any of these is not
+ * a label and contributes nothing to the core.
+ */
+export const BRIEF_FRAGMENT_WORDS: ReadonlySet<string> = new Set([
+  "no", "not", "never", "none", "nothing", "any", "all", "every", "each",
+  "anywhere", "everywhere", "somewhere", "without", "cannot", "here", "there",
+  "this", "that", "these", "those", "its", "is", "are", "was", "were", "be",
+  "do", "does", "did", "can", "will", "would", "should", "must", "may", "might",
+]);
+
+/** Identifier-valid, non-stopword tokens of one raw label (lowercased), ≥3 chars. */
 function labelTokens(raw: unknown): string[] {
   const out: string[] = [];
   for (const t of briefTokens(String(raw ?? ""))) {
-    if (t.length > 1 && !BRIEF_STOPWORDS.has(t) && /^[a-z_$][a-z0-9_$]*$/.test(t)) out.push(t);
+    if (t.length >= BRIEF_CORE_MIN_CHARS && !BRIEF_STOPWORDS.has(t) && /^[a-z_$][a-z0-9_$]*$/.test(t)) out.push(t);
   }
   return out;
+}
+
+/** True when a bold run reads as a sentence fragment, not a product label. */
+function isFragmentLabel(raw: string): boolean {
+  const text = String(raw ?? "").trim();
+  if (!text) return false;
+  if (text.length > 60 || /[.!?;:]/.test(text)) return true;
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length > 1 && words.some((w) => BRIEF_FRAGMENT_WORDS.has(w.toLowerCase()))) return true;
+  return false;
+}
+
+/** Bold-label tokens: the whole run is dropped when it is a sentence fragment. */
+function boldLabelTokens(raw: unknown): string[] {
+  const text = String(raw ?? "");
+  if (isFragmentLabel(text)) return [];
+  return labelTokens(text);
+}
+
+/**
+ * fixes/348 (measurement fix): every token inside a URL authority / email host
+ * (`https://www.bloedows.com/` → www, bloedows, com; `bakery@hbci.com` → hbci,
+ * com). A URL may carry real product nouns in its PATH (`menu-breads`), so only
+ * the authority is collected — never the path.
+ */
+function briefHostTokens(brief: string): Set<string> {
+  const out = new Set<string>();
+  const text = typeof brief === "string" ? brief : "";
+  for (const u of text.match(/\b(?:https?:\/\/|www\.)[^\s<>()[\]]+/gi) ?? []) {
+    const authority = u.replace(/^https?:\/\//i, "").replace(/^www\./i, "").split(/[/?#]/)[0] ?? "";
+    for (const t of briefTokens(authority)) out.add(t);
+  }
+  for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g)) {
+    for (const t of briefTokens(m[1] ?? "")) out.add(t);
+  }
+  return out;
+}
+
+/** The file stem of a spec-graph node path, minus EVERY extension (`oracle.spec.ts` → `oracle`). */
+function specGraphFileStem(file: string): string {
+  return file.replace(/^.*[\\/]/, "").replace(/(\.[^.]+)+$/, "");
 }
 
 /**
@@ -443,6 +627,13 @@ function labelTokens(raw: unknown): string[] {
  * signal that catches an under-produced tree (a declared job/entity the tree
  * never materialised). Without a context the brief's own H1 proper nouns and
  * bold labels carry the core. Empty when neither yields a noun (vacuity).
+ *
+ * fixes/348 (measurement fix): the core is the MEANINGFUL product vocabulary —
+ * scaffold-owned file stems (`console`/`spec`/`oracle` from the emitter's own
+ * modules), URL/email host tokens, sub-3-char tokens, and bold SENTENCE
+ * FRAGMENTS are excluded. The bar ({@link BRIEF_FIT_CORE_BAR}) is unchanged and
+ * a generic tree still fails: the core remains the brief's real nouns plus the
+ * project's declared capabilities.
  */
 export function briefNounCore(
   brief: string,
@@ -450,30 +641,54 @@ export function briefNounCore(
 ): { core: string[]; advisory: string[] } {
   const { required } = briefNounHits(brief);
   const core = new Set<string>();
+  const host = briefHostTokens(brief);
+  // The core is filtered once here (fixes/348): scaffold-owned stems, URL/host
+  // tokens, and sub-3-char tokens can never be the brief's product vocabulary.
   const add = (raw: unknown) => {
-    for (const t of labelTokens(raw)) core.add(t);
+    for (const t of labelTokens(raw)) {
+      if (host.has(t) || SCAFFOLD_OWNED_STEMS.has(t)) continue;
+      core.add(t);
+    }
   };
   if (context && typeof context === "object") {
     for (const e of context.contracts?.entities ?? []) add(e?.name);
     for (const j of context.lattice?.jobs ?? []) add(j);
-    // Every spec-graph CAPABILITY node's label + file stem (the structural
-    // schema/api/store nodes are generic scaffolding, not product nouns).
+    // Spec-graph CAPABILITY nodes only: the structural schema/api/store/ui/tests
+    // nodes are scaffold-owned (their filenames are the emitter's own modules).
     for (const n of context.specGraph?.nodes ?? []) {
       const id = String(n?.id ?? "");
-      if (id === "schema" || id === "api" || id === "store") continue;
+      if (id === "schema" || id === "api" || id === "store" || id === "ui" || id === "tests") continue;
       const file = String(n?.file ?? "");
-      if (file) add(file.replace(/^.*\//, "").replace(/\.[^.]+$/, ""));
+      if (file) add(specGraphFileStem(file));
       const m = /[\u201c"]([^\u201d"]+)[\u201d"]/.exec(String(n?.purpose ?? ""));
       if (m) add(m[1]);
     }
   }
-  // H1/heading region proper nouns (capitalised tokens before the first "##").
-  const headRegion = String(brief ?? "").split(/\n##\s/)[0] ?? "";
-  for (const m of headRegion.matchAll(/\b[A-Z][a-zA-Z0-9]{2,}\b/g)) add(m[0]);
-  // Bold labels (**Item**, **Staff**, **Purchase requests** …).
-  for (const m of String(brief ?? "").matchAll(/\*\*([^*]+)\*\*/g)) add(m[1]);
-  // Domain-register hits anywhere in the brief (R1 P0-5 core signal (c)).
-  for (const t of briefTokens(brief)) if (BRIEF_CORE_REGISTER.has(t)) core.add(t);
+  // H1 TITLE proper nouns ONLY (fixes/348): the intro PROSE used to be mined
+  // too, so a competitor named mid-sentence (`Crumbl`, `WordPress`) and a
+  // sentence-initial verb (`Replace`, `Build`) were measured as core product
+  // nouns. A generic capitalized modifier (`Full Website Redesign`) is dropped.
+  const h1 = (/^[ \t]*#[ \t]+([^\n]*)$/m.exec(String(brief ?? "")) ?? [])[1] ?? "";
+  for (const m of h1.matchAll(/\b[A-Z][a-zA-Z0-9]{2,}\b/g)) {
+    if (BRIEF_GENERIC_CAPITALS.has(m[0].toLowerCase())) continue;
+    add(m[0]);
+  }
+  // Bold labels (**Item**, **Staff**, **Purchase requests** …); a bold SENTENCE
+  // FRAGMENT (`**no prices anywhere**`) contributes nothing.
+  for (const m of String(brief ?? "").matchAll(/\*\*([^*]+)\*\*/g)) {
+    for (const t of boldLabelTokens(m[1])) {
+      if (host.has(t) || SCAFFOLD_OWNED_STEMS.has(t)) continue;
+      core.add(t);
+    }
+  }
+  // Domain-register hits anywhere in the brief (R1 P0-5 core signal (c)). The
+  // register is the CURATED product vocabulary (`engine.DOMAIN_TERMS` + the
+  // delivery-kind nouns), so an explicit register entry is intentional and is
+  // kept as-is — only an URL/host token is never a product noun.
+  for (const t of briefTokens(brief)) {
+    if (host.has(t)) continue;
+    if (BRIEF_CORE_REGISTER.has(t)) core.add(t);
+  }
   const coreList = required.filter((t) => core.has(t));
   const coreSet = new Set(core);
   // Core is not limited to `required` — a project-grounded entity/job noun is a

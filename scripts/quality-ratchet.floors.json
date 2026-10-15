@@ -1,0 +1,396 @@
+{
+  "schema": "rapidtool-quality-ratchet-floors/1",
+  "tool": "scripts/quality-ratchet.mjs",
+  "pinnedBy": "W356 lane `ratchet` (fixes/356_ratchet.md)",
+  "pinnedAt": "2026-10-15",
+  "estimatedCostUsd": null,
+  "owedCodes": {
+    "RT_E_RATCHET_METRIC_UNAVAILABLE": {
+      "status": "registered",
+      "registeredAt": "2026-10-15",
+      "registeredBy": "W358 lane `close-taxonomy` (fixes/358_close_taxonomy.md)",
+      "for": "a pinned floor that could not be measured (a `unavailable` reading that is NOT a missing input and NOT an absent artifact)",
+      "owedEdit": "src/lib/errors.ts — add \"RT_E_RATCHET_METRIC_UNAVAILABLE\" to the ERROR_CODES array (append, never reorder: consumers match string literals) AND one ERROR_CODE_DOC entry naming \"a pinned quality-ratchet floor could not be measured\". APPLIED 2026-10-15: W358 landed both halves verbatim (plus the matching README-cli.md registry row, in the documented `no CLI arm` class).",
+      "why": "The W356 lane could not mint it (it owned no `src/**` file) and no lane owned `src/lib/errors.ts` in W357 either, so W357 armed the debt here. It is PAID: the register now carries the code (verified by `canary.errorCodes.owed-code-not-emitted`, which fails closed if a code recorded `status:\"registered\"` is missing from ERROR_CODES). The residual is honest and recorded: the ratchet still CLASSIFIES its unavailable readings by CAUSE through the three long-standing codes (`RT_E_RUNNER_UNAVAILABLE` missing input, `RT_E_PROJECT_MISSING` artifact absent, `RT_E_VALIDATION` reader shape changed), so this code has no emitter site YET — adopting it for the \"producer ran, no usable reading\" site is a follow-up that changes which causes hard-fail, and is the boundary owner's call, not a silent edit here."
+    }
+  },
+  "policy": {
+    "floors": "A floor MAY ONLY RISE. Breaching it downward (atLeast) or upward (atMost) is a HARD failure. `reading` is the value measured when the floor was pinned — evidence, never the bar; only `floor` is compared.",
+    "unavailable": "A metric whose producer cannot be produced reports `unavailable` with a coded reason drawn from EXISTING ERROR_CODE_DOC entries (no code is minted by this lane — see the log's follow-up note). Two causes are distinguished, because they are different facts: a MISSING INPUT (`RT_E_RUNNER_UNAVAILABLE` — the producer was not run in this invocation, e.g. no --gate was passed) is reported loudly but does NOT fail; a BROKEN OR ABSENT PRODUCER (`RT_E_PROJECT_MISSING` artifact absent, `RT_E_VALIDATION` reader shape changed) on a `status:\"enforced\"` metric is a HARD failure (fail closed). An unavailable reading NEVER reads as a pass.",
+    "pendingFirstGreen": "`status:\"pending-first-green\"` means the floor already names the HONEST bar (usually 0) but the tree is red today, so the floor is REPORTED and not enforced. It must never be lowered; the boundary owner flips it to `enforced` on the first green tree.",
+    "readingPinned": "A floor equal to the current reading (`readingPinned: true`) is not a target and not a weakening: it locks in today's reading so any future rise is permanent.",
+    "uncovered": "A kind with no emitted corpus case reports `uncovered` (floor null) and NEVER `pass`.",
+    "cost": "`estimatedCostUsd` stays null everywhere: no spend is ever fabricated."
+  },
+  "canaries": {
+    "canary.census.job-scoped-reachable": {
+      "reader": "src/lib/compile-check.server.ts#treeSubstanceOf",
+      "assert": "EVERY pinned tree's returned verdict still exposes a reachable, shape-valid `jobScoped` sub-census (numeric stubs/reexports/real + a verdict in {real,mixed,stub-skeleton,empty} + an array `files`) — checked over all rows, not just the first, and the offending tree is named (W357 · R-4)"
+    },
+    "canary.census.whole-tree-reachable": {
+      "reader": "src/lib/compile-check.server.ts#treeSubstanceOf",
+      "assert": "EVERY pinned tree's verdict exposes the OTHER named scope too — a shape-valid `wholeTree` — because both names are OPTIONAL in the declared `TreeSubstance` type while the producer returns them REQUIRED, so the next consumer that assumes presence would otherwise read `undefined` with no compile error (W357 · R-8)"
+    },
+    "canary.census.corpus-is-pinned": {
+      "reader": "scripts/prevention/cassettes/trees.json (the pinned corpus) vs the rows the canaries were handed",
+      "assert": "the census the canaries were handed IS the pinned corpus: row count == the cassette's pinned count AND >= the pinned `tree.corpusSize` floor. A zero-tree or silently truncated corpus is the ONE state in which every census canary above is vacuous, so it is named as a failure (W357 · R-4)"
+    },
+    "canary.census.job-scoped-scope-pinned": {
+      "reader": "src/lib/compile-check.server.ts#treeSubstanceOf",
+      "assert": "the `jobScoped` census file list equals the job-dir file set (src/jobs/* + jobs/*, top-level .ts/.js/.mjs) computed INDEPENDENTLY from the bytes — so the job-scoped reading cannot have been re-pointed at the whole-tree census (the W355 A2-F3 failure mode: 6/13 -> 13/13 with zero product change), nor narrowed away"
+    },
+    "canary.census.classifier-discriminates": {
+      "reader": "src/lib/dod.ts#classifyModuleSource",
+      "assert": "one TODO(E-15) stub source -> 'stub', one reexport-only source -> 'reexport', one real body -> 'real' (the classifier every census routes through must still DISCRIMINATE, not merely exist)"
+    },
+    "canary.surface.readers-present": {
+      "reader": "src/lib/product-quality.ts#readProductQuality + src/lib/dod.ts#productSurfaceKindOf + src/lib/dod.ts#briefDeliveryKind",
+      "assert": "all three named readers exist and `readProductQuality({})` fail-closes to quality:false with non-empty reasons"
+    },
+    "canary.surface.kind-discriminates": {
+      "reader": "src/lib/dod.ts#productSurfaceKindOf",
+      "assert": "a game-kind record demands 'game', a tool-kind record demands 'runnable', and an app whose brief names a page surface demands 'web' — the demanded surface must still track the KIND"
+    },
+    "canary.surface.entry-shape-discriminates": {
+      "reader": "scripts/acceptance-run.mjs#resolveTreeEntry",
+      "assert": "a game with no index.html+src mount is NOT ok, and a game with both IS ok — the kind entry-shape reader must still discriminate"
+    },
+    "canary.realProduct.scan-discriminates": {
+      "reader": "scripts/quality-ratchet.mjs#scanRealProduct",
+      "assert": "a clean synthetic file list yields 0 violations and an injected-defect list (TODO(E-15) + a mock import) yields >0 — the real-product reader must be able to fail"
+    },
+    "canary.realProduct.no-attribute-false-positive": {
+      "reader": "scripts/quality-ratchet.mjs#scanRealProduct",
+      "assert": "the real corpus bytes carrying an HTML/JSX `placeholder=` attribute or a `placeholder:` property are NOT flagged (a false positive here is as bad as a miss)"
+    },
+    "canary.realProduct.repo-scan-discriminates": {
+      "reader": "scripts/quality-ratchet.mjs#scanRepoTestDoubles over RapidTool's own `src/**`",
+      "assert": "the repo-tree reader of the SAME test-double clause discriminates: a production module importing a test-double namespace (`__mocks__/…`) or a specifier that RESOLVES to a test seam fires, while the three production-adjacent doubles the W356 cartographer proved test-seam-confined (providers/mock.ts, mcp/stub-server.ts, testing/fixtures.ts) and a test-seam importer of them stay silent (W357 · R-5)"
+    },
+    "canary.floors.atleast-zero-pins-are-accounted": {
+      "reader": "scripts/quality-ratchet.floors.json#floors",
+      "assert": "no `atLeast: 0` pin is toothless: each such pin either names `subLegs` (floor ids resolving to a pin with floor > 0, i.e. a reading a regression CAN move) or declares `nonRegressible` with a reason. An `atLeast: 0` floor can never fire — a count cannot fall below 0 — so an unaccounted one is a metric that is not measured (W357 · R-3)"
+    },
+    "canary.errorCodes.owed-code-not-emitted": {
+      "reader": "scripts/quality-ratchet.floors.json#owedCodes + src/lib/errors.ts (ERROR_CODES)",
+      "assert": "two directions on the same declaration: (a) a code DECLARED as owed (`status:\"owed\"`) is never EMITTED before `src/lib/errors.ts` registers it — the moment it is, this fails closed and names the owed edit, so the debt can never be paid by shipping an undocumented code; (b) a code whose debt is recorded as PAID (`status:\"registered\"`) really IS in ERROR_CODES — the recorded payment is verified against the register, never claimed (W357 · JOB 4; W358 · paid)"
+    },
+    "canary.docParity.not-vacuous": {
+      "reader": "scripts/docs-module-parity.mjs",
+      "assert": "the doc-parity reader read >=1 doc and found >=1 unique claimed path (a scan that finds nothing is vacuous, not a pass)"
+    },
+    "canary.prevention.two-signal-shape": {
+      "reader": "scripts/prevention/verify-prevention.mjs",
+      "assert": "the verdict still carries BOTH orthogonal signals (fixtureIntegrity.missed and fixPresence.pending) plus count/countFloor"
+    },
+    "canary.prevention.countFloor-not-lowered": {
+      "reader": "scripts/prevention/verify-prevention.mjs",
+      "assert": "the harness's own countFloor is >= the ratchet's pinned guard floor, so the guard floor cannot be lowered in the same edit as a guard deletion"
+    },
+    "canary.errorCodes.registered": {
+      "reader": "src/lib/errors.ts (ERROR_CODES)",
+      "assert": "every RT_E_* code this ratchet emits as an `unavailable` reason is a registered code in src/lib/errors.ts — no code is minted and none is aspirational"
+    },
+    "canary.registry.complete": {
+      "reader": "scripts/quality-ratchet.floors.json#canaries",
+      "assert": "the declared canary set and the implemented canary set are identical — a canary cannot be silently dropped from either side"
+    },
+    "canary.gateReadings.results-keys-present": {
+      "reader": "scripts/gate.sh results file",
+      "assert": "with --gate supplied, every required stage key (typecheck/lint/testsScripts/testsLib/prevention) is present (fail closed: a missing key is never 'no failures')"
+    },
+    "canary.gateReadings.typecheck-log-is-tsc": {
+      "reader": "scripts/gate.sh typecheck.log",
+      "assert": "a non-zero typecheck exit carries >=1 `error TS` line — a red exit with no tsc diagnostics is a replaced/empty log, not a measurement"
+    },
+    "canary.gateReadings.lint-log-is-eslint": {
+      "reader": "scripts/gate.sh lint.log",
+      "assert": "a non-zero lint exit carries eslint's own `N problems` summary line"
+    },
+    "canary.gateReadings.test-leg-not-vacuous": {
+      "reader": "scripts/gate.sh testsScripts.log / testsLib.log",
+      "assert": "a green leg carries `# pass` >= 1 (an exit-0 leg that ran no test is a vacuous green), and a red leg carries at least one `# fail` or `not ok` line"
+    }
+  },
+  "floors": {
+    "gate.ok": {
+      "direction": "atLeast",
+      "floor": 1,
+      "unit": "boolean (1 = ok:true)",
+      "status": "pending-first-green",
+      "reading": null,
+      "producer": "bash scripts/gate.sh  ->  verdict JSON `.ok`  (pass `--gate <path-to-verdict.json>`)",
+      "reason": "The ratchet stage runs BEFORE the gate's verdict program, so no verdict exists inside its own stage. The reading is unavailable in-stage by construction, never assumed true. The boundary owner (or the parent) supplies the verdict."
+    },
+    "typecheck.errors": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "count of `error TS` lines",
+      "status": "enforced",
+      "reading": 0,
+      "producer": "npm run typecheck  (npx tsc --noEmit)",
+      "reason": "Honest bar is 0. Measured 2 (exit 2) when this floor was first pinned, and 0 (exit 0) on the re-measurement minutes later — a sibling W356 lane closed the remaining test-file type errors mid-wave. The floor is unchanged and is now ENFORCED because the honest bar is met. Inside the gate's `ratchet` stage the reading comes from that run's own typecheck.log; standalone (no --gate) it reports `unavailable (RT_E_RUNNER_UNAVAILABLE)` — a missing input, never a silent pass."
+    },
+    "lint.problems": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "eslint `N problems`",
+      "status": "pending-first-green",
+      "reading": 5,
+      "producer": "npm run lint  (eslint .; exit 0 with 5 warnings — see the reading note)",
+      "reason": "Honest bar is 0 — UNCHANGED, and the floor is still 0: this pin is NOT met today. W358 · re-pinned reading: 947 → 5. `fix-lint` (W357) added `testruns/**` to `eslint.config.mjs`'s ignores (0 tracked files; that corpus is generated run output, not this repo's source) so `eslint .` stops crawling 173 vendored fixture trees, and the wave's source edits closed 8 more — the boundary's own lint stage read `problems: 5` with exit 0. Those 5 are real source warnings (2 `no-unused-vars` in `scripts/quality-ratchet.mjs`, 3 in `scripts/quality-ratchet.test.mjs`), which is exactly why the floor stays at 0 and the status stays pending-first-green rather than being re-pinned to a passing 5: the honest bar is a warning-free source tree. Verdict shape today: the metric reads `pending` with the `(BELOW THE HONEST BAR today)` marker, so it can never read as a pass; the boundary owner flips the pin to `enforced` on the first lint-clean tree."
+    },
+    "tests.scripts.pass": {
+      "direction": "atLeast",
+      "floor": 1,
+      "unit": "TAP `# pass` (scripts leg)",
+      "status": "pending-first-green",
+      "reading": null,
+      "producer": "node --test --test-reporter=tap \"scripts/**/*.test.mjs\"  (gate.sh `testsScripts` leg; pass `--gate <gate-tmp-dir>`)",
+      "reason": "An exit-0 leg with zero passing tests is a vacuous green (gate.sh's own rule), so the honest minimum is 1 — not a count target. Reading unavailable standalone: the scripts leg is a 4-minute producer and the ratchet stage reads the gate's own leg log instead of re-running it."
+    },
+    "tests.scripts.fail": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "TAP `# fail` (scripts leg)",
+      "status": "pending-first-green",
+      "reading": null,
+      "producer": "node --test --test-reporter=tap \"scripts/**/*.test.mjs\"  (gate.sh `testsScripts` leg)",
+      "reason": "Honest bar is 0. Reading unavailable standalone for the reason above."
+    },
+    "tests.lib.pass": {
+      "direction": "atLeast",
+      "floor": 1,
+      "unit": "TAP `# pass` (src/lib + src/components leg)",
+      "status": "pending-first-green",
+      "reading": null,
+      "producer": "node --experimental-strip-types --test --test-reporter=tap \"src/lib/**/*.test.ts\" \"src/components/**/*.test.ts\"  (gate.sh `testsLib` leg)",
+      "reason": "Same vacuous-green rule as the scripts leg. Reading unavailable standalone."
+    },
+    "tests.lib.fail": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "TAP `# fail` (src/lib + src/components leg)",
+      "status": "pending-first-green",
+      "reading": null,
+      "producer": "node --experimental-strip-types --test --test-reporter=tap \"src/lib/**/*.test.ts\" \"src/components/**/*.test.ts\"  (gate.sh `testsLib` leg)",
+      "reason": "Honest bar is 0. Reading unavailable standalone."
+    },
+    "prevention.missed": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "guards whose historical detector no longer fires",
+      "status": "enforced",
+      "reading": 0,
+      "producer": "node scripts/prevention/verify-prevention.mjs --all --selftest  -> `.fixtureIntegrity.missed`",
+      "reason": "Measured 0 at pin time. This is the guard whose disarmament (C-06) the W355 audit proved: the ratchet pins it independently of the harness's own `ok`."
+    },
+    "prevention.pending": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "guards whose live fixer seam is not wired",
+      "status": "enforced",
+      "reading": 0,
+      "producer": "node scripts/prevention/verify-prevention.mjs --all --selftest  -> `.fixPresence.pending`",
+      "reason": "Honest bar is 0. It read `[\"C-14\"]` when this floor was first pinned (the W355 audit L10 finding: C-14 was then unsatisfiable) and `[]` on the re-measurement minutes later — a sibling W356 lane closed that fixer. The floor is unchanged and is now ENFORCED because the honest bar is met; if C-14 (or any fixer pin) regresses, `pending` is non-empty and this is a HARD failure, exactly like gate.sh's own prevention stage."
+    },
+    "prevention.guards": {
+      "direction": "atLeast",
+      "floor": 34,
+      "unit": "registry guards replayed",
+      "status": "enforced",
+      "reading": 34,
+      "producer": "node scripts/prevention/verify-prevention.mjs --all --selftest  -> `.count`",
+      "reason": "A green reading must not be reachable by deleting a guard."
+    },
+    "prevention.countFloor": {
+      "direction": "atLeast",
+      "floor": 34,
+      "unit": "the harness's own pinned guard floor",
+      "status": "enforced",
+      "reading": 34,
+      "producer": "node scripts/prevention/verify-prevention.mjs --all --selftest  -> `.countFloor`",
+      "reason": "The harness reads its floor from `scripts/prevention/cassettes/guard-floor.json`. If that file is edited downward, `count` can stay 34 while the floor drops — this pin catches the joint edit."
+    },
+    "tree.corpusSize": {
+      "direction": "atLeast",
+      "floor": 13,
+      "unit": "emitted trees in the pinned corpus",
+      "status": "enforced",
+      "reading": 13,
+      "producer": "scripts/prevention/cassettes/trees.json (the pinned 13-tree list) + testruns/<tree>/.rapidtool/project.json",
+      "reason": "The denominator floor: deleting corpus evidence can never raise a rate."
+    },
+    "tree.jobScopedRealTrees": {
+      "direction": "atLeast",
+      "floor": 6,
+      "unit": "trees whose JOB-SCOPED census verdict is `real`",
+      "status": "enforced",
+      "reading": 6,
+      "producer": "src/lib/compile-check.server.ts#treeSubstanceOf(dir).jobScoped.verdict over the pinned trees",
+      "reason": "The unmovable substantive-tree reading. Deliberately reads the JOB-SCOPED sub-census only: on the same bytes the whole-tree census reads 13/13 non-empty (0/13 literal `real`) — the W355 A2-F3 measurement-integrity failure. A canary fails loudly if `jobScoped` disappears or is re-pointed at the whole-tree census."
+    },
+    "tree.tscPassSample": {
+      "direction": "atLeast",
+      "floor": 1,
+      "unit": "trees whose own declared `typecheck` runs green (bounded sample)",
+      "status": "pending-first-green",
+      "reading": 1,
+      "readingPinned": true,
+      "producer": "src/lib/compile-check.server.ts#treeRun(dir).project.typecheck.run  (opt-in: `--tree-tsc[=N]`, bounded sample)",
+      "reason": "Heavy opt-in producer (treeRun copies each tree to scratch and executes its declared toolchain), so it reports `unavailable (RT_E_RUNNER_UNAVAILABLE)` by default — never assumed. W357 · R-3: the floor was pinned at 0 with a reading of 1, an `atLeast: 0` bar no regression can move (a count cannot fall below 0). The honest bar for a bounded sample is that the sample's trees run their own typecheck green, so the floor is RAISED to 1 (a floor may only rise) and the pin stays pending-first-green because the producer is opt-in and the tree is red today. VALIDATED this lane at W356: `--tree-tsc=1` ran the real treeRun on 1 sampled tree and its declared typecheck resolved and ran GREEN (evidence {\"sampled\":1,\"resolved\":1}). The value is only comparable at a pinned sample size — `evidence.sampled` carries it. The audit's L27 (tool/service/library each failed their own tsc) is NOT re-derived here: this is a one-tree sample, and tool/service have no emitted artifact at all."
+    },
+    "realProductOnly.stubProductionModules": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "production code modules classified `stub` (TODO(E-15) / throw-TODO / deterministic template / blank)",
+      "status": "pending-first-green",
+      "reading": 3,
+      "producer": "scripts/quality-ratchet.mjs#scanRealProduct over the pinned trees (shared classifier src/lib/dod.ts#classifyModuleSource)",
+      "reason": "Owner rule 1: no stub code on a production path — the honest bar is 0. Measured 3 at pin time (src/ui/console.tsx, src/main.ts in two trees)."
+    },
+    "realProductOnly.markerViolations": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "explicit not-implemented / placeholder-code markers on a production path",
+      "status": "enforced",
+      "reading": 0,
+      "producer": "scripts/quality-ratchet.mjs#scanRealProduct (marker scan; attribute forms `placeholder=` / `placeholder:` are excluded)",
+      "reason": "Measured 0 at pin time with the attribute forms excluded (the only two `placeholder` hits in the corpus are legitimate HTML/JSX `placeholder=` attributes — a false positive here would be as bad as a miss)."
+    },
+    "realProductOnly.testDoubleProductionImports": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "test-double namespaces/libraries imported from or used in a PRODUCTION module (emitted corpus)",
+      "status": "enforced",
+      "reading": 0,
+      "producer": "scripts/quality-ratchet.mjs#scanRealProduct (shared clause `testDoubleViolations`; test seams are excluded by name: *.spec.* / *.test.* / tests/**)",
+      "reason": "Owner rule 1's test-double clause: doubles are legitimate in test seams only. Measured 0 at pin time. W357 · R-5: this reading covered the EMITTED corpus only, so RapidTool's own `src/**` — where the repo's own code lives — was outside the reader enforcing the owner's rule. The SAME clause now also runs over `src/**` (the two pins below), and the scope gap is closed rather than disclosed-only."
+    },
+    "realProductOnly.repoTestDoubleImports": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "test-double namespaces / seam modules imported from a PRODUCTION module under RapidTool's own src/**",
+      "status": "enforced",
+      "reading": 0,
+      "producer": "scripts/quality-ratchet.mjs#scanRepoTestDoubles over `src/**` (shared clause `testDoubleViolations` + one repo-only leg: a specifier that RESOLVES to a test seam / test-double module)",
+      "reason": "W357 · R-5 (the W356 cartographer's finding): the owner's `realProductOnly` rule measures the emitted artifacts but not the repo's own tree, so the rule was enforced everywhere except where this repo's code lives. Measured 0 on the real tree. Zero FALSE POSITIVES is part of the bar: `providers/mock.ts`, `mcp/stub-server.ts` and `testing/fixtures.ts` are test-seam-confined (no production module imports them), so the reader stays silent on all three — pinned by `canary.realProduct.repo-scan-discriminates` and by a unit test that reads the real tree, because a false positive here is as bad as a miss."
+    },
+    "realProductOnly.repoModulesScanned": {
+      "direction": "atLeast",
+      "floor": 153,
+      "unit": "production (non-test-seam) code modules enumerated under RapidTool's own src/**",
+      "status": "enforced",
+      "reading": 153,
+      "producer": "scripts/quality-ratchet.mjs#scanRepoTestDoubles (the src/** walk; 280 code modules, 127 test seams, 153 production)",
+      "reason": "The vacuity floor for the new reader: an empty (or silently narrowed) scan must never read as clean. Measured 153 production modules of 280 code modules at pin time. A legitimate shrink of the repo's own source must be re-pinned deliberately by the boundary owner; a scan that reads 0 is the failure this floor names."
+    },
+    "realProductOnly.treesEvaluated": {
+      "direction": "atLeast",
+      "floor": 13,
+      "unit": "emitted trees scanned for real-product bytes",
+      "status": "enforced",
+      "reading": 13,
+      "producer": "scripts/quality-ratchet.mjs#scanRealProduct (corpus walk)",
+      "reason": "The denominator floor for the owner-rule reader: an empty scan must never read as clean."
+    },
+    "productQuality.recordsEvaluated": {
+      "direction": "atLeast",
+      "floor": 25,
+      "unit": "persisted project records read by the product-quality reader",
+      "status": "enforced",
+      "reading": 25,
+      "producer": "src/lib/product-quality.ts#readProductQuality over testruns/**/build*.json + testruns/**/.rapidtool/project.json",
+      "reason": "Denominator floor: the quality rate cannot be raised by deleting records."
+    },
+    "productQuality.qualityCount": {
+      "direction": "atLeast",
+      "floor": 0,
+      "unit": "records whose measured product signals all hold",
+      "status": "enforced",
+      "reading": 0,
+      "readingPinned": true,
+      "subLegs": ["productQuality.treesPresent", "productQuality.realModulesPresent"],
+      "producer": "src/lib/product-quality.ts#readProductQuality(record).quality",
+      "reason": "Measured 0 of 25 at pin time. This floor is READING-PINNED (= today's reading), so it is satisfied today and may only rise; it is not a target and not a weakening. W357 · R-3: an `atLeast: 0` floor can never fire, so the reader's own MOVING sub-legs are pinned beside it (`subLegs`: trees present, records with ≥1 real module) — a regression in either now turns the ratchet red, which the quality count alone never could. The audit disposition remains: `productQuality.quality` is string-presence-based (disclosed, not hidden)."
+    },
+    "productQuality.treesPresent": {
+      "direction": "atLeast",
+      "floor": 25,
+      "unit": "evaluated records whose tree is present (≥1 generated/emitted file)",
+      "status": "enforced",
+      "reading": 25,
+      "producer": "src/lib/product-quality.ts#readProductQuality(record).tree.present over the same 25 records",
+      "reason": "W357 · R-3 — the moving sub-leg that makes `productQuality.qualityCount` measurable: dropping a record's tree or its emitted files IS a regression a rate pinned at 0 cannot see."
+    },
+    "productQuality.realModulesPresent": {
+      "direction": "atLeast",
+      "floor": 25,
+      "unit": "evaluated records whose tree carries ≥1 real (non-stub, non-reexport) module",
+      "status": "enforced",
+      "reading": 25,
+      "producer": "src/lib/product-quality.ts#readProductQuality(record).modules.real over the same 25 records",
+      "reason": "W357 · R-3 — the second moving sub-leg: a tree that loses its last real module is exactly the 'placeholder-only tree' the reader names in its own reasons, and it must move a floor."
+    },
+    "docClaims.mismatches": {
+      "direction": "atMost",
+      "floor": 0,
+      "unit": "docs-claimed repo paths missing or empty on disk",
+      "status": "pending-first-green",
+      "reading": 2,
+      "producer": "node scripts/docs-module-parity.mjs  ->  missingCount + emptyCount  (the ADVISORY doc-parity reader)",
+      "reason": "Honest bar is 0. Measured 2 missing + 0 empty at pin time. Deliberately read as DATA (the reader is advisory-only and is not promoted to a gate here); promoting it would change its contract, which this lane does not own."
+    },
+    "docClaims.uniquePaths": {
+      "direction": "atLeast",
+      "floor": 61,
+      "unit": "unique backticked repo paths the doc scan found",
+      "status": "enforced",
+      "reading": 61,
+      "producer": "node scripts/docs-module-parity.mjs  ->  uniquePaths",
+      "reason": "The vacuity floor: a doc scan that finds nothing must not read as '0 mismatches'. Measured 61."
+    },
+    "acceptance.samples": {
+      "direction": "atLeast",
+      "floor": 1,
+      "unit": "acceptance verdicts read",
+      "status": "enforced",
+      "reading": 1,
+      "producer": "research/eval-out/**/verdict.json (scripts/acceptance-run.mjs output) with fallback research/eval-out/results.json `entries[].acceptance`",
+      "reason": "Denominator floor. NOTE the honest limitation the W355 audit measured (L11): the keyed acceptance record is a SINGLE case, its `stale:true` flag is reported by this reader (never dropped) and the grader freeze is in-run only — so this rate is weak evidence. The floor pins the sample count so a rate cannot be raised by deleting a case."
+    },
+    "acceptance.passCount": {
+      "direction": "atLeast",
+      "floor": 0,
+      "unit": "acceptance verdicts whose `acceptance.pass` is true",
+      "status": "enforced",
+      "reading": 0,
+      "readingPinned": true,
+      "nonRegressible": "Exactly ONE acceptance artifact exists on disk (`research/eval-out/results.json`, `mode:keyed`, `stale:true`) and its single case does not pass, so this count sits at its structural minimum: no regression can move it below 0 and the honest bar CANNOT be raised to 1 without turning a red tree redder. The moving tooth for acceptance is the sample-count floor (`acceptance.samples` ≥ 1) plus the stale flag this reader surfaces; a second sample would make passCount regressible and this floor must be re-pinned by the boundary owner at that point.",
+      "producer": "research/eval-out/results.json  ->  entries[].acceptance.pass",
+      "reason": "Measured 0 of 1 at pin time (the record is `stale:true`, `mode:keyed`). Reading-pinned floor: may only rise. W357 · R-3: accounted as structurally non-regressible rather than left as a silent toothless pin — see `nonRegressible`."
+    },
+    "kindFit.app.units": { "direction": "atLeast", "floor": 30, "unit": "app-kind emitted artifacts compared", "status": "enforced", "reading": 30, "producer": "scripts/quality-ratchet.mjs#kindFitOf (pinned corpus + research/eval-out)", "reason": "Per-kind denominator floor." },
+    "kindFit.game.units": { "direction": "atLeast", "floor": 1, "unit": "game-kind emitted artifacts compared", "status": "enforced", "reading": 1, "producer": "scripts/quality-ratchet.mjs#kindFitOf", "reason": "Per-kind denominator floor (thin coverage is recorded, not hidden)." },
+    "kindFit.library.units": { "direction": "atLeast", "floor": 1, "unit": "library-kind emitted artifacts compared", "status": "enforced", "reading": 1, "producer": "scripts/quality-ratchet.mjs#kindFitOf", "reason": "Per-kind denominator floor (thin coverage is recorded, not hidden)." },
+    "kindFit.tool.units": { "direction": "atLeast", "floor": null, "unit": "tool-kind emitted artifacts compared", "status": "uncovered", "reading": 0, "producer": "scripts/quality-ratchet.mjs#kindFitOf", "reason": "No emitted artifact exists for a tool-kind brief on disk (research/eval-corpus has an `invoice-csv-cli` fixture; research/eval-out has no emit dir for it). UNCOVERED — never a pass." },
+    "kindFit.service.units": { "direction": "atLeast", "floor": null, "unit": "service-kind emitted artifacts compared", "status": "uncovered", "reading": 0, "producer": "scripts/quality-ratchet.mjs#kindFitOf", "reason": "No emitted artifact exists for a service-kind brief on disk (`order-webhook-service` fixture, no emit dir). UNCOVERED — never a pass." },
+    "kindFit.app.fit": { "direction": "atLeast", "floor": 0, "unit": "app-kind artifacts satisfying entry shape + declared scripts + the kind's required surface", "status": "enforced", "reading": 0, "readingPinned": true, "subLegs": ["kindFit.app.entryOk", "kindFit.app.scriptsOk", "kindFit.app.surfaceOk", "kindFit.app.demandedMatch"], "producer": "scripts/quality-ratchet.mjs#kindFitOf", "reason": "Owner rule 2. Measured 0 of 30 at pin time (the binding leg is the kind's required surface: 10/30 carry it). Reading-pinned floor: may only rise. W357 · R-3: the cartographer noted this 0-of-30 reading 'the floor deliberately cannot see' — an `atLeast: 0` bar cannot fire. Each of the four legs of `fit` is therefore pinned on its own where a DROP is possible (`subLegs`), so a regression in any leg now turns the ratchet red. The already-failed sub-legs are named honestly rather than floored: app entry shape 29/30, declared scripts 29/30, demanded-surface match 20/30." },
+    "kindFit.app.entryOk": { "direction": "atLeast", "floor": 29, "unit": "app-kind artifacts whose entry shape the requested kind requires", "status": "enforced", "reading": 29, "producer": "scripts/quality-ratchet.mjs#kindFitOf (acceptance-run.mjs#resolveTreeEntry leg)", "reason": "W357 · R-3 sub-leg: measured 29 of 30 — 1 app tree fails its own kind's entry shape. Reading-pinned at the measured value so any drop is permanent; it CAN fire, which the fit count cannot." },
+    "kindFit.app.scriptsOk": { "direction": "atLeast", "floor": 29, "unit": "app-kind artifacts declaring every script the kind requires", "status": "enforced", "reading": 29, "producer": "scripts/quality-ratchet.mjs#kindFitOf (the tree's own package.json leg)", "reason": "W357 · R-3 sub-leg: measured 29 of 30 (typecheck + test + build for a web kind)." },
+    "kindFit.app.surfaceOk": { "direction": "atLeast", "floor": 10, "unit": "app-kind artifacts whose required page surface is actually present", "status": "enforced", "reading": 10, "producer": "scripts/quality-ratchet.mjs#kindFitOf (product-quality fleet reader leg)", "reason": "W357 · R-3 sub-leg and the BINDING leg: measured 10 of 30 — happily the honest gap the fit floor cannot see, and now a floor a regression moves." },
+    "kindFit.app.demandedMatch": { "direction": "atLeast", "floor": 20, "unit": "app-kind artifacts whose record demands the 'web' surface for an app request", "status": "enforced", "reading": 20, "producer": "scripts/quality-ratchet.mjs#kindFitOf (record.kindSurface.kind == the requested kind's surface)", "reason": "W357 · R-3 sub-leg: measured 20 of 30 — the requested kind does not reach the record's demanded surface in 10 cases." },
+    "kindFit.game.fit": { "direction": "atLeast", "floor": 0, "unit": "game-kind artifacts satisfying entry shape + declared scripts + the kind's required surface", "status": "enforced", "reading": 0, "readingPinned": true, "subLegs": ["kindFit.game.entryOk", "kindFit.game.scriptsOk", "kindFit.game.demandedMatch"], "producer": "scripts/quality-ratchet.mjs#kindFitOf", "reason": "Owner rule 2. Measured 0 of 1 at pin time (the binding leg is the required surface: 0 of 1). Reading-pinned floor: may only rise. W357 · R-3: the three legs whose reading is > 0 are pinned on their own so a drop fires. W358 · R-11: the fourth leg now has its OWN pin (`kindFit.game.surfaceOk`, beside this one) instead of being named only here — the reading is 0 of 1 and its pin is accounted as structurally non-regressible for the reason recorded there." },
+    "kindFit.game.entryOk": { "direction": "atLeast", "floor": 1, "unit": "game-kind artifacts whose entry shape the requested kind requires", "status": "enforced", "reading": 1, "producer": "scripts/quality-ratchet.mjs#kindFitOf (acceptance-run.mjs#resolveTreeEntry leg)", "reason": "W357 · R-3 sub-leg: measured 1 of 1." },
+    "kindFit.game.scriptsOk": { "direction": "atLeast", "floor": 1, "unit": "game-kind artifacts declaring every script the kind requires", "status": "enforced", "reading": 1, "producer": "scripts/quality-ratchet.mjs#kindFitOf (the tree's own package.json leg)", "reason": "W357 · R-3 sub-leg: measured 1 of 1." },
+    "kindFit.game.demandedMatch": { "direction": "atLeast", "floor": 1, "unit": "game-kind artifacts whose record demands the 'game' surface for a game request", "status": "enforced", "reading": 1, "producer": "scripts/quality-ratchet.mjs#kindFitOf (record.kindSurface.kind == the requested kind's surface)", "reason": "W357 · R-3 sub-leg: measured 1 of 1." },
+    "kindFit.game.surfaceOk": { "direction": "atLeast", "floor": 0, "unit": "game-kind artifacts whose required game surface is actually present", "status": "enforced", "reading": 0, "readingPinned": true, "nonRegressible": "W358 · R-11: the reading is 0 of 1 and sits at its STRUCTURAL MINIMUM — the only game-kind unit on disk is a mis-stamped bakery website (cartographer `357_cartographer.md` §3.1B: `testruns/bakery-website/emitted` was stamped `game` by an older resolver revision), so no regression can move the count DOWN and the honest bar (every game unit carries input + loop + canvas = 1) cannot be pinned at 1 without turning a red tree redder. The leg CAN still fail loudly, which is the point of pinning it: an `enforced` pin whose reading becomes `unavailable (RT_E_PROJECT_MISSING)` is a HARD failure (the game unit or the fleet reader stops producing the reading), and `kindFit.game.units >= 1` is the denominator floor. It becomes a regressible floor the day a properly-stamped game unit exists (cartographer §3.4 item 2), and the boundary owner must re-pin it at the honest bar then.", "producer": "scripts/quality-ratchet.mjs#kindFitOf (product-quality fleet reader leg)", "reason": "W358 · R-11: this reading (0 of 1) had NO pin at all, so the one leg that actually fails for `game` could not move the ratchet — only `entryOk`/`scriptsOk`/`demandedMatch` (all 1 of 1) could. Pinned now at the measured value, `readingPinned` (a floor may only rise), with the honest bar (1) and the reason it cannot be pinned there stated in `nonRegressible`." },
+    "kindFit.library.fit": { "direction": "atLeast", "floor": 0, "unit": "library-kind artifacts satisfying entry shape + declared scripts + the kind's required surface", "status": "enforced", "reading": 0, "readingPinned": true, "subLegs": ["kindFit.library.entryOk", "kindFit.library.scriptsOk", "kindFit.library.demandedMatch"], "producer": "scripts/quality-ratchet.mjs#kindFitOf", "reason": "Owner rule 2. Measured 0 of 1 at pin time (the binding leg is the required surface: 0 of 1). Reading-pinned floor: may only rise. W357 · R-3: as for `game` — the three moving legs are pinned. W358 · R-11: the surface leg now has its own accounted pin (`kindFit.library.surfaceOk`) rather than being disclosed here only." },
+    "kindFit.library.entryOk": { "direction": "atLeast", "floor": 1, "unit": "library-kind artifacts whose entry shape the requested kind requires", "status": "enforced", "reading": 1, "producer": "scripts/quality-ratchet.mjs#kindFitOf (acceptance-run.mjs#resolveTreeEntry leg)", "reason": "W357 · R-3 sub-leg: measured 1 of 1." },
+    "kindFit.library.scriptsOk": { "direction": "atLeast", "floor": 1, "unit": "library-kind artifacts declaring every script the kind requires", "status": "enforced", "reading": 1, "producer": "scripts/quality-ratchet.mjs#kindFitOf (the tree's own package.json leg)", "reason": "W357 · R-3 sub-leg: measured 1 of 1." },
+    "kindFit.library.demandedMatch": { "direction": "atLeast", "floor": 1, "unit": "library-kind artifacts whose record demands the 'runnable' surface for a library request", "status": "enforced", "reading": 1, "producer": "scripts/quality-ratchet.mjs#kindFitOf (record.kindSurface.kind == the requested kind's surface)", "reason": "W357 · R-3 sub-leg: measured 1 of 1." },
+    "kindFit.library.surfaceOk": { "direction": "atLeast", "floor": 0, "unit": "library-kind artifacts whose required runnable surface is actually present", "status": "enforced", "reading": 0, "readingPinned": true, "nonRegressible": "W358 · R-11: the reading is 0 of 1 and sits at its STRUCTURAL MINIMUM — the only library-kind unit on disk is a mis-stamped mobile app (cartographer `357_cartographer.md` §3.1B: `testruns/mobile-companion/emitted` was stamped `library`), so no regression can move the count DOWN and the honest bar (every library unit carries an importable runnable surface = 1) cannot be pinned at 1 without turning a red tree redder. The leg CAN still fail loudly: an `enforced` pin whose reading becomes `unavailable (RT_E_PROJECT_MISSING)` is a HARD failure, and `kindFit.library.units >= 1` is the denominator floor. It becomes a regressible floor when a properly-stamped library unit exists (cartographer §3.4 item 2); re-pin it at the honest bar then.", "producer": "scripts/quality-ratchet.mjs#kindFitOf (product-quality fleet reader leg)", "reason": "W358 · R-11: this reading (0 of 1) had NO pin, so the one leg that actually fails for `library` could not move the ratchet. Pinned at the measured value, `readingPinned`, with the honest bar (1) and why it cannot be pinned there recorded in `nonRegressible`." },
+    "kindFit.tool.fit": { "direction": "atLeast", "floor": null, "unit": "tool-kind artifacts satisfying the kind contract", "status": "uncovered", "reading": null, "producer": "scripts/quality-ratchet.mjs#kindFitOf", "reason": "UNCOVERED — no emitted artifact for a tool-kind brief exists on disk, so there is nothing to compare and nothing to pass." },
+    "kindFit.service.fit": { "direction": "atLeast", "floor": null, "unit": "service-kind artifacts satisfying the kind contract", "status": "uncovered", "reading": null, "producer": "scripts/quality-ratchet.mjs#kindFitOf", "reason": "UNCOVERED — no emitted artifact for a service-kind brief exists on disk, so there is nothing to compare and nothing to pass." }
+  }
+}

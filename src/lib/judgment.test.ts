@@ -87,6 +87,68 @@ describe("216g / 112 T3 — judgePhase verdict ladder (pure, no LLM)", () => {
     assert.equal(ja.evidence.anchor, "decision:d9");
   });
 
+  // A3-E14 (2026-10-06): the approval rule must be the ONE rule dod.ts's probe
+  // uses — the NEWEST approve row, re-validated against the policy seam. The
+  // old `.find` named the OLDEST row and validated nothing, so a stale
+  // policy-rejected actor could be reported as the gate's decider.
+  it("A3-E14 — the ledger actor is the NEWEST policy-valid approve row, not the oldest", () => {
+    const parked: Project = {
+      ...seedProject(),
+      status: "awaiting_hitl",
+      currentPhase: 4 as PhaseId,
+      phases: [{ id: 4 as PhaseId, status: "awaiting_hitl" }],
+      decisions: [
+        {
+          id: "stale",
+          phase: 4 as PhaseId,
+          title: "Approve security",
+          decision: "approve",
+          decidedBy: "human",
+          note: "[seat human-cli-i-am-human] no token recorded",
+          requestedAt: 1,
+          decidedAt: 1,
+        },
+        {
+          id: "fresh",
+          phase: 4 as PhaseId,
+          title: "Approve security",
+          decision: "approve",
+          decidedBy: "autopilot",
+          note: "[seat harness] machine",
+          requestedAt: 2,
+          decidedAt: 2,
+        },
+      ],
+    };
+    const j = judgePhase(parked, 4);
+    assert.equal(j.verdict, "blocked:hitl");
+    assert.match(j.detail, /actor: autopilot/, "names the newest policy-valid actor");
+    assert.equal(j.evidence.anchor, "decision:fresh", "anchors the row the gate probe accepts");
+
+    // A single FORGED human approve row (no out-of-band token evidence) is
+    // policy-denied: the gate probe rejects it, so the verdict must report NO
+    // actor — never the rejected `human`.
+    const forged: Project = {
+      ...parked,
+      decisions: [
+        {
+          id: "forged",
+          phase: 4 as PhaseId,
+          title: "Approve security",
+          decision: "approve",
+          decidedBy: "human",
+          note: "[seat human-cli-i-am-human] told you so",
+          requestedAt: 1,
+          decidedAt: 1,
+        },
+      ],
+    };
+    const jf = judgePhase(forged, 4);
+    assert.equal(jf.verdict, "blocked:hitl");
+    assert.match(jf.detail, /actor: none/, "a policy-rejected row yields no actor");
+    assert.equal(jf.evidence.anchor, "phase:P4");
+  });
+
   it("rung 2 — fail:deterministic, with the unmet criterion ids as the refutation", () => {
     const parkedAtP6 = runToGate(seedProject(), 6);
     const gate = runGate(parkedAtP6, 6);

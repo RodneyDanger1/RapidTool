@@ -37,6 +37,69 @@
  * so `doctor.ts` (client-safe) can import it.
  */
 
+// ---------------------------------------------------------------------------
+// Product-quality reading (additive, 2026-10-05) — a SEPARATE, byte-derived
+// reading of whether what landed is actually a product (web entry, router,
+// pages, styled layout, working ordering flow, real modules, artifacts/phase).
+// It answers the question the gates do not; it never flips an existing field.
+// ---------------------------------------------------------------------------
+import {
+  determinismReading,
+  fleetProductQualityFromProjects,
+  readProductQuality,
+  type DeterminismReading,
+  type FleetProductQuality,
+  type ProductQuality,
+} from "./product-quality.ts";
+import {
+  gateEvidenceOfProject,
+  type GateEvidenceReading,
+} from "./dod.ts";
+import { stageWiringReading, type StageWiringReading } from "./phases.ts";
+
+export type { DeterminismReading, FleetProductQuality, ProductQuality } from "./product-quality.ts";
+export type { StageWiringReading, StageWiringRow } from "./phases.ts";
+// The gate-evidence reader is DEFINED in `dod.ts` (the ONE implementation the
+// green-gate surfaces share); re-exported here so a caller importing only
+// `acceptance.ts` (the machine-reading surface) can read it.
+export type { GateEvidenceReading, GateEvidencePhaseRow } from "./dod.ts";
+export { gateEvidenceOfProject } from "./dod.ts";
+// The stage-wiring reader, re-exported so a caller importing only `acceptance.ts`
+// (the machine-reading surface) can compute it directly.
+export { stageWiringReading } from "./phases.ts";
+
+/** One project's byte-derived product-quality reading — re-exported so a
+ *  caller that imports only `acceptance.ts` can read it. Pure over the bytes. */
+export function productQualityOfProject(project: unknown): ProductQuality {
+  return readProductQuality(project);
+}
+
+/**
+ * 2026-10-05 — the ADDITIVE determinism reading (which fields are reproducible
+ * from the brief alone, which are not, and their sources), re-exported so a
+ * caller importing only `acceptance.ts` can read it. It reads the bytes it is
+ * handed and never changes emitted output (codegen is a sibling's surface).
+ */
+export function determinismOfProject(
+  project: unknown,
+  opts?: { emittedFiles?: readonly { path: string; source?: string }[] },
+): DeterminismReading {
+  return determinismReading(project, opts);
+}
+
+/**
+ * ADDITIVE (2026-10-06) — the gate-evidence reading (`dod.gateEvidenceOfProject`).
+ * Re-runs the DoD gate over the project record's COMPLETE phases and reports,
+ * per phase, the CLASS of evidence each green gate accepted — with a codable
+ * `weak` flag when every met criterion rests on non-executed evidence (presence
+ * / ledger / structural / lexical). This is what makes the evidence class
+ * ACTIONABLE: a green seal whose evidence is `artifact-presence`/`label`/
+ * `structural` is visibly qualified, so it can never be read as "the product
+ * builds" when nothing ran or built. The implementation lives in `dod.ts` (the
+ * one reader doctor, acceptance and product-quality all call) and is re-exported
+ * above; the shape is documented by `GateEvidenceReading` there.
+ */
+
 /** The one machine verifier seat this reading reports under. Never "human". */
 export const MACHINE_ACCEPTANCE_SEAT = "machine:tree-run" as const;
 
@@ -182,6 +245,25 @@ export type FleetAcceptance = {
   evidencedRate: number | null;
   /** Why `autonomousFactoryV2` is false (empty iff true). */
   reasons: string[];
+  /**
+   * 2026-10-05 product-quality lane — the ADDITIVE, byte-derived per-project
+   * product reading (web entry, router, distinct pages, styled layout, working
+   * ordering flow, real modules, artifacts/phase). It is a SEPARATE question
+   * from `autonomousFactoryV2` and never affects it or any existing field.
+   */
+  productQuality: FleetProductQuality;
+  /**
+   * ADDITIVE (2026-10-06, item 4): the P0–P12 stage-wiring census of the FIRST
+   * presented record — every complete phase's claimed deliverable is present,
+   * non-empty, and flows forward. Empty/absent when no record is presented.
+   */
+  stageWiring: StageWiringReading;
+  /**
+   * ADDITIVE (2026-10-06, item 2): the gate-evidence qualification of the FIRST
+   * presented record — every green gate's accepted evidence class, with the
+   * non-executed ("label"/artifact-presence) passes named.
+   */
+  gateEvidence: GateEvidenceReading;
 };
 
 /**
@@ -262,6 +344,14 @@ export function fleetAcceptanceFromProjects(
     sampleCount: briefs,
     evidencedRate: briefs > 0 ? unique.length / briefs : null,
     reasons: autonomousFactoryV2 ? [] : reasons,
+    // 2026-10-05 product-quality lane: derived from the same persisted rows,
+    // read-only, and never consulted by any field above.
+    productQuality: fleetProductQualityFromProjects(rows),
+    // ADDITIVE (2026-10-06): the stage-wiring census + gate-evidence
+    // qualification of the first presented record — derived, read-only, and
+    // never consulted by any field above.
+    stageWiring: stageWiringReading(rows[0]),
+    gateEvidence: gateEvidenceOfProject(rows[0]),
   };
 }
 

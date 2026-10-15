@@ -18,9 +18,11 @@ import {
   fleetAcceptanceFromProjects,
   fleetAlarms,
   fleetMetrics,
+  gateEvidenceOfProject,
   parseCandidateJournalRow,
   readMachineEvidence,
   resampleUsage,
+  stageWiringReading,
 } from "./acceptance.ts";
 import { mintTreeRunTested, treeBytesDigest, treeRunTestedEvidence } from "./codegen.server.ts";
 import { fnv1a } from "./algorithms.ts";
@@ -491,5 +493,140 @@ describe("fixes/346-X5 — the variance reading (never one lucky sample)", () =>
     assert.equal(mixed.sampleCount, 2);
     assert.equal(mixed.evidenced, 1);
     assert.equal(mixed.evidencedRate, 0.5, "one of two samples evidenced — the 1-sample reading is not overstated");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-05 product-quality lane — `FleetAcceptance.productQuality` is a NEW,
+// additive, byte-derived reading. It must never change the machine acceptance
+// reading or any existing field.
+// ---------------------------------------------------------------------------
+describe("2026-10-05 — FleetAcceptance.productQuality (additive, never touches the bar)", () => {
+  it("is zeroed for an empty fleet and does not change autonomousFactoryV2", () => {
+    const empty = fleetAcceptanceFromProjects([]);
+    assert.equal(empty.productQuality.projects, 0);
+    assert.equal(empty.autonomousFactoryV2, false, "an empty fleet still refuses");
+    const one = fleetAcceptanceFromProjects([evidenced("bakery", "h1")]);
+    assert.equal(one.autonomousFactoryV2, true, "evidence alone still satisfies the machine reading");
+    assert.equal(one.productQuality.projects, 1);
+    assert.equal(
+      one.productQuality.withTree,
+      0,
+      "the evidenced row carries no tree bytes — it is not counted as a tree",
+    );
+  });
+
+  it("reads a tree-bearing record's real product signals beside the acceptance reading", () => {
+    const withTree = {
+      id: "tree-brief",
+      brief: "ordering website",
+      generatedTree: [
+        { path: "index.html", source: "<html></html>" },
+        { path: "src/main.tsx", source: 'import { RouterProvider } from "@tanstack/react-router";' },
+        { path: "src/pages/menu.tsx", source: "export function MenuPage() { return <div/>; }" },
+        { path: "src/styles.css", source: ".x { }" },
+      ],
+    };
+    const a = fleetAcceptanceFromProjects([evidenced("full", "h1"), withTree]);
+    assert.equal(a.productQuality.projects, 2);
+    assert.equal(a.productQuality.withTree, 1);
+    assert.equal(a.productQuality.quality, 0, "no ordering flow/form ⇒ not product-quality");
+    assert.equal(a.autonomousFactoryV2, true, "the evidenced row alone meets the default floor");
+    assert.equal(a.evidenced, 1, "the tree-bearing row has no evidence stamp and is not counted");
+  });
+
+  it("a record with a real empty tree trips the empty-tree count", () => {
+    const a = fleetAcceptanceFromProjects([{ id: "empty", brief: "x", generatedTree: [] }]);
+    assert.equal(a.productQuality.emptyTree, 1);
+    assert.equal(a.productQuality.withTree, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-06 � item 2 (actionable evidence class) + item 4 (stage wiring). The
+// fleet acceptance aggregate now carries the gate-evidence qualification and the
+// P0�P12 stage-wiring census of the presented record, so a green seal whose
+// evidence is presence-only is visibly qualified.
+// ---------------------------------------------------------------------------
+describe("2026-10-06 � gate-evidence qualification + stage wiring ride the fleet reading", () => {
+  const record = (extra: Record<string, unknown>) => ({ id: "r1", brief: "x", ...extra });
+
+  it("a green gate resting on artifact-presence only is qualified weak with RT_E_CLAIM_UNVERIFIED", () => {
+    const g = gateEvidenceOfProject(
+      record({
+        phases: [{ id: 3, status: "complete" }],
+        artifacts: [{ id: "a", phase: 3, kind: "mcp", title: "mcp", body: "contract" }],
+      }),
+    );
+    assert.deepEqual(g.weakPhases, [3]);
+    assert.ok(g.phases[0].classes.includes("artifact-presence"));
+    assert.match(g.phases[0].note, /NON-EXECUTED/);
+    assert.match(g.note, /RT_E_CLAIM_UNVERIFIED/);
+  });
+
+  // A3-E8 (2026-10-06, REPLACES the pre-fix pin): the engine's DETERMINISTIC
+  // TEMPLATE self-test is not the product running, so a green P6 gate resting
+  // on it is NON-executed evidence and must be qualified WEAK. The old pin
+  // called `executed-self-test` executed evidence, which let a green gate that
+  // never left the floor read as an executed pass.
+  it("a green gate whose only executed arm is the deterministic template self-test is WEAK", () => {
+    const g = gateEvidenceOfProject(
+      record({
+        phases: [{ id: 6, status: "complete" }],
+        generatedSource: "export const x = 1;",
+        lastTest: { ok: true, detail: "engine self-test ok" },
+      }),
+    );
+    const p6 = g.phases.find((x) => x.phase === 6);
+    assert.ok(p6, "P6 is surfaced");
+    assert.equal(p6!.weak, true, "the engine template self-test is NOT product execution");
+    assert.ok(p6!.classes.includes("executed-self-test"), "the class is still reported");
+    assert.ok(g.weakPhases.includes(6));
+    assert.match(g.note, /RT_E_CLAIM_UNVERIFIED/);
+  });
+
+  it("a gate whose met evidence includes a real executed tree-run is NOT weak", () => {
+    const g = gateEvidenceOfProject(
+      record({
+        phases: [{ id: 6, status: "complete" }],
+        generatedSource: "export const x = 1;",
+        artifacts: [{ id: "c", phase: 6, kind: "code", title: "code", body: "x" }],
+        lastTest: { ok: true, detail: "tree-run green", label: "tested", evidenceHash: "abc" },
+      }),
+    );
+    const p6 = g.phases.find((x) => x.phase === 6)!;
+    assert.equal(p6.weak, false, "executed tree-run spec tests are executed evidence");
+    assert.ok(p6.classes.includes("executed-tree-tests"));
+  });
+
+  it("a non-object record yields the empty gate-evidence reading (fail-closed, never a fabricated pass)", () => {
+    const g = gateEvidenceOfProject(null);
+    assert.deepEqual(g.phases, []);
+    assert.deepEqual(g.weakPhases, []);
+    assert.match(g.note, /no complete phase/);
+  });
+
+  it("stageWiringReading + gateEvidence are carried on FleetAcceptance for the first record", () => {
+    const a = fleetAcceptanceFromProjects([
+      record({
+        phases: [{ id: 0, status: "complete" }],
+        artifacts: [{ id: "a", phase: 0, kind: "scorecard", title: "s", body: "body" }],
+      }),
+    ]);
+    assert.ok(a.stageWiring, "the wiring census rides the aggregate");
+    assert.equal(a.stageWiring.rows.length, 13);
+    assert.ok(a.gateEvidence, "the gate-evidence reading rides the aggregate");
+    assert.deepEqual(a.gateEvidence.weakPhases, [0], "P0's gate is presence-only ? weak");
+  });
+
+  it("stageWiringReading flags a complete phase that produced no deliverable (coded, never silent)", () => {
+    const w = stageWiringReading(
+      record({
+        phases: [{ id: 0, status: "complete" }, { id: 1, status: "complete" }],
+        artifacts: [{ id: "g0", phase: 0, kind: "gate", title: "gate", body: "x" }],
+      }),
+    );
+    assert.equal(w.ok, false);
+    assert.equal(w.failures.find((f) => f.phase === 0)?.code, "RT_E_PLAN_UNDERPRODUCED");
   });
 });

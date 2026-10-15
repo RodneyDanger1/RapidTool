@@ -38,7 +38,16 @@ export class CrossSiteRequestError extends Error {
 
 /** Throw `CrossSiteRequestError` for a scripted cross-site/sibling request. */
 export function assertSameSiteRequest(): void {
-  const request = getRequest();
+  let request: Request | undefined;
+  try {
+    request = getRequest();
+  } catch {
+    // No server request context (build, CLI, unit test): getRequest() throws
+    // outside the Start runtime rather than returning undefined. There is no
+    // request to inspect, so there is nothing to guard — same as the
+    // `!request` branch below, and never an internal AsyncLocalStorage error.
+    return;
+  }
   if (!request) return; // no request context (e.g. build) — nothing to guard
   const h = request.headers;
   const site = h.get("sec-fetch-site");

@@ -11,7 +11,7 @@
 // with automatic rollback on throw so emit consumers cannot leave a partial
 // tree when one write fails mid-set.
 // ---------------------------------------------------------------------------
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 // R11-f07: ONE shared physical-containment helper (scripts/path-safety.mjs —
 // same cross-boundary pattern as db.ts → migration-plan.mjs). Lexical checks
@@ -165,8 +165,72 @@ export function applyWrite(
     snapshot.set(rel, readRecord(abs));
   }
   mkdirSync(dirname(abs), { recursive: true });
-  writeFileSync(abs, body, "utf8");
+  writeStaged(abs, body);
   return snapshot;
+}
+
+/** W352 (R-18): the reclaimable write-set lock a batch apply holds while it
+ *  stages a multi-file set. `<root>/.rapidtool-writeset.lock`, JSON `{pid,…}`.
+ *  A kill mid-set leaves it behind as the MARKER of a possibly-partial tree;
+ *  the next apply reclaims it iff its owner pid is dead, else refuses
+ *  RT_E_BUSY (a live writer owns the set). */
+export const WRITE_SET_LOCK = ".rapidtool-writeset.lock";
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === "EPERM";
+  }
+}
+
+function acquireWriteSetLock(root: string): string {
+  const lockPath = join(root, WRITE_SET_LOCK);
+  if (existsSync(lockPath)) {
+    let owner: unknown = null;
+    try {
+      owner = JSON.parse(readFileSync(lockPath, "utf8"))?.pid ?? null;
+    } catch {
+      owner = null;
+    }
+    if (typeof owner === "number" && owner !== process.pid && pidAlive(owner)) {
+      const err = new Error(`write-set: another writer (pid ${owner}) holds ${lockPath}`) as Error & {
+        code?: ErrorCode;
+      };
+      err.code = "RT_E_BUSY";
+      throw err;
+    }
+    // Dead / unreadable / our own stale lock — reclaim it, never deadlock.
+    try {
+      rmSync(lockPath, { force: true });
+    } catch {
+      /* best-effort reclaim */
+    }
+  }
+  mkdirSync(root, { recursive: true });
+  writeFileSync(lockPath, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), "utf8");
+  return lockPath;
+}
+
+let stageCounter = 0;
+
+/** Stage `body` beside `abs` then rename it into place: a reader sees the old
+ *  bytes or the new ones, never a torn file (same-fs rename is atomic). A
+ *  failed rename reclaims the staged temp and rethrows. */
+function writeStaged(abs: string, body: string): void {
+  const tmp = `${abs}.rtws-${process.pid}-${stageCounter++}.tmp`;
+  writeFileSync(tmp, body, "utf8");
+  try {
+    renameSync(tmp, abs);
+  } catch (err) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+    throw err;
+  }
 }
 
 /**
@@ -180,20 +244,29 @@ export function applyWrites(
   files: readonly { path: string; body: string }[],
   snapshot: WriteSnapshot = new Map(),
 ): WriteSnapshot {
+  // Validate every path (and record prior bytes) BEFORE taking the lock or
+  // writing anything: an unsafe path must not leave a lock or a partial set.
   for (const f of files) {
     if (!snapshot.has(f.path)) {
       snapshot.set(f.path, readRecord(absOf(root, f.path)));
     }
   }
+  const lockPath = acquireWriteSetLock(root);
   try {
     for (const f of files) {
       const abs = absOf(root, f.path);
       mkdirSync(dirname(abs), { recursive: true });
-      writeFileSync(abs, f.body, "utf8");
+      writeStaged(abs, f.body);
     }
   } catch (err) {
     rollback(root, snapshot);
     throw err;
+  } finally {
+    try {
+      rmSync(lockPath, { force: true });
+    } catch {
+      /* best-effort unlock */
+    }
   }
   return snapshot;
 }

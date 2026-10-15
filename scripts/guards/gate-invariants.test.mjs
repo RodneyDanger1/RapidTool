@@ -34,7 +34,10 @@ import { normalizeMtimes, preflight } from "./runlock-preflight.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const GUARDS = join(ROOT, "scripts", "guards");
-const TESTRUNS = existsSync(resolve(ROOT, "..", "testruns")) ? resolve(ROOT, "..", "testruns") : join(ROOT, "testruns");
+// B1-F1: the run root is the TRACKED in-repo fixture subset (`<repo>/testruns`),
+// so this suite is green on a clean checkout; `RAPIDTOOL_TESTRUNS` still
+// overrides for a host that keeps a larger run root elsewhere.
+const TESTRUNS = process.env.RAPIDTOOL_TESTRUNS || join(ROOT, "testruns");
 
 function read(file) {
   return readFileSync(file, "utf8");
@@ -63,6 +66,28 @@ function copyTree(source, dest) {
   cpSync(source, dest, {
     recursive: true,
     filter: (src) => !/(^|[\\/])(node_modules|\.git|dist|build|coverage|\.output)$/.test(src),
+  });
+}
+
+/** How many keyed-synthesis log rows a persisted project carries. */
+function synthesisRowsOf(project) {
+  return (project.logs ?? []).filter((l) => String(l && l.event).startsWith("p6.synthesis.")).length;
+}
+
+/**
+ * The GENUINE keyless floor for a persisted project: the real bytes with every
+ * `p6.synthesis.*` row removed and an absent tree, materialized as a real fixture
+ * and read back through the real loader. `{...project, generatedTree: []}` is NOT
+ * the keyless floor when the fixture's own logs already carry a keyed attempt —
+ * the fail-closed `p6-arch` probe then returns `false` for the control too, which
+ * is exactly why the C-14 pin was unsatisfiable.
+ */
+function buildKeylessFloor(project) {
+  const logs = (project.logs ?? []).filter((l) => !String(l && l.event).startsWith("p6.synthesis."));
+  return withScratch((dir) => {
+    const p = join(dir, "build.json");
+    writeFileSync(p, JSON.stringify({ ...project, generatedTree: [], logs }));
+    return headless.loadProject(p);
   });
 }
 
@@ -201,9 +226,15 @@ test("C-14 p6-arch must fail closed on a keyed attempt with no tree", () => {
   const base = /** @type {any} */ (headless.loadProject(join(TESTRUNS, "office-stock-tracker", "build.json")));
   const item = DOD[6].find((candidate) => candidate.id === "p6-arch");
   assert.ok(item && typeof item.probe === "function", "the real p6-arch probe must exist");
-  const keylessNoTree = { ...base, generatedTree: [] };
-  assert.equal(item.probe(keylessNoTree), true, "the keyless floor (no keyed attempt) still passes");
-  const sentinel = { ...base, generatedTree: [], logs: [...(base.logs ?? []), { event: "p6.synthesis.attempt", detail: "keyed P6 synthesis attempted" }] };
+  // The fixture's own logs carry a keyed attempt, so `{...base, generatedTree: []}`
+  // is NOT the keyless floor the probe's legacy-pass branch is for.
+  assert.ok(
+    synthesisRowsOf(base) > 0,
+    `office-stock-tracker/build.json carries ${synthesisRowsOf(base)} keyed-synthesis rows - a generatedTree-only control is not keyless (the pin was unsatisfiable)`,
+  );
+  const keylessNoTree = buildKeylessFloor(base);
+  assert.equal(item.probe(keylessNoTree), true, "the keyless floor (no keyed attempt, absent tree) still passes");
+  const sentinel = { ...keylessNoTree, logs: [...(keylessNoTree.logs ?? []), { event: "p6.synthesis.attempt", detail: "keyed P6 synthesis attempted" }] };
   assert.equal(
     item.probe(sentinel),
     false,

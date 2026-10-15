@@ -15,8 +15,10 @@ import { ERROR_CODES } from "./errors.ts";
 import { inventoryFromJobSources } from "./doctor.ts";
 import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
 import type { Project, SpecGraph } from "./types.ts";
-import { DEPLOY_HONESTY_STAMP, deployNotes, deplyNotes, projectKindOf, scaffoldProject, underProductionRefusalOf } from "./scaffold.ts";
+import { DEPLOY_HONESTY_STAMP, CAUTION_ALERT_LEAD, cjsResidueHits, deployNotes, deplyNotes, declaredSurfaceNamesOf, projectKindOf, readmeLeadsWithCautionBanner, scaffoldProject, surfaceTreeRows, underProductionRefusalOf, withheldTreeReadmeNote } from "./scaffold.ts";
+import { emitSoftware } from "./software-export.ts";
 import type { ScaffoldFile, ScaffoldResult } from "./scaffold.ts";
+import { declaredSurfaceNames, productSurfaceKindOf, productSurfaceTrace } from "./dod.ts";
 import { deliveryKindOf, withDeliveryKind } from "./engine.ts";
 import { compileFixtureAssertion, fixtureMatchHelperSource } from "./brief-fixtures.ts";
 import { specSourceHasBehaviouralAssert } from "./compile-check.server.ts";
@@ -27,15 +29,24 @@ const fullRun = (over: Partial<Project> = {}) => runHeadless(seedProject(over), 
 /** P0-primed project: lattice + specGraph + contracts + oracle, no generated code. */
 const primed = (over: Partial<Project> = {}) => runHeadless(seedProject(over), [0]);
 
+/**
+ * Assert ok and return the NARROWED ok-arm. `ScaffoldResult` is a discriminated
+ * union and `assert.ok(result.ok)` does not narrow it, so a caller that needs an
+ * ok-only field (`gameTemplate` / `underProduced` / `uiGeneration`) must come
+ * through here — `assert.fail` is typed `never`, which is what narrows.
+ */
+function okResult(result: ScaffoldResult): Extract<ScaffoldResult, { ok: true }> {
+  if (!result.ok) assert.fail(`expected ok: ${result.error}`);
+  return result;
+}
+
 /** Assert ok and return the file list (type-narrowing helper). */
 function okFiles(result: ScaffoldResult): ScaffoldFile[] {
-  assert.ok(result.ok, `expected ok: ${!result.ok ? result.error : ""}`);
-  return (result as { ok: true; files: ScaffoldFile[] }).files;
+  return okResult(result).files;
 }
 
 function bodyOf(result: ScaffoldResult, path: string): string {
-  assert.ok(result.ok, `expected ok result (${!result.ok ? result.error : "n/a"})`);
-  const f = (result as { ok: true; files: ScaffoldFile[] }).files.find((x) => x.path === path);
+  const f = okResult(result).files.find((x) => x.path === path);
   assert.ok(f, `expected file ${path}`);
   return f!.body;
 }
@@ -283,6 +294,9 @@ describe("scaffoldProject — file-tree shape per kind", () => {
       "DEPLOY.md",
       ".env.example",
       ".gitignore",
+      // fixes/352 (release hygiene): every tree ships a LICENSE + a CI workflow.
+      "LICENSE",
+      ".github/workflows/ci.yml",
       "package.json",
       "tsconfig.json",
       ".rapidtool/project.json",
@@ -297,9 +311,9 @@ describe("scaffoldProject — file-tree shape per kind", () => {
       files.every((f) => !f.path.startsWith("src/") || f.path === "src/main.tsx" || f.path === "src/styles.css"),
       "only the boot-shell src entry without a spec graph",
     );
-    // fixes/217f (T4.2): the .gitignore joined the emitted file set — the count
-    // moves with it. old → new: "10 files" → "11 files" (338-5 added styles.css).
-    assert.ok((result as { ok: true; summary: string }).summary.startsWith("11 files"));
+    // fixes/217f (T4.2) + fixes/352: the emitted file set grew again — 11 files
+    // (338-5) → 13 (the LICENSE + CI workflow every professional tree ships).
+    assert.ok((result as { ok: true; summary: string }).summary.startsWith("13 files"));
   });
 
   it("fails honestly for a project with an empty name", () => {
@@ -426,7 +440,12 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       `the emitted refusal code must be registered: ${decl![1]}`,
     );
     const throws = src.split("\n").filter((l) => /throw new Error\(/.test(l));
-    assert.ok(throws.length >= 12, `expected >=12 emitted coded throws, found ${throws.length}`);
+    // Floor moved 12 → 11 by fixes/347-2: the per-kind runnable entries stopped
+    // being throw-stubs (the measured "CLI throws TODO(E-15) on every command"),
+    // removing three coded-throw lines. The invariant below (every remaining
+    // throw is coded) is unchanged; the floor only guards against the invariant
+    // being satisfied by deleting all throws.
+    assert.ok(throws.length >= 11, `expected >=11 emitted coded throws, found ${throws.length}`);
     for (const l of throws) {
       assert.ok(
         /EMITTED_REFUSAL_CODE|emittedRefusal/.test(l),
@@ -464,13 +483,14 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
     }
   });
 
-  it("331: the tree-job oracle probe AWAITS the call (an async rejection must not float past the test)", () => {
+  it("331/353: the tree-job oracle probe AWAITS the call over real candidate inputs", () => {
     // The "guarded probe" row calls a REAL job function. Those functions are
     // async, so a synchronous try/catch alone lets the rejection outlive the
     // test: node:test then reports "generated asynchronous activity after the
     // test ended" as an unhandledRejection and the whole spec FILE fails,
     // reddening the tree for a reason unrelated to product quality. Awaiting
-    // keeps the rejection inside the guard.
+    // keeps the rejection inside the guard. 353 probes several documented
+    // candidate inputs (so an always-throwing module cannot slip through).
     const result = scaffoldProject({
       ...fullRun(),
       generatedTree: [
@@ -485,12 +505,39 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
     const spec = bodyOf(result, "tests/oracle.spec.ts");
     assert.match(
       spec,
-      /await \(jm_\w+\[first\] as \(\.\.\.a: unknown\[\]\) => unknown\)\(/,
+      /await jm_\w+Fn\(input\)/,
       "the job probe awaits the call so a rejection is caught, not floated",
     );
+    assert.match(spec, /const jm_\w+Inputs: unknown\[\] = \[\{ payment: 1 \}/, "several documented candidate inputs are probed");
     assert.ok(
-      !/^\s+\(jm_\w+\[first\][^\n]*\);\s*$/m.test(spec),
+      !/^\s+jm_\w+Fn\([^\n]*\);\s*$/m.test(spec),
       "no bare, un-awaited probe call survives",
+    );
+    assert.ok(
+      !spec.includes("throws a well-formed Error"),
+      "353: the pre-fix any-thrown-Error acceptance is gone",
+    );
+  });
+
+  it("353: an always-throwing job module FAILS its row (no any-Error acceptance)", () => {
+    const result = scaffoldProject({
+      ...fullRun(),
+      generatedTree: [
+        {
+          path: "src/jobs/dispatch.ts",
+          source: "export async function dispatchOrder() { throw new Error(\"not implemented\"); }\n",
+          hash: "h-dispatch-throw",
+          attempt: 0,
+        },
+      ],
+    });
+    const spec = bodyOf(result, "tests/oracle.spec.ts");
+    // The row requires at least one USABLE outcome; an export that throws for
+    // every documented input leaves `Good` undefined and the row fails.
+    assert.match(spec, /assert\.notEqual\(jm_\w+Good, undefined, "job module "/, "the row demands a usable outcome");
+    assert.ok(
+      !/instanceof Error && String\(\(jm_\w+ as Error\)\.message\)/.test(spec),
+      "no branch accepts a thrown Error as a passing outcome",
     );
   });
 
@@ -507,8 +554,11 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       ],
     });
     const spec = bodyOf(result, "tests/oracle.spec.ts");
-    assert.match(spec, /assert\.equal\(__jobOutcomeOk, true,/, "the emitted row asserts the call outcome");
-    assert.match(spec, /Number\.isNaN\(__jobResult\)/, "a NaN stub return (the L1-F2 shape) fails the row");
+    // fixes/353: the outcome is asserted behaviourally — a usable value for at
+    // least one documented input, AND determinism for the input that succeeded.
+    assert.match(spec, /assert\.notEqual\(jm_\w+Good, undefined, "job module "/, "the emitted row asserts a usable call outcome");
+    assert.match(spec, /Number\.isFinite\(out\)/, "a NaN stub return (the L1-F2 shape) fails the row");
+    assert.match(spec, /assert\.deepEqual\(await jm_\w+Fn\(jm_\w+GoodInput\), jm_\w+Good,/, "the succeeding input must yield the same outcome");
     assert.ok(
       specSourceHasBehaviouralAssert(spec),
       "the emitted spec must carry ≥1 behavioural assertion, not only typeof/length probes",
@@ -651,21 +701,31 @@ describe("scaffoldProject — escaping (hostile inputs)", () => {
   it("collapses newlines so hostile prose cannot break out of strings or comments", () => {
     const result = scaffoldProject(hostileProject());
     const spec = bodyOf(result, "tests/oracle.spec.ts");
-    // 216b (106 T-08 / F-05): a row with no real surface to assert against no longer
-    // emits the tautological `test("<id>".length > 0)` floor — it emits a VISIBLY
-    // marked `test.skip("<id> — NOT IMPLEMENTED")` instead. This test's intent is that
-    // the rows exist and stay single-line (the escaping contract), not that every row
-    // is executable, so count BOTH forms. Counting only `test(` silently encoded the
-    // tautologies this task deleted.
+    // 216b (106 T-08 / F-05) + fixes/356 (W356 A3): a row with no real surface
+    // to assert against no longer emits the tautological `test("<id>".length >
+    // 0)` floor, and no longer emits a reachable `assert.fail` either — it emits
+    // a MARKED, COUNTED skip under its pinned id. This test's intent is that the
+    // rows exist and stay single-line (the escaping contract), so count every
+    // emitted row-entry form.
     const rows = spec.split("\n").filter((l) => {
       const t = l.trimStart();
       return t.startsWith("test(") || t.startsWith("test.skip(");
     });
     assert.equal(rows.length, 2, "both oracle rows still materialise as single-line spec entries");
-    // The new contract must hold: a skip is named, never a silent always-true assertion.
-    for (const l of spec.split("\n").filter((l) => l.trimStart().startsWith("test.skip("))) {
-      assert.ok(l.includes("NOT IMPLEMENTED"), `a skipped row must be VISIBLY marked: ${l}`);
+    // The new contract, per row: an unwired row is VISIBLY marked — never a
+    // silent always-true assertion and never an unavoidable red.
+    for (const l of rows) {
+      assert.ok(
+        l.includes("{ skip: ") && l.includes("NOT IMPLEMENTED"),
+        `every unwired row must be a MARKED skip: ${l}`,
+      );
     }
+    assert.ok(!spec.includes("assert.fail("), "no reachable assert.fail is emitted for an unwired row");
+    assert.match(
+      spec,
+      /ORACLE SHORTFALL: 2 of 2 pinned A7 row\(s\) are/,
+      "the emitted spec header COUNTS the shortfall (never silent)",
+    );
     assert.ok(!spec.includes("line1\n"), "newline inside oracle prose was collapsed");
     const stub = bodyOf(result, "src/generated/job-0.ts");
     assert.ok(stub.includes("drop table; --"), "job label survives as prose");
@@ -1059,54 +1119,82 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
     );
   });
 
-  it("216b census: the README bullet renders in BOTH branches and agrees with the emitted spec", () => {
+  it("216b/356 census: the README bullet renders in BOTH branches and agrees with the emitted spec", () => {
     // Branch 1 — every pinned row carries a real assertion (full engine run).
     const clean = scaffoldProject(fullRun());
     const cleanLine = censusLineOf(bodyOf(clean, "README.md"));
     const cleanSpec = bodyOf(clean, "tests/oracle.spec.ts");
-    assert.ok(cleanLine, "census bullet renders when nothing is skipped");
+    assert.ok(cleanLine, "census bullet renders when nothing is unwired");
     assert.match(
       cleanLine!,
-      /: all \d+ pinned row\(s\) assert the emitted modules' real current behavior — no NOT IMPLEMENTED skips\.$/,
+      /: all \d+ pinned row\(s\) assert the emitted modules' real current behavior — no NOT IMPLEMENTED rows\.$/,
       "all-assert branch statement",
     );
-    assert.ok(!cleanLine!.includes("are NOT IMPLEMENTED"), "no false skip claim on the all-assert branch");
+    assert.ok(!cleanLine!.includes("are NOT IMPLEMENTED"), "no false unwired claim on the all-assert branch");
     assert.equal(
       cleanSpec.split("\n").filter((l) => l.trimStart().startsWith("test.skip(")).length,
       0,
       "spec agrees: zero skipped rows",
     );
+    assert.ok(
+      !/ORACLE SHORTFALL/.test(cleanSpec),
+      "spec agrees: no shortfall total on an all-assert emission",
+    );
+    assert.ok(
+      cleanSpec
+        .split("\n")
+        .filter((l) => !l.trimStart().startsWith("//"))
+        .every((l) => !/\{\s*skip: /.test(l)),
+      "spec agrees: no marked-shortfall row when every row is wired",
+    );
 
     // Branch 2 — rows the emitted modules give no surface to assert against are
-    // counted AND named (id + the visible skip marker in the spec itself).
+    // counted AND named; fixes/356 (W356 A3): each is a MARKED, COUNTED skip
+    // (never a silent green, never an unavoidable red), the README sentence and
+    // the spec header carry the same total (same predicate), and the tree's own
+    // `npm test` is not condemned by the shortfall it reports.
     const skipped = scaffoldProject(primed());
     const skipLine = censusLineOf(bodyOf(skipped, "README.md"));
     const skipSpec = bodyOf(skipped, "tests/oracle.spec.ts");
     assert.ok(skipLine, "census bullet still renders when rows are NOT IMPLEMENTED");
     assert.match(
       skipLine!,
-      /: \d+ of \d+ pinned row\(s\) assert the emitted modules' real current behavior; \d+ are NOT IMPLEMENTED/,
-      "mixed branch statement",
+      /: ACCEPTANCE SHORTFALL — \d+ of \d+ pinned row\(s\) are NOT IMPLEMENTED/,
+      "mixed branch statement states the shortfall up front",
     );
-    const named = skipLine!.match(/skipped \(never green\): (.+)\.$/);
+    assert.ok(skipLine!.includes("A skip is not a pass"), "the census says a skip is NOT a pass");
+    assert.ok(
+      !/"REAL failing"/.test(skipLine!) && !skipLine!.includes("exits non-zero"),
+      "the census no longer claims the unwired rows fail the run (they are counted skips)",
+    );
+    const named = skipLine!.match(/never silent: (.+)\.$/);
     assert.ok(named, "the census names the NOT IMPLEMENTED row ids");
     const ids = named![1].split(", ").map((s) => s.replace(/`/g, ""));
     assert.ok(ids.length >= 1, "at least one NOT IMPLEMENTED id is named");
     for (const id of ids) {
+      const rowLine = skipSpec
+        .split("\n")
+        .find((l) => l.trimStart().startsWith(`test(${JSON.stringify(id)}, `));
+      assert.ok(rowLine, `the emitted spec keeps ${id} BY NAME under its pinned id — census and artifact agree`);
       assert.ok(
-        skipSpec.includes(`test.skip(${JSON.stringify(`${id} — NOT IMPLEMENTED`)}`),
-        `the emitted spec skips ${id} BY NAME — census and artifact agree: ${id}`,
+        rowLine!.includes("{ skip: ") && rowLine!.includes("NOT IMPLEMENTED"),
+        `and carries the visible shortfall marker: ${rowLine}`,
       );
     }
-    const specSkips = skipSpec.split("\n").filter((l) => l.trimStart().startsWith("test.skip("));
-    assert.equal(
-      specSkips.length,
-      ids.length,
-      "census count === skipped rows in the emitted spec (one source of truth, 216b)",
+    assert.match(
+      skipSpec,
+      new RegExp(`ORACLE SHORTFALL: ${ids.length} of \\d+ pinned A7 row\\(s\\) are`),
+      "the spec header carries the SAME counted total the README does",
     );
+    assert.equal(
+      skipSpec.split("\n").filter((l) => l.trimStart().startsWith("test.skip(")).length,
+      0,
+      "the marker rides the row's own test entry, not a detached skip",
+    );
+    assert.ok(!skipSpec.includes("assert.fail("), "no reachable assert.fail is emitted for an unwired row");
     assert.ok(
-      !bodyOf(skipped, "README.md").includes("no NOT IMPLEMENTED skips"),
-      "no false clean claim when rows skip",
+      !bodyOf(skipped, "README.md").includes("no NOT IMPLEMENTED rows"),
+      "no false clean claim when rows are unwired",
     );
   });
 
@@ -1468,7 +1556,7 @@ describe("W49 / 335-3 — cli-tool declares its runnable entry (main)", () => {
 // W50 / 336-3 (Transit) — DEPLOY.md must state what the emitted bytes actually
 // declare. The pre-fix Test section told the operator to run `npm test` against
 // a tree whose package.json declares no `test` script (zero oracle rows) and
-// claimed "no todo stubs" on a tree whose own README counts test.skip rows.
+// claimed "no todo stubs" on a tree whose own README counts unwired rows.
 // ---------------------------------------------------------------------------
 describe("W50 / 336-3 — DEPLOY.md matches the emitted oracle bytes", () => {
   it("a NOT IMPLEMENTED oracle row makes DEPLOY.md carry the census, not a 'no todo stubs' claim", () => {
@@ -1482,9 +1570,9 @@ describe("W50 / 336-3 — DEPLOY.md matches the emitted oracle bytes", () => {
     const dep = bodyOf(result, "DEPLOY.md");
     assert.ok(
       !dep.includes("no todo stubs"),
-      "DEPLOY.md must not claim every row asserts when the emitted spec skips one",
+      "DEPLOY.md must not claim every row asserts when the emitted spec carries an unwired one",
     );
-    assert.ok(dep.includes("NOT IMPLEMENTED"), "DEPLOY.md names the skipped rows");
+    assert.ok(dep.includes("NOT IMPLEMENTED"), "DEPLOY.md names the unwired rows");
     assert.ok(dep.includes("npm test"), "the emitted package.json still declares a test script");
   });
 
@@ -1681,10 +1769,11 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     createdAt: 0,
   });
 
-  it("binds ≥2 spec-derived fields + an interaction to a real generated export", () => {
+  /** The A3-f07 fixture: a recorded one-signature spec + the module it names. */
+  const specBoundProject = (): Project => {
     const sig =
       "createRequest(customerId: string, priority: number): { customerId: string; priority: number }";
-    const p: Project = {
+    return {
       ...primed(),
       implementationSpec: recordedSpec([sig]),
       generatedSource:
@@ -1692,6 +1781,12 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
         "  return { customerId, priority };\n" +
         "}\n",
     };
+  };
+
+  it("binds ≥2 spec-derived fields + an interaction to a real generated export", () => {
+    const sig =
+      "createRequest(customerId: string, priority: number): { customerId: string; priority: number }";
+    const p = specBoundProject();
     const result = scaffoldProject(p);
     const ui = bodyOf(result, "src/ui/console.tsx");
 
@@ -1714,6 +1809,33 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
       assert.ok(sig.includes(m[1]!), `emitted input ${m[1]} maps to a recorded spec value`);
     }
     assertParsesTsx("spec-derived UI", ui);
+  });
+
+  it("358 merge: the spec-derived page set no longer REPLACES the ui node's binding", () => {
+    // R-UI-1: this same fixture derives ≥2 pages, and the 353 site used to
+    // wholesale-replace `src/ui/console.tsx` with a bare router mount, which made
+    // the W-14 binding above unreachable for that input class. The merge keeps
+    // BOTH: the derived page set is emitted AND the console keeps the binding.
+    const result = scaffoldProject(specBoundProject());
+    const paths = okFiles(result).map((f) => f.path);
+    assert.ok(paths.includes("src/ui/router.tsx"), "A2-F5's page set survives the merge");
+    assert.ok(
+      paths.filter((p) => /^src\/ui\/pages\/.+\.tsx$/.test(p)).length >= 2,
+      "the derived router still mounts >=2 page modules",
+    );
+    const ui = bodyOf(result, "src/ui/console.tsx");
+    assert.match(ui, /from "\.\/router\.tsx"/, "the console mounts the derived router");
+    for (const field of ["customerId", "priority"]) {
+      assert.ok(ui.includes(`name="${field}"`), `the console keeps the real bound field ${field}`);
+    }
+    assert.ok(ui.includes("onSubmit={onSubmit}"), "the console keeps the real interaction");
+    assert.ok(/generated\.createRequest\(/.test(ui), "the interaction still calls the generated export");
+    const entry = importedEntryBody(result, "src/ui/console.tsx", ui);
+    assert.ok(
+      /export\s+(?:async\s+)?function\s+createRequest\b/.test(entry),
+      "the merge's generated import resolves to the module that really exports it",
+    );
+    assertParsesTsx("merged spec-derived UI", ui);
   });
 
   it("the real engine fixture binds the generated function's own fields (no name-dump)", () => {
@@ -1938,6 +2060,29 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     assert.ok(!ui.includes("nothing to wire yet"), "not the honest-panel path");
     assert.ok(ui.includes('name="price"') && ui.includes('name="quantity"'), "both real fields are bound");
     assertParsesTsx("S2 form-over-render UI", ui);
+  });
+
+  it("fixes/347: a multi-page render tree emits the site shell, not a lone form", () => {
+    // The measured keyed bakery tree exported four page renderers plus a
+    // bindable numeric helper; 346-S2's form preference then emitted a single
+    // `computeLineTotal` form and threw the site away. ≥2 page renderers is a
+    // site: the shell must mount the pages.
+    const p: Project = {
+      ...primed(),
+      implementationSpec: null,
+      generatedSource:
+        'export function renderHome(): string { return "home"; }\n' +
+        'export function renderMenu(): string { return "menu"; }\n' +
+        'export function renderContact(): string { return "contact"; }\n' +
+        "export function computeTotal(price: number, quantity: number): number { return price * quantity; }\n",
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.ok(ui.includes("<nav>"), "the multi-page shell is emitted");
+    assert.match(ui, /generated\.renderHome\(/, "the home renderer is called");
+    assert.match(ui, /generated\.renderMenu\(/, "the menu renderer is called");
+    assert.match(ui, /generated\.renderContact\(/, "the contact renderer is called");
+    assert.ok(!/nothing to wire yet/.test(ui), "not the honest-panel path");
+    assertParsesTsx("multi-page site UI", ui);
   });
 
   it("fixes/346-S5 control: a callable render export still yields the multi-section shell", () => {
@@ -2338,6 +2483,28 @@ describe("PR-28 C1-02/C1-03 — the mounted shell calls a real generated export,
         assert.ok(result.ok, `${root}: the emitter produces a tree`);
         const ui = bodyOf(result, "src/ui/console.tsx");
         assert.ok(!/\bJSX\s*\./.test(ui), `${root}: C1-03 the emitted shell never references the global JSX namespace`);
+        // 351: a web-marketing brief emits the multi-page site (router + one file
+        // per page + site-data adapters over the generated module) instead of the
+        // single-file shell. It is wired when its adapters call real generated
+        // exports — verified against the same barrel's export surface.
+        if (result.files.some((f) => f.path === "src/ui/router.tsx")) {
+          assert.match(ui, /from "\.\/router\.tsx"/, `${root}: the site console mounts the router`);
+          const siteData = bodyOf(result, "src/ui/site-data.ts");
+          const mountedSite = mountedImport(siteData);
+          assert.ok(mountedSite, `${root}: the site adapters import the generated entry`);
+          assert.ok(mountedSite.spec.includes("generated"), `${root}: the adapters import the generated barrel`);
+          const siteExports = exportsOf(result, resolveFrom("src/ui/site-data.ts", mountedSite.spec));
+          const siteCalls = [...siteData.matchAll(new RegExp(`\\b${mountedSite.ns}\\.([A-Za-z_$][\\w$]*)\\(`, "g"))].map(
+            (m) => m[1]!,
+          );
+          for (const name of siteCalls) {
+            assert.ok(siteExports.has(name), `${root}: site-data called ${name} is a real export of the mounted module`);
+          }
+          assert.ok(siteCalls.length > 0, `${root}: the site adapters call a real generated export`);
+          wired += 1; // the adapters call real generated exports — the site is wired
+          checked += 1;
+          continue;
+        }
         if (ui.includes("ReactNode")) {
           assert.match(ui, /import type \{ ReactNode \} from "react";/, `${root}: ReactNode is imported from react`);
         }
@@ -2363,12 +2530,17 @@ describe("PR-28 C1-02/C1-03 — the mounted shell calls a real generated export,
 
 
 // ---------------------------------------------------------------------------
-// R2-04 (P1) � a below-floor PARTIAL is refused, not emitted. The C1-01 floor
-// refusal is already recorded on the project's trail (RT_E_PLAN_UNDERPRODUCED);
-// the scaffold honors it so a 2�3-file runnable-looking tree is never written.
-// R2-05 (P1) � a skip-dominated oracle is never presented as test evidence.
+// R2-04 (P1) + fixes/354 A2-F4 (Decision D1) + fixes/356 (W356 A3; restores the
+// 354 wave's inverted safety default): the ABSENT policy refuses a below-floor
+// plan up front — zero files — and an EXPLICIT `"partial"` (or the headless/CLI
+// spelling `"banner"`) lands the PARTIAL with the `> [!CAUTION]` /
+// `## BELOW-FLOOR PLAN` banner IN the emitted README and
+// `underProduced{code,detail}` on the result. `"refuse"` and the legacy
+// `allowUnderProduced:false` are the same refusal.
+// R2-05 (P1) re-decided by fixes/356 (W356 A3): an unwired oracle row is a
+// MARKED, COUNTED skip — never a silent green row and never an unavoidable red.
 // ---------------------------------------------------------------------------
-describe("R2-04 � the scaffold refuses a below-floor partial (BF-1)", () => {
+describe("R2-04 / A2-F4 — the below-floor partial needs an EXPLICIT opt-in; the default refuses", () => {
   const C2_ROOT = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "..", "testruns", "campaign2");
 
   /** A primed project carrying a recorded under-production refusal + substance. */
@@ -2405,33 +2577,64 @@ describe("R2-04 � the scaffold refuses a below-floor partial (BF-1)", () => {
     assert.equal(underProductionRefusalOf({ ...underProduced(), generatedTree: [], generatedSource: "" }), null);
   });
 
-  it("scaffoldProject refuses the below-floor partial, naming RT_E_PLAN_UNDERPRODUCED", () => {
+  it("W356 A3: an ABSENT policy REFUSES before writing (the restored safety default)", () => {
     const result = scaffoldProject(underProduced());
-    assert.ok(!result.ok, "a below-floor partial is refused, not emitted");
+    assert.ok(!result.ok, "an absent policy writes nothing (the safety default is refuse)");
     if (!result.ok) {
-      assert.match(result.error, /RT_E_PLAN_UNDERPRODUCED/);
-      assert.match(result.error, /under-produced|below-floor/);
       assert.equal(result.code, "RT_E_PLAN_UNDERPRODUCED", "the coded refusal rides the result interface");
+      assert.match(result.error, /RT_E_PLAN_UNDERPRODUCED/);
     }
-    // Control: the same project after a success verdict emits normally.
+  });
+
+  it("explicit 'partial' / 'banner' lands the bannered partial, carrying underProduced{code,detail}", () => {
+    for (const opts of [{ underProduced: "partial" as const }, { underProduced: "banner" as const }]) {
+      const result = scaffoldProject(underProduced(), opts);
+      assert.ok(result.ok, `${JSON.stringify(opts)} lands the partial (an explicit opt-in)`);
+      if (result.ok) {
+        assert.equal(result.underProduced?.code, "RT_E_PLAN_UNDERPRODUCED");
+        assert.match(result.underProduced?.detail ?? "", /RT_E_PLAN_UNDERPRODUCED/);
+        const readme = bodyOf(result, "README.md");
+        assert.match(readme, /^> \[!CAUTION\]/, "the caution banner leads the emitted README");
+        assert.match(readme, /## BELOW-FLOOR PLAN/, "the banner names the below-floor state");
+        assert.ok(result.files.some((f) => f.path === "src/generated/probe.ts"), "the real partial bytes land");
+      }
+    }
+    // Control: the same project after a success verdict emits with NO banner/field.
     const superseded = underProduced({
       logs: [{ ts: 2, phase: 6, level: "info", event: "p6.synthesis", detail: "Chunked synthesis: 9 file(s) in 8 chunk(s)" }],
     });
-    assert.ok(scaffoldProject(superseded).ok, "a superseded refusal does not block the emission");
+    const clean = scaffoldProject(superseded);
+    assert.ok(clean.ok, "a superseded refusal does not block the emission");
+    if (clean.ok) {
+      assert.equal(clean.underProduced, undefined, "no below-floor field on a clean emission");
+      assert.doesNotMatch(bodyOf(clean, "README.md"), /BELOW-FLOOR PLAN/, "no banner on a clean emission");
+    }
   });
 
-  it("INTERNAL candidate emits opt out — the pre-seal self-typecheck still materializes the partial", () => {
+  it("STRICT: absent, underProduced:'refuse' (and legacy allowUnderProduced:false) write nothing, coded RT_E_PLAN_UNDERPRODUCED", () => {
+    for (const opts of [{}, { underProduced: "refuse" as const }, { allowUnderProduced: false }]) {
+      const result = scaffoldProject(underProduced(), opts);
+      assert.ok(!result.ok, `${JSON.stringify(opts)} refuses the below-floor partial`);
+      if (!result.ok) {
+        assert.match(result.error, /RT_E_PLAN_UNDERPRODUCED/);
+        assert.match(result.error, /under-produced|below-floor/);
+        assert.equal(result.code, "RT_E_PLAN_UNDERPRODUCED", "the coded refusal rides the result interface");
+      }
+    }
+  });
+
+  it("the INTERNAL candidate emit still materializes the partial (allowUnderProduced:true)", () => {
     // The pre-seal gate (codegen.defaultTreeTypecheck) passes allowUnderProduced
-    // so a multi-cycle repair can still run the candidate's REAL tsc; without
-    // the opt-out every repair cycle would be preempted by the ship-time guard.
+    // so a multi-cycle repair can still run the candidate's REAL tsc.
     const r = scaffoldProject(underProduced(), { allowUnderProduced: true });
     assert.ok(r.ok, "allowUnderProduced materializes the candidate for its tsc verdict");
   });
 
-  it("replay: the recorded campaign2 below-floor trees refuse; the at-floor trees still emit", () => {
+  it("replay: the recorded campaign2 below-floor trees need an explicit opt-in to land bannered (the default refuses); the at-floor trees emit clean", () => {
     if (!existsSync(C2_ROOT)) return; // frozen checkout with no sibling testruns
     const belowFloor = ["bakery-website", "bakery-florist-orders", "mobile-companion", "office-invoice-tracker", "office-stock-tracker", "held-out-community-tool-library"];
     const atFloor = ["flower-shop-website", "office-scheduler"];
+    let landed = 0;
     let refused = 0;
     let emitted = 0;
     for (const slug of [...belowFloor, ...atFloor]) {
@@ -2441,25 +2644,32 @@ describe("R2-04 � the scaffold refuses a below-floor partial (BF-1)", () => {
       const under = underProductionRefusalOf(project);
       if (belowFloor.includes(slug)) {
         assert.ok(under !== null, `${slug}: the below-floor partial carries a final under-production refusal`);
-        const r = scaffoldProject(project);
-        assert.ok(!r.ok, `${slug}: the scaffold REFUSES the below-floor partial (no runnable-looking tree)`);
-        if (!r.ok) {
-          assert.match(r.error, /RT_E_PLAN_UNDERPRODUCED/);
-          assert.equal(r.code, "RT_E_PLAN_UNDERPRODUCED", `${slug}: the refusal carries its registered code`);
+        const r = scaffoldProject(project, { underProduced: "partial" });
+        assert.ok(r.ok, `${slug}: the explicit 'partial' opt-in LANDS the bannered partial`);
+        if (r.ok) {
+          assert.equal(r.underProduced?.code, "RT_E_PLAN_UNDERPRODUCED", `${slug}: the recorded refusal rides the result`);
+          assert.match(bodyOf(r, "README.md"), /## BELOW-FLOOR PLAN/, `${slug}: the README carries the banner`);
         }
+        const strict = scaffoldProject(project);
+        assert.ok(!strict.ok, `${slug}: the ABSENT policy writes nothing`);
+        if (!strict.ok) assert.equal(strict.code, "RT_E_PLAN_UNDERPRODUCED", `${slug}: the strict refusal carries its registered code`);
+        landed += 1;
         refused += 1;
       } else {
         assert.equal(under, null, `${slug}: an at-floor tree (a later p6.synthesis success) is not under-produced`);
-        assert.ok(scaffoldProject(project).ok, `${slug}: the at-floor tree still emits`);
+        const r = scaffoldProject(project);
+        assert.ok(r.ok, `${slug}: the at-floor tree still emits`);
+        if (r.ok) assert.equal(r.underProduced, undefined, `${slug}: no below-floor field on an at-floor tree`);
         emitted += 1;
       }
     }
-    assert.ok(refused >= 5, `R2-04: the recorded below-floor class is refused (got ${refused})`);
+    assert.ok(landed >= 5, `R2-04/D1: the recorded below-floor class lands a bannered partial (got ${landed})`);
+    assert.ok(refused >= 5, `R2-04: the same class refuses under STRICT (got ${refused})`);
     assert.ok(emitted >= 2, `R2-04 control: the at-floor trees still emit (got ${emitted})`);
   });
 });
 
-describe("R2-05 � no skip-dominated oracle is emitted as evidence", () => {
+describe("R2-05 — a shortfall oracle is MARKED and COUNTED, never silent and never a skip wall", () => {
   /** A project every oracle row has NO emitted surface for (job/api/host all absent). */
   function noSurface(): Project {
     return {
@@ -2472,27 +2682,910 @@ describe("R2-05 � no skip-dominated oracle is emitted as evidence", () => {
     };
   }
 
-  it("a skip-dominated oracle emits REAL failing tests � zero skips", () => {
+  it("every-row-unwired oracle emits MARKED, COUNTED skips — no silent green, no unavoidable red", () => {
     const result = scaffoldProject(noSurface());
     const spec = bodyOf(result, "tests/oracle.spec.ts");
-    const skips = spec.split("\n").filter((l) => l.trimStart().startsWith("test.skip("));
-    assert.equal(skips.length, 0, "R2-05: a skip-dominated oracle emits no skip at all");
-    const live = spec.split("\n").filter((l) => /^\s*test\(/.test(l));
-    assert.ok(live.length > 0, "R2-05: the NOT IMPLEMENTED rows land as real tests");
-    assert.ok(spec.includes("assert.fail("), "R2-05: and they fail loudly � an honest red, never a green skip wall");
+    const rows = spec.split("\n").filter((l) => /^\s*test\(/.test(l));
+    assert.ok(rows.length > 0, "R2-05: every row still materialises under its pinned id");
+    for (const l of rows) {
+      assert.ok(
+        l.includes("{ skip: ") && l.includes("NOT IMPLEMENTED"),
+        `R2-05: an unwired oracle row is a VISIBLY marked skip, never a silent green row: ${l}`,
+      );
+    }
     assert.ok(
-      spec.includes("R2-05: this oracle IS skip-dominated"),
-      "the emitted spec states why the rows are failing, not skipped",
+      !spec.includes("assert.fail("),
+      "R2-05: no reachable assert.fail — one unwired row no longer condemns the tree",
+    );
+    assert.equal(
+      spec.split("\n").filter((l) => l.trimStart().startsWith("test.skip(")).length,
+      0,
+      "the marker rides the row's own test entry (so its pinned id stays the test name)",
+    );
+    assert.match(
+      spec,
+      /ORACLE SHORTFALL: \d+ of \d+ pinned A7 row\(s\) are/,
+      "R2-05: the counted total is on the emitted spec header — the skip wall is never silent",
+    );
+    assert.match(
+      spec,
+      /RT_E_SPEC_SKIP_VACUOUS/,
+      "the emitted spec names the tree-run guard that refuses a skip-dominated spec (a skip is not a pass)",
     );
   });
 
-  it("control: a non-dominated (mixed) oracle keeps its visible skip", () => {
+  it("fixes/356 (W356 A3): an UNWIRED row in a NON-dominated oracle is a MARKED, COUNTED skip — the tree is not condemned", () => {
+    // primed() has 5 assertable rows (endpoints) and ONE unwired row
+    // (`orc-phase`, job "graph" — no endpoint, no host). The pre-354 ratio gate
+    // (`notImplemented > assertable` = 1 > 5) let that row emit an UNCOUNTED
+    // `test.skip("orc-phase — NOT IMPLEMENTED")` — a shortfall that could vanish
+    // into a green run. The 354 answer (a reachable `assert.fail`) failed the
+    // whole tree instead. It is now a marked, counted skip: visible per row and
+    // totalled on both headers.
     const spec = bodyOf(scaffoldProject(primed()), "tests/oracle.spec.ts");
-    const skips = spec.split("\n").filter((l) => l.trimStart().startsWith("test.skip("));
-    assert.ok(skips.length > 0, "a mixed oracle still marks its NOT IMPLEMENTED row with a skip");
+    const rowLine = spec.split("\n").find((l) => /^\s*test\("orc-phase", /.test(l));
+    assert.ok(rowLine, "the unwired row keeps its pinned id as the test name");
     assert.ok(
-      skips.every((l) => l.includes("NOT IMPLEMENTED")),
-      "every remaining skip is visibly marked",
+      rowLine!.includes("{ skip: ") && rowLine!.includes("NOT IMPLEMENTED"),
+      `and carries the visible shortfall marker: ${rowLine}`,
+    );
+    assert.match(spec, /ORACLE SHORTFALL: 1 of 6 pinned A7 row\(s\) are/, "the header counts it");
+    assert.ok(
+      !spec.includes("orc-phase is NOT IMPLEMENTED — replace"),
+      "no reachable failing assertion for the unwired row",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/354 A2-F5 — a PROSE brief (no labelled Pages:/Views: list) derives its
+// page set from the project's own implementationSpec, so a real generated tree
+// gets a router + pages instead of the single-file shell.
+// ---------------------------------------------------------------------------
+describe("A2-F5 — spec-derived page set for a prose brief", () => {
+  /** A prose bakery brief (NO Pages:/Views: label) + a spec + a mountable tree. */
+  function proseBakery(): Project {
+    return {
+      ...seedProject({
+        name: "Golden Crust Bakery",
+        kind: "app",
+        brief:
+          "Golden Crust Bakery needs a website: customers browse the breads and pastries, check the opening hours, and place an order for pickup. Do not invent prices.",
+      }),
+      domain: "custom-software",
+      lattice: { domain: "custom-software", jobs: ["checkout"], entities: ["order"], constraints: [], nodes: [], complexity: 1 },
+      contracts: { entities: [{ name: "order", fields: [] }], endpoints: [] },
+      implementationSpec: {
+        requirements: [
+          "Browse the menu of breads and pastries",
+          "See the bakery's opening hours",
+          "Place an order for pickup",
+        ],
+        edgeCases: [],
+        errorHandling: [],
+        typeSignatures: [],
+        dataFlow: [],
+        negativeConstraints: [],
+        source: "p6",
+        briefHash: "fixture",
+        createdAt: 1,
+      },
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/content.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/content.ts",
+          source: [
+            "export function getOpenStatus(): { open: boolean } { return { open: true }; }",
+            'export async function getMenuItems(): Promise<{ id: string; name: string }[]> { return [{ id: "bread", name: "Bread" }]; }',
+            "export function addToCart(productId: string, quantity: number): { productId: string; quantity: number } { return { productId, quantity }; }",
+            "",
+          ].join("\n"),
+          hash: "h1",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
+        ],
+        order: ["ui"],
+      },
+    };
+  }
+
+  it("derives >=2 pages (a router + page modules) from the implementationSpec when the brief names no list", () => {
+    const result = scaffoldProject(proseBakery());
+    const files = okFiles(result);
+    const paths = files.map((f) => f.path);
+    assert.ok(paths.includes("src/ui/router.tsx"), "a router is emitted for the derived page set");
+    const pageFiles = paths.filter((p) => /^src\/ui\/pages\/.+\.tsx$/.test(p));
+    assert.ok(pageFiles.length >= 2, `>=2 derived pages (got ${pageFiles.join(", ")})`);
+    const router = bodyOf(result, "src/ui/router.tsx");
+    const routeIds = [...router.matchAll(/\{ id: "([a-z0-9_]+)"/g)].map((m) => m[1]);
+    assert.ok(routeIds.length >= 2, `the router declares the derived routes: ${routeIds.join(", ")}`);
+    // The derived pages mount REAL tree exports (not invented content).
+    const data = bodyOf(result, "src/ui/site-data.ts");
+    assert.match(data, /generated\.getMenuItems\(\)/, "a derived page reads the real async getter");
+    assert.match(data, /generated\.getOpenStatus\(\)/, "a derived page reads the real sync getter");
+    assert.doesNotMatch(router, /path: "\/prices"/, "no invented page literal");
+  });
+
+  it("a brief with an absent implementationSpec keeps the single-file shell (no spec, no derived pages)", () => {
+    const p = proseBakery();
+    const paths = okFiles(scaffoldProject({ ...p, implementationSpec: null })).map((f) => f.path);
+    assert.ok(!paths.includes("src/ui/router.tsx"), "no spec ⇒ no derived page set ⇒ the single-file shell is kept");
+  });
+
+  it("358 merge: the derived page set and the ui node's own W-14 binding ride the SAME emission", () => {
+    // R-UI-1, other side: the derived page set stays AND the console keeps the
+    // real field binding — and the derived page binds the same real mutator, so
+    // the binding is applied TO the spec-derived pages, not only kept beside them.
+    const result = scaffoldProject(proseBakery());
+    const paths = okFiles(result).map((f) => f.path);
+    assert.ok(paths.includes("src/ui/router.tsx"), "the derived page set is kept");
+    assert.ok(paths.filter((p) => /^src\/ui\/pages\/.+\.tsx$/.test(p)).length >= 2, ">=2 derived pages");
+    const ui = bodyOf(result, "src/ui/console.tsx");
+    assert.match(ui, /from "\.\/router\.tsx"/, "the console still mounts the derived router");
+    for (const field of ["productId", "quantity"]) {
+      assert.ok(ui.includes(`name="${field}"`), `the console keeps the real bound field ${field}`);
+    }
+    assert.ok(ui.includes("onSubmit={onSubmit}"), "the console keeps the real interaction");
+    assert.match(ui, /generated\.addToCart\(/, "the handler calls a genuinely exported function");
+    const data = bodyOf(result, "src/ui/site-data.ts");
+    assert.match(data, /generated\.addToCart\(/, "a derived page submits through the same real mutator");
+    assert.match(data, /generated\.getMenuItems\(\)/, "and the derived data pages still read the real getters");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/354 A2-F11 — the `game` kind's platformer is a deterministic scaffold
+// TEMPLATE, marked in the envelope and the emitted README (never presented as
+// brief-generated work).
+// ---------------------------------------------------------------------------
+describe("A2-F11 — the game template is marked honestly", () => {
+  it("gameTemplate:true rides the envelope and the README states the deterministic-template boundary", () => {
+    const result = scaffoldProject(seedProject({ kind: "game", brief: "A physics puzzle game about stacking crates." }));
+    const files = okFiles(result);
+    assert.equal(okResult(result).gameTemplate, true, "the game kind marks its template on the envelope");
+    assert.match(bodyOf(result, "README.md"), /DETERMINISTIC SCAFFOLD TEMPLATE/, "the README says so");
+    assert.ok(files.some((f) => f.path === "src/ui/console.tsx"), "the template game module is emitted");
+  });
+
+  it("a non-game emission carries no gameTemplate marker and no template line", () => {
+    const result = scaffoldProject(seedProject({ kind: "app", brief: "A dispatch board." }));
+    assert.equal(okResult(result).gameTemplate, undefined);
+    assert.doesNotMatch(bodyOf(result, "README.md"), /DETERMINISTIC SCAFFOLD TEMPLATE/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/354 A2-F13 — ONE value-position CJS-residue predicate, exported so the
+// emit boundary (headless) and the synthesis validator (codegen) share it.
+// ---------------------------------------------------------------------------
+describe("A2-F13 — the shared CJS-residue predicate", () => {
+  it("flags module/exports residue, leaves clean ESM alone, and adds `export =` only on request", () => {
+    assert.deepEqual(cjsResidueHits("export const x = 1;\n"), [], "clean ESM is not residue");
+    assert.ok(cjsResidueHits("module.exports = { run };\n").includes("module.exports"));
+    assert.ok(cjsResidueHits("exports.run = () => 1;\n").includes("exports"));
+    assert.ok(
+      cjsResidueHits("if (typeof module !== 'undefined' && module.exports) { module.exports = { run }; }\n").includes(
+        "module.exports",
+      ),
+      "a module.exports reference is residue at the emit boundary whatever its position",
+    );
+    assert.deepEqual(cjsResidueHits("xexports.run = 1;\n"), [], "a look-alike is not residue");
+    assert.deepEqual(cjsResidueHits("export = run;\n"), [], "`export =` is not detected unless asked");
+    assert.ok(cjsResidueHits("export = run;\n", { tsExportEquals: true }).includes("export ="));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 351 — web-marketing multi-page site emission.
+// A `web-marketing` webapp brief whose generated module exposes page content
+// emits one file per page + a router + a shared layout + a designed stylesheet
+// + the ordering flow, instead of the single `src/ui/console.tsx` shell.
+// ---------------------------------------------------------------------------
+describe("351 — web-marketing multi-page site emission", () => {
+  function marketing(over: Partial<Project> = {}): Project {
+    return {
+      ...seedProject({
+        name: "Bloedow Bakery",
+        kind: "app",
+        brief:
+          "Bloedow Bakery website with online ordering, a menu, an about page and a contact page for the Winona bakery.",
+      }),
+      domain: "web-marketing",
+      lattice: { domain: "web-marketing", jobs: ["schedule"], entities: ["home"], constraints: [], nodes: [], complexity: 1 },
+      contracts: null,
+      implementationSpec: null,
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/content.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/content.ts",
+          source: [
+            'export function getBusinessFacts(): { name: string; phone: string; awards: string[] } { return { name: "Bloedow Bakery", phone: "507-452-3682", awards: ["Best Donut Shop"] }; }',
+            'export function getMenuGroups(): { group: string; items: { id: string; name: string; image: string }[] }[] { return [{ group: "Breads", items: [{ id: "bread-white", name: "White Bread", image: "https://www.bloedows.com/images/white-bread.jpg" }] }]; }',
+            'export function getOpeningHours(): { hours: { day: string; open: string; close: string; closed: boolean }[]; closedDays: string[] } { return { hours: [{ day: "Tuesday", open: "6:00 am", close: "3:00 pm", closed: false }], closedDays: ["Sunday"] }; }',
+            'export function getOrderingPolicy(): { deliveryArea: string; preorderCutoff: string } { return { deliveryArea: "Winona city limits", preorderCutoff: "3:00 pm" }; }',
+            'export function getAboutStory(): { paragraphs: string[]; flour: string } { return { paragraphs: ["Ernest opened the bakery in 1924."], flour: "Bay State Flour" }; }',
+            'export async function createOrder(input: { lines: unknown[] }): Promise<{ ok: boolean; message: string }> { return { ok: input.lines.length > 0, message: "Order received." }; }',
+            "",
+          ].join("\n"),
+          hash: "h1",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [
+          { id: "schema", file: "src/domain/site.ts", purpose: "Typed entities", dependsOn: [], owner: "architect" },
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
+          { id: "job-0", file: "src/jobs/schedule.ts", purpose: 'Implement job "schedule" against the contract', dependsOn: [], owner: "implementer" },
+        ],
+        order: ["schema", "ui", "job-0"],
+      },
+      ...over,
+    };
+  }
+
+  it("emits one file per page, a router, a layout, a cart and an honest asset manifest", () => {
+    const result = scaffoldProject(marketing());
+    const paths = okFiles(result).map((f) => f.path);
+    for (const path of [
+      "src/ui/console.tsx",
+      "src/ui/router.tsx",
+      "src/ui/layout.tsx",
+      "src/ui/site-data.ts",
+      "src/ui/cart.ts",
+      "src/ui/pages/HomePage.tsx",
+      "src/ui/pages/MenuPage.tsx",
+      "src/ui/pages/AboutPage.tsx",
+      "src/ui/pages/ContactPage.tsx",
+      "src/ui/pages/OrderPage.tsx",
+      "public/assets/manifest.json",
+    ]) {
+      assert.ok(paths.includes(path), `missing ${path}`);
+    }
+    const consoleBody = bodyOf(result, "src/ui/console.tsx");
+    assert.match(consoleBody, /from "\.\/router\.tsx"/, "console mounts the router");
+    assert.match(consoleBody, /export default Console/, "the default export contract is preserved");
+    const router = bodyOf(result, "src/ui/router.tsx");
+    for (const id of ["home", "menu", "about", "contact", "order"]) {
+      assert.ok(router.includes(`#/${id}`), `router exposes the ${id} route`);
+    }
+    assert.match(router, /window\.addEventListener\("hashchange"/, "the router is real, not a static list");
+    const data = bodyOf(result, "src/ui/site-data.ts");
+    assert.match(data, /import \* as generated from "\.\.\/generated\.ts"/, "adapters import the generated barrel");
+    assert.match(data, /generated\.getBusinessFacts\(\)/, "adapters call a real generated export");
+    assert.match(data, /generated\.getMenuGroups\(\)/, "menu data comes from the generated module");
+  });
+
+  it("references declared image URLs and never fabricates a binary asset", () => {
+    const result = scaffoldProject(marketing());
+    const manifest = JSON.parse(bodyOf(result, "public/assets/manifest.json")) as {
+      source: string;
+      images: { url: string }[];
+    };
+    assert.equal(manifest.source, "urls-referenced-by-generated-tree");
+    assert.ok(manifest.images.some((image) => image.url.includes("white-bread.jpg")), "the real image URL is listed");
+    const paths = okFiles(result).map((f) => f.path);
+    assert.ok(
+      !paths.some((p) => /\.(png|jpe?g|gif|webp|avif|ico)$/i.test(p)),
+      "no binary image file is written (URLs are referenced, never faked)",
+    );
+  });
+
+  it("reports the emitted UI path and lets a caller hook still override the site", () => {
+    const result = scaffoldProject(marketing());
+    assert.deepEqual(result.ok ? result.uiGeneration : undefined, {
+      hook: "default-generator",
+      applied: false,
+      uiPath: "src/ui/console.tsx",
+    });
+    const hooked = scaffoldProject(marketing(), {
+      uiGeneration: () => ["  return (", "    <main>", '      <h1>{"hook"}</h1>', "    </main>", "  );"],
+    });
+    const paths = okFiles(hooked).map((f) => f.path);
+    assert.ok(!paths.includes("src/ui/router.tsx"), "a caller hook suppresses the generated site");
+    assert.ok(bodyOf(hooked, "src/ui/console.tsx").includes('{"hook"}'), "the hook's lines land");
+  });
+
+  it("leaves a non-marketing webapp on the single-file shell", () => {
+    const paths = okFiles(scaffoldProject(fullRun())).map((f) => f.path);
+    assert.ok(!paths.includes("src/ui/router.tsx"), "no router for a non-marketing brief");
+    assert.ok(!paths.includes("public/assets/manifest.json"), "no asset manifest for a non-marketing brief");
+  });
+
+  it("every emitted page parses as TSX and the emission is byte-deterministic", () => {
+    const result = scaffoldProject(marketing());
+    for (const path of [
+      "src/ui/console.tsx",
+      "src/ui/router.tsx",
+      "src/ui/layout.tsx",
+      "src/ui/pages/HomePage.tsx",
+      "src/ui/pages/MenuPage.tsx",
+      "src/ui/pages/AboutPage.tsx",
+      "src/ui/pages/ContactPage.tsx",
+      "src/ui/pages/OrderPage.tsx",
+    ]) {
+      const out = ts.transpileModule(bodyOf(result, path), {
+        fileName: path,
+        reportDiagnostics: true,
+        compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+      });
+      assert.equal(
+        (out.diagnostics ?? []).filter((d) => d.category !== ts.DiagnosticCategory.Message).length,
+        0,
+        `${path} parses as TSX`,
+      );
+    }
+    const fixed = marketing();
+    assert.deepEqual(scaffoldProject(fixed), scaffoldProject(fixed), "same project ⇒ byte-identical site");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/352 — the measured defects on the real emitted bytes:
+//   * the marketing emitter must accept the PARAMETERISED-renderer shape (the
+//     green keyed bakery tree), not only zero-arg data getters;
+//   * schema/api/store must be REAL modules in tree mode, never `export *`;
+//   * the store must persist; the oracle must be behavioural or skip honestly;
+//   * the tree ships LICENSE + CI + a project-derived version.
+// ---------------------------------------------------------------------------
+describe("fixes/352 — renderer-shape site, real tree modules, release hygiene", () => {
+  function rendererProject(): Project {
+    return {
+      ...seedProject({
+        name: "Golden Crust Bakery",
+        kind: "app",
+        brief: "Bakery marketing site with a menu, hours and an online order form for celebration cakes.",
+      }),
+      domain: "web-marketing",
+      lattice: { domain: "web-marketing", jobs: ["show"], entities: ["Home"], constraints: [], nodes: [], complexity: 1 },
+      contracts: {
+        entities: [{ name: "Home", fields: [] }],
+        endpoints: [{ method: "POST", path: "/v1/show", job: "show" }],
+      } as NonNullable<Project["contracts"]>,
+      implementationSpec: {
+        requirements: [],
+        edgeCases: [],
+        errorHandling: [],
+        typeSignatures: ["renderHome(): { tagName: string }", "runShow(command: ShowCommand): Promise<Text>"],
+        dataFlow: [],
+        negativeConstraints: [],
+        source: "prompt-verb",
+        briefHash: "h",
+        createdAt: 0,
+      },
+      currentPhase: 6,
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/render-home.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/render-home.ts",
+          source: [
+            "type MenuItem = { id: string; name: string };",
+            "type MenuFilters = { query: string };",
+            "type OrderFormDefaults = { name?: string; notes?: string };",
+            "function renderHome(): { tagName: string } { return { tagName: 'div' }; }",
+            "function renderMenu(menu: MenuItem[], filters: MenuFilters) { void menu; void filters; return { tagName: 'div' }; }",
+            "function renderOrderForm(defaults: OrderFormDefaults) { void defaults; return { tag: 'form' }; }",
+            "async function submitOrder(order: OrderFormDefaults): Promise<{ reference: string }> { void order; return { reference: 'GC-1' }; }",
+            "export { renderHome, renderMenu, renderOrderForm, submitOrder };",
+            "",
+          ].join("\n"),
+          hash: "h1",
+          attempt: 0,
+        },
+        {
+          path: "src/jobs/show.ts",
+          source: "export async function runShow(command: unknown): Promise<unknown> { void command; return { id: 'x' }; }\n",
+          hash: "h2",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [
+          { id: "schema", file: "src/domain/web_marketing.ts", purpose: "Typed entities from the lattice", dependsOn: [], owner: "architect" },
+          { id: "api", file: "src/api/routes.ts", purpose: "HTTP contracts bound to jobs", dependsOn: [], owner: "implementer" },
+          { id: "store", file: "src/state/store.ts", purpose: "Checkpointed client/server state", dependsOn: [], owner: "implementer" },
+          { id: "job-0", file: "src/jobs/show.ts", purpose: 'Implement job "show" against the contract', dependsOn: [], owner: "implementer" },
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces bound to store fields", dependsOn: [], owner: "implementer" },
+        ],
+        order: ["schema", "api", "store", "job-0", "ui"],
+      },
+    };
+  }
+
+  it("emits the multi-page site for the PARAMETERISED-renderer shape (not a lone form)", () => {
+    const result = scaffoldProject(rendererProject());
+    const paths = okFiles(result).map((f) => f.path);
+    for (const p of [
+      "src/ui/router.tsx",
+      "src/ui/render-tree.tsx",
+      "src/ui/site-data.ts",
+      "src/ui/pages/HomePage.tsx",
+      "src/ui/pages/MenuPage.tsx",
+      "src/ui/pages/OrderPage.tsx",
+      "public/assets/manifest.json",
+    ]) {
+      assert.ok(paths.includes(p), `renderer shape must emit ${p}`);
+    }
+    const data = bodyOf(result, "src/ui/site-data.ts");
+    assert.match(data, /generated\.renderHome\(\)/, "the home renderer is called");
+    assert.match(data, /generated\.renderMenu\(\[\], \{ query: "" \}\)/, "the menu renderer is called with sound empty args");
+    assert.match(data, /generated\.renderOrderForm\(\{\s*\}\)/, "an all-optional object arg is `{}`");
+    assert.match(bodyOf(result, "src/ui/console.tsx"), /from "\.\/router\.tsx"/, "the console mounts the router");
+  });
+
+  it("tree mode emits REAL api/store/domain modules — never `export *`", () => {
+    const files = okFiles(scaffoldProject(rendererProject()));
+    for (const p of ["src/api/routes.ts", "src/state/store.ts", "src/domain/web_marketing.ts"]) {
+      const body = files.find((f) => f.path === p)!.body;
+      assert.ok(!body.includes("export * from"), `${p} must not be a re-export bridge`);
+    }
+    const api = files.find((f) => f.path === "src/api/routes.ts")!.body;
+    assert.match(api, /import \* as treeJob0 from "\.\.\/jobs\/show\.ts"/, "the router imports the tree's real job module");
+    assert.match(api, /"show": async \(input: unknown\) => treeJob0\.runShow\(/, "and dispatches the endpoint to its bound run export");
+    const store = files.find((f) => f.path === "src/state/store.ts")!.body;
+    assert.match(store, /export class OrderLog/, "the store ships a real persisted order log");
+    assert.match(store, /typeof localStorage !== "undefined"/, "localStorage-backed with an injectable seam");
+    assert.match(store, /export interface StorageSeam/, "the storage seam is injectable");
+  });
+
+  it("the oracle wires behavioural capability assertions (a real call, not a presence proxy)", () => {
+    const spec = bodyOf(scaffoldProject(rendererProject()), "tests/oracle.spec.ts");
+    assert.match(spec, /const fn = treeModule\["renderHome"\] as unknown as/, "a wired capability calls the real export");
+    assert.match(spec, /await fn\(\)/, "the call is awaited");
+    assert.match(spec, /assert\.notEqual\(outcome, undefined/, "the outcome is asserted");
+    assert.ok(specSourceHasBehaviouralAssert(spec), "≥1 behavioural assertion");
+    assert.ok(
+      !/let __jobOutcomeOk = false;/.test(spec),
+      "the pre-352 non-NaN/any-throw probe is gone",
+    );
+  });
+
+  it("ships release hygiene: LICENSE + CI workflow + a project-derived version", () => {
+    const files = okFiles(scaffoldProject(rendererProject()));
+    assert.ok(files.some((f) => f.path === "LICENSE"), "LICENSE emitted");
+    assert.match(files.find((f) => f.path === "LICENSE")!.body, /^MIT License/, "real MIT text");
+    const ci = files.find((f) => f.path === ".github/workflows/ci.yml")!.body;
+    assert.match(ci, /npm install --no-audit --no-fund/, "CI installs (no lockfile is shipped)");
+    assert.match(ci, /npm run typecheck/, "CI runs the emitted tree's typecheck");
+    assert.match(ci, /npm test/, "CI runs the emitted tree's test");
+    const pkg = JSON.parse(files.find((f) => f.path === "package.json")!.body) as { version: string };
+    assert.match(pkg.version, /^[01]\.\d+\.\d+$/, "version is derived from the project, not 0.0.0");
+    assert.notEqual(pkg.version, "0.0.0");
+  });
+
+  it("emits an honest asset manifest: placeholders when the tree declares no URL", () => {
+    const manifest = JSON.parse(
+      bodyOf(scaffoldProject(rendererProject()), "public/assets/manifest.json"),
+    ) as { source: string; images: unknown[]; placeholders: unknown[] };
+    assert.equal(manifest.source, "none-declared");
+    assert.equal(manifest.images.length, 0, "no invented URLs");
+    assert.ok(manifest.placeholders.length >= 1, "honest placeholder roster instead of a blank claim");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 353 — the shape-tolerant briefed site, bridge/duplicate cleanup, release
+// hygiene and the game surface (the measured scorecard defects).
+// ---------------------------------------------------------------------------
+describe("353 — shape-tolerant briefed site + release/game hardening", () => {
+  /** A multi-page brief whose tree exposes async getters + a sync getter + a mutator. */
+  function bakeryProject(over: Partial<Project> = {}): Project {
+    return {
+      ...seedProject({
+        name: "Golden Crust Bakery",
+        kind: "app",
+        brief:
+          "# Golden Crust Bakery\n\nPages: Home with a live open/closed badge; Menu with breads and pastries; About with our history; Order for pickup.\n\nNo prices are published: keep price a field, never invent numbers.",
+      }),
+      domain: "custom-software",
+      lattice: { domain: "custom-software", jobs: ["checkout"], entities: ["order"], constraints: [], nodes: [], complexity: 1 },
+      contracts: { entities: [{ name: "order", fields: [] }], endpoints: [] },
+      implementationSpec: null,
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/content.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/content.ts",
+          source: [
+            "export function getOpenStatus(now: Date): { open: boolean; weekday: number } { return { open: now.getUTCDay() !== 0, weekday: now.getUTCDay() }; }",
+            'export async function getMenuItems(): Promise<{ id: string; name: string }[]> { return [{ id: "bread-white", name: "White Bread" }]; }',
+            "export function addToCart(productId: string, quantity: number): { productId: string; quantity: number } { return { productId, quantity }; }",
+            "export async function updateMenuItemPrice(id: string, price: number | null): Promise<{ id: string; price: number | null }> { return { id, price }; }",
+            "",
+          ].join("\n"),
+          hash: "h1",
+          attempt: 0,
+        },
+        { path: "src/domain/web-marketing.ts", source: 'export function domainNote(): string { return "bakery"; }\n', hash: "h2", attempt: 0 },
+      ],
+      specGraph: {
+        nodes: [
+          { id: "schema", file: "src/domain/web_marketing.ts", purpose: "Typed entities from the lattice", dependsOn: [], owner: "architect" },
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
+          { id: "job-0", file: "src/jobs/checkout.ts", purpose: 'Implement job "checkout" against the contract', dependsOn: [], owner: "implementer" },
+        ],
+        order: ["schema", "ui", "job-0"],
+      },
+      ...over,
+    };
+  }
+
+  it("emits a router + one page per briefed page and mounts the real data exports", () => {
+    const result = scaffoldProject(bakeryProject());
+    const paths = okFiles(result).map((f) => f.path);
+    for (const p of [
+      "src/ui/router.tsx",
+      "src/ui/layout.tsx",
+      "src/ui/site-data.ts",
+      "src/ui/view.tsx",
+      "src/ui/pages/HomePage.tsx",
+      "src/ui/pages/MenuPage.tsx",
+      "src/ui/pages/AboutPage.tsx",
+      "src/ui/pages/OrderPage.tsx",
+      "src/ui/pages/AdminPage.tsx",
+    ]) {
+      assert.ok(paths.includes(p), `missing ${p}`);
+    }
+    const router = bodyOf(result, "src/ui/router.tsx");
+    for (const id of ["home", "menu", "about", "order", "admin"]) {
+      assert.ok(router.includes(`{ id: "${id}"`), `route ${id}`);
+    }
+    assert.ok(router.includes("`#/${item.id}`"), "nav links build real #/ anchors");
+    assert.match(router, /window\.addEventListener\("hashchange"/, "the router is real, not a static list");
+    const data = bodyOf(result, "src/ui/site-data.ts");
+    assert.match(data, /import \* as generated from "\.\.\/generated\.ts"/, "adapters import the tree barrel");
+    assert.match(data, /generated\.getOpenStatus\(new Date\(0\)\)/, "Home reads the real sync getter");
+    assert.match(data, /generated\.getMenuItems\(\)/, "Menu reads the real async getter");
+    assert.match(data, /generated\.addToCart\(/, "Order binds the real mutator");
+    // 353 (no-invention): the withheld price is edited through the tree's own
+    // real `updateMenuItemPrice` export, never a fabricated price literal.
+    assert.match(data, /generated\.updateMenuItemPrice\(/, "Admin binds the real price editor");
+    assert.ok(!/\bpriceCents\s*:\s*\d/.test(data), "no invented price literal is emitted");
+    assert.ok(!data.includes("export * from"), "site-data is not a barrel bridge");
+    // A page with no matching export is an explicit not-published state.
+    assert.match(bodyOf(result, "src/ui/pages/AboutPage.tsx"), /EmptySection/, "About is honest about no content");
+  });
+
+  it("reuses the tree's real domain module instead of writing a duplicate, and ships no barrel bridge", () => {
+    const files = okFiles(scaffoldProject(bakeryProject()));
+    const paths = files.map((f) => f.path);
+    assert.ok(paths.includes("src/domain/web-marketing.ts"), "the tree's real domain module ships");
+    assert.ok(!paths.includes("src/domain/web_marketing.ts"), "no snake-case duplicate is written");
+    for (const f of files) {
+      assert.ok(!/^\s*export \* from "\.\.\/generated\.ts"/m.test(f.body), `${f.path} is not a barrel bridge`);
+    }
+  });
+
+  it("does not mount the briefed site when the brief names fewer than two pages", () => {
+    const paths = okFiles(scaffoldProject(fullRun())).map((f) => f.path);
+    assert.ok(!paths.includes("src/ui/router.tsx"), "a non-multi-page brief keeps the single-file shell");
+  });
+
+  it("never dumps the raw brief into package.json", () => {
+    const files = okFiles(scaffoldProject(bakeryProject()));
+    const pkg = JSON.parse(files.find((f) => f.path === "package.json")!.body) as { description: string };
+    assert.ok(!pkg.description.includes("Pages:"), "no raw brief text");
+    assert.ok(!pkg.description.trimStart().startsWith("#"), "no markdown header dump");
+    assert.match(pkg.description, /Golden Crust Bakery/, "the description names the project");
+    assert.match(pkg.description, /web app/, "the description names the kind");
+  });
+
+  it("emits a responsive stylesheet with mobile-first width media queries", () => {
+    const css = bodyOf(scaffoldProject(bakeryProject()), "src/styles.css");
+    assert.match(css, /@media \(min-width: 40rem\)/, "small-tablet breakpoint");
+    assert.match(css, /@media \(min-width: 48rem\)/, "tablet breakpoint");
+    assert.match(css, /@media \(min-width: 90rem\)/, "wide (1440px) breakpoint");
+  });
+
+  it("emits a real canvas game surface for the game kind (no TODO stub)", () => {
+    const ui = bodyOf(scaffoldProject(seedProject({ kind: "game" })), "src/ui/console.tsx");
+    assert.ok(ui.includes("bootGame"), "the game is booted");
+    assert.ok(ui.includes('getContext("2d")'), "a real 2D canvas context");
+    assert.ok(ui.includes("requestAnimationFrame"), "a real fixed-timestep loop");
+    assert.ok(ui.includes('addEventListener("keydown"'), "real keyboard input");
+    assert.ok(ui.includes("localStorage"), "a persistent best score");
+    assert.ok(!ui.includes("TODO(E-15) stub"), "the canvas stub is gone");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/347-2 — the emitted surface follows the BRIEF's kind, the runnable
+// entries are REAL for every kind, the no-invention rule is hard, and the
+// gate-wiring seam is proven against dod's own kind-aware trace.
+// ---------------------------------------------------------------------------
+describe("347-2 — kind follows the brief + real runnable entries", () => {
+  it("a stored `app` label does not beat a brief that plainly says game (agrees with the gate)", () => {
+    const p = fullRun({ kind: "app", brief: "Build Sky Hopper, a 2D browser arcade game with platforms and a start screen." });
+    // The gate's own surface decision for the same brief is the game contract…
+    assert.equal(productSurfaceKindOf({ brief: p.brief, kind: p.kind }), "game");
+    // …and the emitter now agrees, so it writes the game surface, not a webapp.
+    assert.equal(projectKindOf(p), "game");
+    const files = okFiles(scaffoldProject(p));
+    assert.ok(
+      files.some((f) => f.path === "src/ui/console.tsx" && f.body.includes("bootGame")),
+      "the emitted tree carries the real game surface",
+    );
+    assert.ok(
+      files.some((f) => f.path === "src/main.ts" && f.body.includes("bootGame")),
+      "the game browser entry boots the shell",
+    );
+    assert.ok(!files.some((f) => f.path === "index.html" && f.body.includes("main.tsx")), "not a webapp entry");
+    // A stored game kind with an unrelated brief stays a game (no brief re-inference).
+    assert.equal(projectKindOf(fullRun({ kind: "game", brief: "a different brief entirely" })), "game");
+  });
+
+  it("the emitted cli-tool entry is a real program (no TODO throw) with a parser + dispatch", () => {
+    const main = bodyOf(scaffoldProject(fullRun({ kind: "tool" })), "src/main.ts");
+    assert.ok(!main.includes("TODO(E-15)"), "the CLI entry no longer throws a TODO stub");
+    assert.match(main, /export async function main\(/, "the entry contract is exported");
+    assert.match(main, /export function parseArgv\(/, "a real argument parser");
+    assert.match(main, /createReadStream/, "input is streamed, not fully buffered");
+    assert.match(main, /export const COMMANDS/, "the declared commands are enumerated");
+    assert.match(main, /return 1;/, "a usage error exits 1");
+    assert.match(main, /return 2;/, "no data / unreadable input exits 2");
+  });
+
+  it("the emitted service entry is a real server with validation + coded 400s", () => {
+    const main = bodyOf(scaffoldProject(fullRun({ kind: "service" })), "src/main.ts");
+    assert.ok(!main.includes("TODO(E-15)"), "the service entry no longer throws a TODO stub");
+    assert.match(main, /createServer/, "a real node:http server");
+    assert.match(main, /export function resolvePort/, "the PORT wiring stays");
+    assert.match(main, /export async function main\(/, "the start contract is exported");
+    assert.match(main, /status: 400/, "an invalid payload gets a coded 400");
+    assert.match(main, /"GET \/health"/, "a real healthcheck route");
+  });
+
+  it("the emitted library entry exports the brief's declared names as real implementations", () => {
+    const p = primed({
+      kind: "library",
+      brief: "A TypeScript webhook SDK: `subscribe(url, events, secret)`, `publish(event, payload)`, `deliveries(filter)`, `verifySignature(rawBody, header, secret)`.",
+    });
+    const main = bodyOf(scaffoldProject(p), "src/main.ts");
+    assert.ok(!main.includes("TODO(E-15)"), "the library entry no longer throws a TODO stub");
+    for (const name of ["subscribe", "publish", "deliveries", "verifySignature"]) {
+      assert.match(main, new RegExp(`export function ${name}\\(`), `${name} is a real exported function`);
+    }
+    assert.match(main, /createHmac\("sha256"/, "signature verification is real HMAC-SHA256");
+    assert.match(main, /export const entry: LibraryInfo/, "package identity is exported");
+  });
+
+  it("declaredSurfaceNamesOf mirrors dod.declaredSurfaceNames (one grammar, no drift)", () => {
+    const brief = "Commands: `summary <file>`, `errors <file>`, `watch <file>`; a `--json` flag is not a command.";
+    assert.deepEqual(declaredSurfaceNamesOf(brief), declaredSurfaceNames(brief));
+  });
+});
+
+describe("347-2 — the gate-wiring seam (surfaceTreeRows)", () => {
+  /** A multi-page web fixture whose tree exposes real, mountable exports. */
+  function webFixture(): Project {
+    return {
+      ...seedProject({
+        name: "Golden Crust Bakery",
+        kind: "app",
+        brief: "# Golden Crust Bakery\n\nPages: Home with a live open/closed badge; Menu with breads; Contact with the address and hours.\n\nNo prices are published: keep price a field, never invent numbers.",
+      }),
+      domain: "custom-software",
+      lattice: { domain: "custom-software", jobs: ["checkout"], entities: ["order"], constraints: [], nodes: [], complexity: 1 },
+      contracts: { entities: [{ name: "order", fields: [] }], endpoints: [] },
+      implementationSpec: null,
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/content.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/content.ts",
+          source: [
+            "export function getOpenStatus(now: Date): { open: boolean; weekday: number } { return { open: now.getUTCDay() !== 0, weekday: now.getUTCDay() }; }",
+            "export async function getMenuItems(): Promise<{ id: string; name: string }[]> { return [{ id: \"bread-white\", name: \"White Bread\" }]; }",
+            "",
+          ].join("\n"),
+          hash: "h1",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [
+          { id: "schema", file: "src/domain/web_marketing.ts", purpose: "Typed entities from the lattice", dependsOn: [], owner: "architect" },
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
+          { id: "job-0", file: "src/jobs/checkout.ts", purpose: 'Implement job "checkout" against the contract', dependsOn: [], owner: "implementer" },
+        ],
+        order: ["schema", "ui", "job-0"],
+      },
+    };
+  }
+
+  it("folding the emitted surface into generatedTree turns dod's web criterion green", () => {
+    const project = webFixture();
+    const emitted = scaffoldProject(project);
+    assert.ok(emitted.ok, `emit: ${!emitted.ok ? emitted.error : ""}`);
+    const files = okFiles(emitted);
+    const rows = surfaceTreeRows(project, files);
+    assert.ok(rows.some((r) => /^src\/ui\/pages\//.test(r.path)), "the seam carries the emitted page modules");
+    assert.ok(rows.some((r) => r.path === "src/ui/router.tsx"), "and the router");
+    const trace = productSurfaceTrace({ ...project, generatedTree: [...rows, ...(project.generatedTree ?? [])] });
+    assert.equal(trace.kind, "web");
+    assert.ok(trace.pageFiles.length > 0, `page surface visible to the gate (${trace.pageFiles.join(", ")})`);
+    assert.ok(trace.navPath, "navigation/routing path visible to the gate");
+  });
+
+  it("never emits a price literal on an ordered line (no fabricated price)", () => {
+    const files = okFiles(scaffoldProject(webFixture()));
+    for (const file of files) {
+      assert.ok(!/priceCents\s*:\s*-?\d/.test(file.body), `${file.path}: no price literal`);
+    }
+  });
+
+  it("folding the emitted surface turns dod's game criterion green", () => {
+    const project = fullRun({ kind: "app", brief: "A 2D browser arcade game with platforms and a start screen." });
+    const emitted = scaffoldProject(project);
+    assert.ok(emitted.ok);
+    const rows = surfaceTreeRows(project, okFiles(emitted));
+    assert.ok(rows.some((r) => r.path === "src/ui/console.tsx"), "the seam carries the game shell");
+    const trace = productSurfaceTrace({ ...project, generatedTree: [...rows, ...(project.generatedTree ?? [])] });
+    assert.equal(trace.kind, "game");
+    assert.ok(trace.inputPresent && trace.loopPresent && trace.canvasPresent, "input + loop + canvas visible");
+  });
+
+  it("folding the emitted surface turns dod's runnable criterion green (the emitted entry is judged)", () => {
+    const project = primed({
+      kind: "library",
+      brief: "A TypeScript webhook SDK: `subscribe(url, events, secret)`, `publish(event, payload)`, `deliveries(filter)`, `verifySignature(rawBody, header, secret)`.",
+    });
+    const emitted = scaffoldProject(project);
+    assert.ok(emitted.ok);
+    const rows = surfaceTreeRows(project, okFiles(emitted));
+    assert.equal(rows[0]?.path, "src/main.ts", "the emitted entry is the FIRST row the gate reads");
+    const trace = productSurfaceTrace({ ...project, generatedTree: [...rows, ...(project.generatedTree ?? [])] });
+    assert.equal(trace.kind, "runnable");
+    assert.ok(!trace.entry.stub, "the judged entry is not a stub");
+    assert.deepEqual(trace.entry.missingDeclared, [], "every declared surface name is implemented");
+  });
+});
+
+describe("347-2 — lockfile policy + the no-invention hard rule", () => {
+  it("the README justifies the absent lockfile and CI installs without one", () => {
+    const result = scaffoldProject(fullRun());
+    const readme = bodyOf(result, "README.md");
+    assert.match(readme, /## Lockfile & reproducibility/, "the policy section ships");
+    assert.match(readme, /No `package-lock\.json` is shipped/, "the absence is stated, not silent");
+    assert.match(readme, /npm install/, "the reproducible-install path is named");
+    const ci = bodyOf(result, ".github/workflows/ci.yml");
+    assert.match(ci, /npm install --no-audit --no-fund/, "CI installs (writes the lockfile on first run)");
+    assert.ok(
+      !okFiles(result).some((f) => f.path === "package-lock.json"),
+      "no fabricated lockfile (integrity hashes are unknowable offline)",
+    );
+  });
+
+  it("refuses to author a price/award/address literal when the brief withholds one", () => {
+    const withheld = fullRun({ kind: "app", brief: "A bakery site. No prices are published — do not invent numbers." });
+    // Control: with no invented literal the emission is clean.
+    assert.ok(scaffoldProject(withheld).ok, "a withholding brief still emits when nothing is invented");
+    // A caller hook that sneaks a price literal into the scaffold-authored UI is refused.
+    const refused = scaffoldProject(withheld, {
+      uiGeneration: () => ['  const priceCents = 1250;', "  return <main />;"],
+    });
+    assert.ok(!refused.ok, "the invented price literal is refused");
+    if (!refused.ok) {
+      assert.equal(refused.code, "RT_E_VALIDATION");
+      assert.match(refused.error, /withholds prices\/awards\/addresses/);
+    }
+    // The rule is scoped to a WITHHOLDING brief: without the withholding line, no refusal.
+    const open = fullRun({ kind: "app", brief: "A bakery site with a menu and an order form." });
+    assert.ok(scaffoldProject(open, { uiGeneration: () => ['  const priceCents = 1250;', "  return <main />;"] }).ok);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 358 (R-10) � the console Preview's caution-banner sentence follows the README
+// the emitter actually wrote. The alert used to decide its copy by matching ONE
+// literal (the seam's `RED TREE �` banner line), so a below-floor run � whose
+// README leads with the SCAFFOLD's `> [!CAUTION]` / `BELOW-FLOOR PLAN` banner
+// instead � rendered the FALSE sentence "The archive's README does not carry the
+// caution banner for this withheld reason." Both branches are pinned here against
+// real emissions, and the sentence now comes from ONE producer keyed on the bytes.
+// ---------------------------------------------------------------------------
+describe("358 (R-10) � the Preview's caution-banner sentence follows the emitted README", () => {
+  const BANNERED = "The archive's README carries the same caution banner.";
+  const NOT_BANNERED =
+    "The archive's README does not carry the caution banner for this withheld reason.";
+
+  /** The below-floor branch: the scaffold's OWN banner leads the README (A2-F4). */
+  const belowFloorProject = (): Project => ({
+    ...fullRun({ kind: "app" }),
+    logs: [
+      {
+        ts: 1,
+        phase: 6,
+        level: "warn",
+        event: "p6.synthesis.refused",
+        detail:
+          "RT_E_PLAN_UNDERPRODUCED � chunk 1/8 refused � accepted tree has 0 module(s) but the brief demands >= 8",
+      },
+    ],
+  });
+
+  /** The red-trail branch: the seam prepends its own `redTreeBannerText`. */
+  const redTrailProject = (): Project => ({
+    ...fullRun({ kind: "app" }),
+    logs: [
+      { ts: 1, phase: 6, level: "error", event: "p6.tree.failure", detail: "the tree-run did not clear the bar" },
+    ],
+  });
+
+  it("below-floor: the scaffold banner drives the TRUE sentence (was FALSE before 358)", () => {
+    const result = scaffoldProject(belowFloorProject(), { underProduced: "partial" });
+    const readme = bodyOf(result, "README.md");
+    assert.ok(
+      readme.startsWith(`${CAUTION_ALERT_LEAD}\n`),
+      "premise: the scaffold's caution banner leads this README",
+    );
+    assert.match(readme, /BELOW-FLOOR PLAN/, "premise: and it is the below-floor banner");
+    assert.doesNotMatch(
+      readme,
+      /RED TREE/,
+      "premise: this branch carries the SCAFFOLD banner, never the seam's red-tree line",
+    );
+    assert.equal(readmeLeadsWithCautionBanner(readme), true, "the README does carry the caution banner");
+    assert.equal(
+      withheldTreeReadmeNote(readme),
+      BANNERED,
+      "so the alert renders 'carries the same caution banner' � the pre-358 code rendered the false one",
+    );
+  });
+
+  it("red trail: the seam's banner drives the same TRUE sentence", () => {
+    const emitted = emitSoftware(redTrailProject());
+    assert.ok(emitted.ok, "the red-trail tree is surfaced for inspection");
+    assert.equal(emitted.redTree?.code, "RT_E_TREE_RUN_FAILED");
+    const readme = emitted.files.find((f) => f.path === "README.md");
+    assert.ok(readme, "the README is emitted");
+    assert.ok(
+      readme.body.startsWith(`${CAUTION_ALERT_LEAD}\n`),
+      "premise: the seam prepends its caution banner",
+    );
+    assert.match(readme.body, /RED TREE/, "premise: this branch carries the seam's red-tree banner");
+    assert.equal(withheldTreeReadmeNote(readme.body), BANNERED, "the alert renders the true sentence");
+  });
+
+  it("a clean emission's README carries no caution banner ? the honest fallback sentence", () => {
+    const readme = bodyOf(scaffoldProject(fullRun({ kind: "app" })), "README.md");
+    assert.ok(!readme.startsWith(CAUTION_ALERT_LEAD), "premise: no withheld banner on a clean emit");
+    assert.equal(readmeLeadsWithCautionBanner(readme), false, "the predicate discriminates");
+    assert.equal(withheldTreeReadmeNote(readme), NOT_BANNERED, "and the fallback sentence is the true one");
+  });
+
+  it("the alert's copy is the ONE producer's output � no branch literal remains in the component", () => {
+    const preview = readFileSync(
+      fileURLToPath(new URL("../components/software-preview.tsx", import.meta.url)),
+      "utf8",
+    );
+    assert.match(
+      preview,
+      /import \{ withheldTreeReadmeNote \} from "@\/lib\/scaffold";/,
+      "the Preview imports the producer",
+    );
+    assert.match(preview, /\{readmeCautionNote\}/, "and renders its output");
+    assert.doesNotMatch(preview, /redTreeReadmeBannered/, "the single-literal predicate is gone");
+    assert.doesNotMatch(
+      preview,
+      /surfaced below the build's own completion bar/,
+      "the component no longer matches the seam's banner literal itself",
+    );
+    assert.doesNotMatch(
+      preview,
+      /\.body\.includes\(|\.body\.startsWith\(/,
+      "and reads no README bytes of its own — the producer owns that decision",
+    );
+    assert.doesNotMatch(
+      preview,
+      /The archive's README/,
+      "no sentence literal can drift from the producer",
     );
   });
 });

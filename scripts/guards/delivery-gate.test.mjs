@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,10 @@ import test from "node:test";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CLI = join(ROOT, "scripts", "rapidtool-cli.mjs");
-const TESTRUNS = existsSync(resolve(ROOT, "..", "testruns")) ? resolve(ROOT, "..", "testruns") : join(ROOT, "testruns");
+// B1-F1: the run root is the TRACKED in-repo fixture subset (`<repo>/testruns`),
+// so this suite is green on a clean checkout; `RAPIDTOOL_TESTRUNS` still
+// overrides for a host that keeps a larger run root elsewhere.
+const TESTRUNS = process.env.RAPIDTOOL_TESTRUNS || join(ROOT, "testruns");
 
 function runCli(args) {
   const env = { ...process.env };

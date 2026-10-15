@@ -23,9 +23,9 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, wildStep, approveHitl, rejectHitl, unlockRetry, type WildReviewer } from "./engine.ts";
+import { emptyProject, wildStep, approveHitl, rejectHitl, unlockRetry, stageWildPlan, type WildReviewer } from "./engine.ts";
 import { runGate } from "./dod.ts";
-import type { HitlDecision, Project } from "./types.ts";
+import type { HitlDecision, Project, WildPlan } from "./types.ts";
 
 // fix 327 L1 — non-hermetic keyless suite. The host shell may carry a real
 // DEEPSEEK_API_KEY (this box sets one in the User scope), which flips
@@ -234,9 +234,25 @@ describe("§S3 bounded classifier-reject retry (313 D1)", () => {
       retryBackoffMs: 5,
     });
     assert.equal(floorCalls, 1, "the deterministic floor verdict is never retried");
-    assert.equal(r2.outcome, "paused");
+    // A4-E1 — old → new, deliberate: this fixture is keyless, so `emptyProject`
+    // leaves `enforceDod` false (advisory). A deterministic DoD-floor reject on
+    // an ADVISORY run must ADVANCE exactly as `advanceOnce` does (the red gate
+    // stays RECORDED). Pre-fix it parked while advertising an open human gate
+    // that did not exist (status "running", `hitl` null) — a door the CLI's
+    // `approve`/`reject` refuse.
+    assert.equal(r2.outcome, "advanced", "advisory DoD reject advances (A4-E1)");
+    assert.equal(r2.code, undefined);
     assert.equal(r2.project.logs.filter((l) => l.event === "wild.review_retry").length, 0);
-    assert.ok(String(r2.error).includes("Deterministic DoD review"));
+    assert.ok(
+      (r2.project.logs ?? []).some((l) => l.event === "wild.review_advisory"),
+      "the advisory rejection is RECORDED on the ledger, not hidden",
+    );
+    assert.ok(
+      (r2.project.logs ?? []).some(
+        (l) => l.event === "wild.review" && String(l.detail).includes("Deterministic DoD review"),
+      ),
+      "the DoD review text still rides the ledger",
+    );
 
     // (iii) an explicit maxReviewRetries: 0 clamps to the plain resolver.
     const c = counting(() => ({ ok: true, verdict: "reject", feedback: REJECT_FEEDBACK, model: "test" }));
@@ -373,11 +389,22 @@ describe("§S6 GAP-1 review-reject mint (fixes/320)", () => {
     assert.equal(res.project.phases[0].status, "awaiting_hitl", "the phase record enters the gate edge");
 
     // (2) the park is coherent now: unlockText is TRUE and a resume re-enters the gate.
+    // A4-E10 — old → new, deliberate: the minted gate is `forceHuman`, so under
+    // the AGENT SEAL it can never be machine-cleared (R3/B-03). The sealed park
+    // now names the REPAIR-the-phase path (`human-retry`) and a
+    // `wild.repair_required` row names the working door, instead of promising
+    // that a human approve/reject is the sealed run's designed next step. The
+    // minted gate is retained — the human doors below still work.
     const park = res.project.wildRun?.park;
     assert.ok(park);
-    assert.equal(park.unlock, "human-gate");
+    assert.equal(park.unlock, "human-retry");
     assert.equal(park.resumeAction, "gate", "a resume re-enters the gate — no silent advance");
-    assert.ok(park.unlockText.includes("A human must approve or reject the open gate"));
+    assert.ok(park.unlockText.includes("A human decision is required"));
+    assert.ok(
+      (res.project.logs ?? []).some((l) => l.event === "wild.repair_required"),
+      "the sealed reject records the repair path",
+    );
+    assert.ok(res.project.hitl, "the minted human gate is retained (never removed)");
 
     // (3) machine seats can never clear it (R3/B-03 throw).
     assert.throws(
@@ -439,6 +466,99 @@ describe("§S6 GAP-1 review-reject mint (fixes/320)", () => {
     assert.ok(
       rerun.project.artifacts.some((a) => a.phase === 0 && (a.body ?? "").includes(NOTE)),
       "the recorded note rides the regeneration (rejectionResponseBlock) — the repair loop closes",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 347 — the CONSOLE zero-human plan gate. `stageWildPlan` used to park
+// unconditionally, so a browser Wild Mode run always needed one human Resume
+// even when the classifier approved the plan. Under the console's agent-seal
+// consent a classifier APPROVE now executes; a reject / unconfigured review
+// still parks, and a caller WITHOUT the seal keeps the pre-347 bytes.
+// ---------------------------------------------------------------------------
+describe("347 — stageWildPlan under the agent seal (console zero-human run)", () => {
+  const plan: WildPlan = {
+    goal: "deliver the brief",
+    steps: [
+      { id: "s1", action: "draft the core module", why: "the brief requires it" },
+      { id: "s2", action: "verify the module", why: "machine verification is the P6 bar" },
+    ],
+    source: "planner",
+    plannedAt: 1,
+    note: "347 pin",
+  };
+  const approving: WildReviewer = async () => ({
+    ok: true,
+    verdict: "approve",
+    feedback: "The two rows name concrete deliverables and a verification step for this phase.",
+    model: "stub",
+  });
+  const rejecting: WildReviewer = async () => ({
+    ok: true,
+    verdict: "reject",
+    feedback: "The plan omits the machine-verification step the phase's exit criteria require.",
+    model: "stub",
+  });
+
+  it("an approving classifier no longer parks when the seal is on (zero human gates)", async () => {
+    const p: Project = { ...wildFixture({ phase: 0 }), wildPlan: plan };
+    const r = await stageWildPlan(p, approving, { agentSeal: true });
+    assert.equal(r.staged, false, "the approved plan executes instead of parking");
+    assert.ok(r.project.logs.some((l) => l.event === "wild.plan_approved"), "the machine approval is ledgered");
+    assert.ok(!r.project.logs.some((l) => l.event === "wild.paused_plan"), "no review park row");
+    assert.notEqual(r.project.wildRun?.pause, true, "the run is not paused");
+  });
+
+  it("a rejecting classifier still parks under the seal", async () => {
+    const p: Project = { ...wildFixture({ phase: 0 }), wildPlan: plan };
+    const r = await stageWildPlan(p, rejecting, { agentSeal: true });
+    assert.equal(r.staged, true, "a reject always parks — the seal never invents an approval");
+    assert.equal(r.project.wildRun?.park?.unlock, "human-gate");
+    assert.ok(r.project.logs.some((l) => l.event === "wild.paused_plan"));
+  });
+
+  it("without the seal the approve park is unchanged (opt-in consent)", async () => {
+    const p: Project = { ...wildFixture({ phase: 0 }), wildPlan: plan };
+    const r = await stageWildPlan(p, approving);
+    assert.equal(r.staged, true, "the pre-347 park is byte-identical without the seal");
+    assert.ok(r.project.logs.some((l) => l.event === "wild.paused_plan"));
+  });
+
+  it("W62: a resume after a REJECT re-parks without executing or re-reviewing the rejected plan", async () => {
+    let calls = 0;
+    const countingReject: WildReviewer = async () => {
+      calls += 1;
+      return {
+        ok: true,
+        verdict: "reject",
+        feedback: "The plan omits the machine-verification step the phase's exit criteria require.",
+        model: "stub",
+      };
+    };
+    const p: Project = { ...wildFixture({ phase: 0 }), wildPlan: plan };
+    const first = await stageWildPlan(p, countingReject, { agentSeal: true });
+    assert.equal(first.staged, true, "the reject parks");
+    assert.equal(calls, 1, "the plan was reviewed once");
+
+    // Resume: clear the pause, then re-stage — as a driver resume would.
+    const resumed: Project = {
+      ...first.project,
+      wildRun: { ...first.project.wildRun!, pause: false, park: null },
+    };
+    const again = await stageWildPlan(resumed, approving, { agentSeal: true });
+    assert.equal(calls, 1, "the prior REJECT is read from the ledger — no re-review spend");
+    assert.equal(again.staged, true, "a rejected plan must not execute on resume");
+    assert.equal(again.project.wildRun?.pause, true, "the run is re-parked");
+    assert.ok(
+      (again.project.logs ?? []).some(
+        (l) => l.event === "wild.paused_plan" && /prior review verdict "reject"/.test(String(l.detail ?? "")),
+      ),
+      "the re-park names the prior verdict precisely",
+    );
+    assert.ok(
+      !(again.project.logs ?? []).some((l) => l.event === "wild.plan_approved"),
+      "no approval row is fabricated on resume",
     );
   });
 });

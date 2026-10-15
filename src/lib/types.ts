@@ -373,6 +373,16 @@ export type IntentLattice = {
   complexity: number;
   /** True when neither jobs nor entities came from brief vocabulary (both fallbacks fired) — lets the scorecard call reframe. */
   vague?: boolean;
+  /**
+   * The brief's own repeated content nouns (frequency ≥2, generic words
+   * removed), frequency-ranked — product vocabulary the LEX bank does not
+   * carry (a bakery's `donut`/`bread`/`menu`/`order`, a retailer's `cart`).
+   * ADDITIVE: `entities`/`jobs`/`nodes`/`complexity`/`vague` stay the LEX-only
+   * values, so no existing lattice consumer changes; product-facing artifact
+   * builders merge this in (engine.productNouns). Absent for a vocabulary-free
+   * brief (no repeated content noun) → the deterministic fallback stands.
+   */
+  briefNouns?: string[];
 };
 
 export type SchedulerPlan = {
@@ -498,6 +508,14 @@ export type Project = {
   /** fixes/144 (M2): multi-file generation tree — additive; absent on legacy
    * / deterministic payloads. Assembly + p6-arch probes consume this. */
   generatedTree?: GeneratedTreeFile[];
+  /**
+   * fixes/353 — the emitter's OWN surface modules (pages, router, game shell,
+   * runnable entry), stamped by the driver immediately before the P6 gate is
+   * recorded. `dod`'s kind-aware criteria read `generatedTree ∪ emittedSurface`
+   * because those files are written by `scaffold.ts`, never by synthesis; the
+   * field is additive and absent on legacy records (byte-identical reading).
+   */
+  emittedSurface?: GeneratedTreeFile[];
   /**
    * Provenance label for the last module verdict (E-07 additive; absent =
    * legacy payloads / the deterministic template self-test): "self-test" is

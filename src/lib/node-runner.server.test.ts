@@ -96,6 +96,36 @@ describe("redactSecrets (174-15)", () => {
     }
   });
 
+  it("fixes/354 A2-U1: a whitespace-only key (the documented keyless disable) leaves output byte-identical", () => {
+    const prev = process.env.DEEPSEEK_API_KEY;
+    const text = "line one has spaces and line two does too";
+    try {
+      process.env.DEEPSEEK_API_KEY = " ";
+      assert.strictEqual(
+        redactSecrets(text),
+        text,
+        "a single-space key must NOT be treated as a secret (pre-fix it replaced every space)",
+      );
+      process.env.DEEPSEEK_API_KEY = "\t\n  ";
+      assert.strictEqual(redactSecrets(text), text, "any whitespace-only key is a keyless disable");
+    } finally {
+      if (prev === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = prev;
+    }
+  });
+
+  it("fixes/354 A2-U1: a real non-blank key is STILL redacted", () => {
+    const prev = process.env.DEEPSEEK_API_KEY;
+    const probe = "test-deepseek-key-value-A2U1";
+    try {
+      process.env.DEEPSEEK_API_KEY = probe;
+      assert.equal(redactSecrets(`a=${probe} b`), "a=[secret-hidden] b");
+    } finally {
+      if (prev === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = prev;
+    }
+  });
+
   it("fixes/346 A2-F6: redacts xai- and tvly- vendor key shapes", () => {
     const xai = "xai-" + "a".repeat(40);
     assert.equal(redactSecrets(`cfg ${xai} done`), "cfg [secret-hidden] done");

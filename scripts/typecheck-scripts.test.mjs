@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { test } from "node:test";
@@ -52,6 +52,16 @@ const FILE_LINE_RE = /^(.+?\.(?:mjs|mts|cjs|js))\((\d+),(\d+)\): error (TS\d+):/
  * deliberately, with an owner), but the debt it recorded is paid.
  */
 export const ERROR_BUDGET = {};
+
+/**
+ * B1-F10: the nested-proof guard. The leg below spawns the REAL
+ * `npm run typecheck`; that child re-runs this file, so the heavyweight tsc legs
+ * are skipped inside the nested run (the OUTER run proves them for real). A
+ * skipped test still prints its own TAP line with its name, which is exactly the
+ * evidence the parent leg reads. Never set outside that child.
+ */
+const NESTED_TYPECHECK = process.env.RT_TYPECHECK_NESTED === "1";
+const NESTED_SKIP = NESTED_TYPECHECK ? "nested `npm run typecheck` proof run — the outer run proves this leg" : false;
 
 /** POSIX, repo-relative — the form the budget keys and tsc diagnostics share. */
 function relPosix(abs) {
@@ -149,7 +159,7 @@ function scriptsTypecheckRun() {
   return cachedRun;
 }
 
-test("scripts typecheck: every checkable scripts/** file is inside the program", () => {
+test("scripts typecheck: every checkable scripts/** file is inside the program", { skip: NESTED_SKIP }, () => {
   const run = scriptsTypecheckRun();
   assert.equal(run.error, null, `tsc could not be spawned: ${run.error}`);
   const onDisk = scriptsFilesOnDisk();
@@ -168,7 +178,7 @@ test("scripts typecheck: every checkable scripts/** file is inside the program",
   );
 });
 
-test("scripts typecheck: no NEW errors beyond the recorded per-file budget", () => {
+test("scripts typecheck: no NEW errors beyond the recorded per-file budget", { skip: NESTED_SKIP }, () => {
   const run = scriptsTypecheckRun();
   const errors = parseTscErrors(run.output);
   const { unbudgeted, overBudget, stale, counts } = evaluateBudget(errors, ERROR_BUDGET);
@@ -189,31 +199,52 @@ test("scripts typecheck: no NEW errors beyond the recorded per-file budget", () 
   assert.deepEqual(stale, [], `budget names file(s) that are gone: ${stale.join(", ")}`);
 });
 
-test("scripts typecheck: npm run typecheck runs BOTH legs (src + scripts)", () => {
-  // W46 · 332-4 (S1b): the flip that makes `npm run typecheck` see scripts/**.
-  // Pinned at the package.json bytes so a later edit cannot quietly drop the
-  // scripts leg (which is what left the CLI invisible to a type checker).
-  // W48 · 334-4: the scripts program is now CLEAN (0 errors, was 134 across
-  // 14 files), so `ERROR_BUDGET` is empty and the ratchet fails on ANY new
-  // error in ANY scripts file. Leg 2 still runs THIS test file — it also pins
-  // program coverage and the budget mechanism; the strict budget-blind program
-  // stays available under its own explicit name.
-  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
-  const typecheck = pkg.scripts?.typecheck ?? "";
-  assert.match(typecheck, /tsc --noEmit/, "leg 1: the src+server program (tsconfig.json)");
-  assert.match(
-    typecheck,
-    /scripts\/typecheck-scripts\.test\.mjs/,
-    "leg 2: the scripts ratchet — the CLI must be inside the typecheck it guards",
-  );
-  assert.match(
-    pkg.scripts?.["typecheck:scripts:strict"] ?? "",
-    /tsc -p tsconfig\.scripts\.json --noEmit/,
-    "the strict scripts program stays available under its own explicit name",
-  );
-});
+test(
+  "scripts typecheck: npm run typecheck runs BOTH legs (src + scripts)",
+  { skip: NESTED_SKIP },
+  () => {
+    // W46 · 332-4 (S1b) made `npm run typecheck` see `scripts/**`; the CLI must
+    // stay inside the typecheck it guards. B1-F10: the pre-fix leg asserted on
+    // `package.json`'s script TEXT, which passes even if the scripts leg is
+    // dropped. This is BEHAVIOURAL — it spawns the REAL `npm run typecheck` and
+    // requires the scripts ratchet (THIS file) to have RUN inside it: leg 1's
+    // `tsc --noEmit` gates the `&&`, so exit 0 + this file's own TAP line is the
+    // whole chain observed end to end.
+    // Recursion is bounded by RT_TYPECHECK_NESTED (the nested run skips the
+    // heavyweight tsc legs — the outer run proves them for real).
+    // The strict program (`typecheck:scripts:strict`) is exercised behaviourally
+    // by the coverage/ratchet legs above, which spawn exactly that program
+    // (`tsc -p tsconfig.scripts.json --noEmit --listFiles`).
+    // The bare spread keeps `process.env`'s string index signature (adding a
+    // literal key here widened the object to `{ RT_TYPECHECK_NESTED: string }`
+    // and made the `delete` below a TS2339); the CLI test idiom is
+    // spread-then-assign.
+    const env = { ...process.env };
+    env.RT_TYPECHECK_NESTED = "1";
+    delete env.NODE_TEST_CONTEXT;
+    const res = spawnSync("npm", ["run", "typecheck"], {
+      cwd: ROOT,
+      env,
+      encoding: "utf8",
+      shell: true,
+      timeout: 900_000,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const out = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
+    assert.equal(
+      res.status,
+      0,
+      `\`npm run typecheck\` must succeed — leg 1 (tsc --noEmit) then leg 2 (the scripts ratchet).\n${out.slice(-4000)}`,
+    );
+    assert.match(
+      out,
+      /scripts typecheck: every checkable scripts\/\*\* file is inside the program/,
+      "leg 2 (the scripts ratchet) must have RUN inside `npm run typecheck` — a script that drops it is the regression this leg catches",
+    );
+  },
+);
 
-test("scripts typecheck: rapidtool-cli.mjs and its taxonomy test are clean and unbudgeted", () => {
+test("scripts typecheck: rapidtool-cli.mjs and its taxonomy test are clean and unbudgeted", { skip: NESTED_SKIP }, () => {
   // W46 · 332-4: the CLI carried 38 of the 173 errors and its test 1; both are
   // now clean and deliberately have NO budget entry, so the generic ratchet
   // above fails on the first new error in either (a clean file is unbudgeted).
@@ -224,6 +255,34 @@ test("scripts typecheck: rapidtool-cli.mjs and its taxonomy test are clean and u
   assert.deepEqual(cliErrors, [], "the CLI and its taxonomy test must typecheck clean");
   assert.equal(ERROR_BUDGET["scripts/rapidtool-cli.mjs"], undefined, "a clean file must carry no ratchet budget");
   assert.equal(ERROR_BUDGET["scripts/cli-exit-taxonomy.test.mjs"], undefined, "a clean file must carry no ratchet budget");
+});
+
+test("scripts typecheck: the MEASUREMENT layer's own files are clean and unbudgeted", () => {
+  // W357 · fix-gates: the W356 cartographer's R-1 was exactly this class — the
+  // ratchet's own two new files arrived with 90 tsc errors because a scripts file
+  // can pass `node --test` and still fail the gate through this program. They are
+  // clean now, and with an EMPTY budget that is the only state they may stay in:
+  // a budget entry here would let the measurement layer buy itself an exemption
+  // from the typecheck it enforces everywhere else.
+  const files = [
+    "scripts/quality-ratchet.mjs",
+    "scripts/quality-ratchet.test.mjs",
+    "scripts/check-module-coverage.mjs",
+    "scripts/check-module-coverage.test.mjs",
+    "scripts/typecheck-scripts.test.mjs",
+  ];
+  const onDisk = scriptsFilesOnDisk();
+  const measured = files.filter((f) => onDisk.includes(f));
+  assert.deepEqual(measured, files, `expected every measurement-layer file in the program's file walk; missing ${files.filter((f) => !onDisk.includes(f)).join(", ")}`);
+  const errors = parseTscErrors(scriptsTypecheckRun().output);
+  const budgeted = measured.filter((f) => ERROR_BUDGET[f] !== undefined);
+  assert.deepEqual(budgeted, [], `a measurement-layer file must carry no typecheck budget: ${budgeted.join(", ")}`);
+  // The ratchet and its own suite must be error-free; the others are covered by
+  // the generic ratchet above, which fails on the first error in any of them.
+  const ratchetErrors = errors
+    .filter((e) => e.file === "scripts/quality-ratchet.mjs" || e.file === "scripts/quality-ratchet.test.mjs")
+    .map((e) => e.message);
+  assert.deepEqual(ratchetErrors, [], "the ratchet and its suite must typecheck clean under the scripts program");
 });
 
 test("scripts typecheck: the budget parser has teeth (a planted error is flagged)", () => {
@@ -258,7 +317,7 @@ test("scripts typecheck: the budget parser has teeth (a planted error is flagged
   assert.equal(floodVerdict.overBudget[0].file, "scripts/grok-pwa-plugin.mjs");
 });
 
-test("scripts typecheck: a planted error in a real file trips the guard end-to-end", () => {
+test("scripts typecheck: a planted error in a real file trips the guard end-to-end", { skip: NESTED_SKIP }, () => {
   // Spawns tsc over a planted temp file with the same checker flags the config
   // uses, so the RED proof exercises real tsc output rather than a fixture.
   const dir = mkdtempSync(join(tmpdir(), "scripts-typecheck-"));

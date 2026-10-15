@@ -33,18 +33,29 @@ import {
 // (S's file) — imported READ-ONLY so the pure repair prompt's advertised rules
 // can be checked against the checks that actually enforce them.
 import {
+  compactModuleUnderBound,
+  contractTypeRedeclarations,
   crossChunkDuplicateDeclarations,
   forbiddenPrimitiveHit,
   FORBIDDEN_PRIMITIVE_NAMES,
+  implicitAnyParameters,
+  jsxHits,
+  jsxNamespaceHits,
+  materializedCjsResidueHits,
   missingSignatureNames,
+  moneySemanticsHits,
   nondeterministicPrimitiveHit,
+  P6_MODULE_MAX_CHARS,
   p6SynthesisBriefFitRepairPrompt,
   p6SynthesisExportRepairPrompt,
   p6SynthesisForbiddenRepairPrompt,
   p6SynthesisRepairPrompt,
   p6SynthesisSignatureRepairPrompt,
   proseLineHits,
+  suppressionPragmaHit,
   unawaitedAsyncValueUses,
+  unboundExportNames,
+  validateSynthesisModule,
 } from "./codegen.server.ts";
 import { LESSON_TEXT_MAX, lessonRow } from "./knowledge.ts";
 import { BRIEF_TEMPLATES } from "./templates.ts";
@@ -314,6 +325,19 @@ describe("expansionPrompt fidelity + build-ready framing (fixes/95)", () => {
       "the cut is marked — the model can see evidence was dropped",
     );
     assert.ok(!content.includes(tail), "the tail beyond the cap never reaches the model");
+  });
+
+  it("fixes/348: a realistic 8k-char brief reaches the model IN FULL (the non-negotiables are not sliced)", async () => {
+    const filler = "Build the menu, the admin order queue and the staff ordering app. ".repeat(120);
+    const brief =
+      "# Bloedow Bakery — Website\n\n" +
+      filler +
+      "\n\n## Non-negotiables\n- No invented prices. NONNEGOTIABLE_TAIL_SENTINEL";
+    assert.ok(brief.length > 4_000 && brief.length <= EXPAND_BRIEF_MAX_CHARS, `fixture is a realistic over-4k brief (${brief.length})`);
+    const content = await captureUserContent(brief);
+    assert.ok(content.includes(brief), "the WHOLE brief rides the wire");
+    assert.ok(content.includes("NONNEGOTIABLE_TAIL_SENTINEL"), "the non-negotiables reach the model");
+    assert.ok(!content.includes("[TRUNCATED"), "nothing was cut");
   });
 
   it("caps the policy list at EXPAND_POLICY_MAX_COUNT and marks over-long policies", async () => {
@@ -928,6 +952,19 @@ describe("PR-18 — dedicated repair prompt + prompt/validator parity", () => {
       ["b"],
       "the missing-signature rule has a live validator",
     );
+    // fixes/349-P6: the three rules added for the emit-killing classes.
+    assert.ok(
+      materializedCjsResidueHits("const x = module.exports.y;", ["x"]).length > 0,
+      "the non-ESM rule has a live validator",
+    );
+    assert.ok(
+      implicitAnyParameters("function f(a) { return a; }").length > 0,
+      "the implicit-any rule has a live validator",
+    );
+    const bloat = `/**\n${"// filler comment line\n".repeat(40)} */\nfunction f(): void { return; }\n`;
+    const compacted = compactModuleUnderBound(bloat, 60);
+    assert.ok(compacted !== null && compacted.length <= 60, "the size rule has a live compaction (deterministic repair)");
+    assert.ok(P6_MODULE_MAX_CHARS > 0, "the size bound is a real constant");
   });
 
   it("EACH codegen repair re-prompt restates the preserved-rules contract (parity across every repair prompt)", () => {
@@ -942,5 +979,125 @@ describe("PR-18 — dedicated repair prompt + prompt/validator parity", () => {
       assert.match(prompt, /forbidden primitive/i, `${name}: names the forbidden-primitive rule`);
       assert.match(prompt, /no markdown fences|JSON ONLY/i, `${name}: restates the JSON-only output contract`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 353 — prompt contract: every validator predicate is stated in the prompt the
+// model actually receives (no hidden rules). Two prompts live in this module:
+// the expansion prompt (its reply is checked by `expandedSpecViolations`) and
+// the dedicated repair prompt (its reply is checked by `validateSynthesisModule`
+// in codegen.server.ts). Each predicate below is linked BOTH to the prompt line
+// that tells the model and to a live validator reading.
+// ---------------------------------------------------------------------------
+describe("353 — every expandedSpecViolations predicate is stated in the expansion prompt", () => {
+  it("states the object / exact-six-key / array / non-empty-string / non-empty-requirements rules", async () => {
+    const content = await captureUserContent("Build a fleet healthcheck tool");
+    assert.ok(content.includes("ONE JSON object with EXACTLY these six keys"), "object + exact-key rule stated");
+    assert.ok(content.includes("EACH of the six keys MUST be a JSON array of strings"), "array rule stated");
+    assert.ok(content.includes("every array element MUST be a plain, non-empty string"), "string-element rule stated");
+    assert.ok(content.includes("requirements MUST be a NON-EMPTY array"), "non-empty-requirements rule stated");
+  });
+
+  it("each stated rule matches a live expandedSpecViolations predicate", () => {
+    assert.deepEqual(expandedSpecViolations([1]), ["reply is not a JSON object"], "object rule is live");
+    assert.ok(
+      expandedSpecViolations({ requirements: ["x"] }).some((v) => v.startsWith("missing key")),
+      "six-key rule is live",
+    );
+    assert.ok(
+      expandedSpecViolations({ ...FULL_SPEC, edgeCases: "nope" }).includes('"edgeCases" is not an array'),
+      "array rule is live",
+    );
+    assert.ok(
+      expandedSpecViolations({ ...FULL_SPEC, typeSignatures: [null] }).some((v) => /non-string or blank/.test(v)),
+      "non-empty-string rule is live",
+    );
+    assert.ok(
+      expandedSpecViolations({ ...FULL_SPEC, requirements: [] }).some((v) => /no usable entries/.test(v)),
+      "non-empty-requirements rule is live",
+    );
+  });
+});
+
+describe("353 — every validateSynthesisModule predicate is advertised in the repair prompt", () => {
+  const PROMPT = repairSystemPrompt();
+  const cases: { name: string; phrase: string; live: () => boolean }[] = [
+    { name: "forbidden primitive", phrase: "forbidden primitive", live: () => forbiddenPrimitiveHit("const x = eval('1');").hard !== null },
+    { name: "Math.random", phrase: "Math.random", live: () => nondeterministicPrimitiveHit("const x = Math.random();") !== null },
+    { name: "prose-in-code", phrase: "planning prose", live: () => proseLineHits("I will write the code now and make sure it works.").length > 0 },
+    {
+      name: "un-awaited async",
+      phrase: "await every async call",
+      live: () => unawaitedAsyncValueUses("async function f(){}\nfunction g(): number { return f().ok; }", ["f"]).length > 0,
+    },
+    {
+      name: "cross-chunk duplicate",
+      phrase: "redeclare a name another chunk already exports",
+      live: () => crossChunkDuplicateDeclarations("function estimateARV(): number { return 1; }", [{ path: "a.ts", exports: ["estimateARV"] }]).length > 0,
+    },
+    { name: "missing signature", phrase: "EXACTLY the required signatures", live: () => missingSignatureNames(["a"], ["a", "b"]).length > 0 },
+    { name: "non-ESM residue", phrase: "CommonJS module/exports residue", live: () => materializedCjsResidueHits("const x = module.exports.y;", ["x"]).length > 0 },
+    { name: "implicit any", phrase: "annotate EVERY function parameter", live: () => implicitAnyParameters("function f(a) { return a; }").length > 0 },
+    {
+      name: "module size",
+      phrase: "module size bound",
+      live: () => compactModuleUnderBound(`/**\n${"// filler comment line\n".repeat(40)} */\nfunction f(): void { return; }\n`, 60) !== null,
+    },
+    { name: "suppression pragma", phrase: "suppression pragma", live: () => suppressionPragmaHit("// @ts-ignore\nfunction f(): void {}") !== null },
+    {
+      name: "JSX-free .ts chunk",
+      phrase: "JSX-free",
+      live: () =>
+        jsxHits('const x = <Widget title="a" />;\n').length > 0 &&
+        jsxNamespaceHits("function f(): JSX.Element { return null; }").length > 0,
+    },
+    {
+      name: "money semantics",
+      phrase: "unit price × quantity",
+      live: () =>
+        moneySemanticsHits("function computeCartTotalPence() {\n  var total = 0;\n  total = total + quantity;\n  return total;\n}").length > 0,
+    },
+    {
+      name: "shared contract type",
+      phrase: "shared contract type",
+      live: () => contractTypeRedeclarations("type Property = { id?: string };\nfunction f(): void {}", ["Property"]).length > 0,
+    },
+    { name: "unbound export", phrase: "every name the reply's `exports` list claims", live: () => unboundExportNames("function f(): void {}", ["g"]).length > 0 },
+    { name: "JSON only / fences", phrase: "no markdown fences", live: () => validateSynthesisModule("```\nfunction f(): void {}\n```", ["f"], ["f"]).ok === false },
+  ];
+
+  it("advertises every rule the repair validator enforces", () => {
+    for (const c of cases) {
+      assert.ok(PROMPT.includes(c.phrase), `repair prompt omits the ${c.name} rule (expected: "${c.phrase}")`);
+    }
+  });
+
+  it("each advertised rule is backed by a LIVE validator (no unenforced advertising)", () => {
+    for (const c of cases) assert.ok(c.live(), `no live validator backs the ${c.name} rule`);
+  });
+
+  it("validateSynthesisModule actually refuses the previously-unstated classes", () => {
+    assert.equal(validateSynthesisModule("", [], []).ok, false, "empty module refused");
+    assert.equal(
+      validateSynthesisModule("// @ts-ignore\nfunction f(): void {}\nmodule.exports.f = f;", ["f"], ["f"]).ok,
+      false,
+      "suppression pragma refused",
+    );
+    assert.equal(
+      validateSynthesisModule('function f(): void { const x = <Widget title="a" />; }', ["f"], ["f"]).ok,
+      false,
+      "raw JSX refused",
+    );
+    assert.equal(
+      validateSynthesisModule("function f(): JSX.Element { return null; }", ["f"], ["f"]).ok,
+      false,
+      "JSX namespace refused",
+    );
+    assert.equal(
+      validateSynthesisModule("type Property = { id?: string };\nfunction f(): void {}\nmodule.exports.f = f;", ["f"], ["f"], null, ["Property"]).ok,
+      false,
+      "contract-type redeclaration refused",
+    );
   });
 });

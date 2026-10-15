@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "owner": "quality-system owner (gate.sh)",
+  "purpose": "Every test that reports TAP `# SKIP` must match one of these explicitly reviewed, justified entries. gate.sh fails on any skipped test whose exact leaf name is absent here, so a suite can no longer pass by skipping out of a check. Each entry names the file that owns the test and the condition under which the skip is the honest outcome. Entries may only be REMOVED once the test always runs (or deleted); a stale entry is reported (registeredSkips vs the run's skips) but is not itself fatal because whether a conditional skip fires is host-dependent.",
+  "skips": [
+    {
+      "name": "216z opt-in: the REAL npm install leg runs (RT_VERIFYKIND_INSTALL=1)",
+      "file": "src/lib/compile-check.server.test.ts",
+      "reason": "The real-npm install leg is deliberately opt-in (RT_VERIFYKIND_INSTALL=1) so the default suite never touches the network; without the env var the test is an honest skip, never a fake pass."
+    },
+    {
+      "name": "promptExpand() is honest not-configured when no DeepSeek key is present",
+      "file": "src/lib/harvest.test.ts",
+      "reason": "The not-configured/keyless path is only observable when DEEPSEEK_API_KEY is absent from the process environment; on a keyed host (this box) the path cannot be exercised and the test skips honestly."
+    }
+  ]
+}

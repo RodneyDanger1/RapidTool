@@ -26,7 +26,21 @@ import { fileURLToPath } from "node:url";
 // with-app-env.mjs:97-105) — never the naive pathToFileURL compare.
 import { isMainModule } from "./with-app-env.mjs";
 
-const PREVIEW_PORT = 8081;
+/**
+ * The preview port. F-15 (fixes/344) added the `PORT` override to
+ * vite.config.ts's preview block (`resolvePort(process.env.PORT, 8081)`); this
+ * script must scan the SAME port the server actually bound, or `stop` looks at
+ * 8081 while the server holds a different port and reports a false free. Same
+ * validation as vite's resolvePort: unset/blank/non-integer/out-of-range →
+ * 8081.
+ */
+export function resolvePreviewPort(raw, fallback = 8081) {
+  if (raw === undefined || raw === null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n <= 65535 ? n : fallback;
+}
+
+const PREVIEW_PORT = resolvePreviewPort(process.env.PORT);
 const PREVIEW_URL = `http://127.0.0.1:${PREVIEW_PORT}/`;
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");

@@ -80,8 +80,14 @@ export type ExpandBriefResult =
 
 /** Prompt budget caps (documented so callers cannot be surprised by a cut).
  *  Over-budget briefs/policies are cut WITH an explicit truncation marker —
- *  a silent slice would hide evidence from the model. */
-export const EXPAND_BRIEF_MAX_CHARS = 4000;
+ *  a silent slice would hide evidence from the model.
+ *
+ *  fixes/348: the brief budget is the WHOLE structured brief a realistic
+ *  product brief carries (the measured bakery brief is ~8 140 chars, so the old
+ *  4 000-char cut dropped its menu/build/non-negotiable sections). Kept generous
+ *  so no realistic brief is cut; a pathological one is still cut WITH the
+ *  marker, never silently. */
+export const EXPAND_BRIEF_MAX_CHARS = 48_000;
 export const EXPAND_POLICY_MAX_CHARS = 240;
 export const EXPAND_POLICY_MAX_COUNT = 12;
 /** Prior-run lesson budget (fixes/98 §5 Tier 3): lesson rows are ≤ LESSON_TEXT_MAX
@@ -308,6 +314,7 @@ function expansionPrompt(
     "Expand the brief below into an EXHAUSTIVE, BUILD-READY implementation spec. The spec is consumed by a builder agent that must produce WORKING code with tests and docs — phrase every requirement and edge case so a test can observe and verify it.",
     "Reply with ONE JSON object with EXACTLY these six keys:",
     '{"requirements": ["..."], "edgeCases": ["..."], "errorHandling": ["..."], "typeSignatures": ["..."], "dataFlow": ["..."], "negativeConstraints": ["..."]}.',
+    "Envelope shape (machine-checked, verbatim): the value of EACH of the six keys MUST be a JSON array of strings — never a bare string, object, number, or null; and every array element MUST be a plain, non-empty string (no numbers, no objects, no nulls, no blank strings). An omitted key, a non-array value, or a blank/non-string element is REFUSED; nothing is silently defaulted.",
     "Field rules:",
     "- requirements: 5-12 implementable sentences covering EVERY feature, user workflow, and hard constraint the brief states — none of the brief's asks may be dropped; each phrased so a test can verify it.",
     "- edgeCases: boundary, empty-input, duplicate, concurrency, timeout, offline/backend-down, plus the brief's own domain risks (e.g. same-day reroutes, HIPAA-safe notes, rate-limited search); each as a behavior a test must pin.",
@@ -315,7 +322,8 @@ function expansionPrompt(
     '- typeSignatures: one line per public function/component in TypeScript syntax, e.g. "createOrder(items: CartItem[]): Promise<Order>". COVERAGE (fixes/215d): emit at least one signature for EVERY requirement above — a requirement with no signature cannot be built later; never drop a feature the brief states.',
     "- dataFlow: the ordered steps data takes from raw input to persisted/output form, failure-path steps included (one line per step).",
     '- negativeConstraints: everything the brief forbids or implies must-not-do, each phrased as "DO NOT ...".',
-    "- Every array entry is one plain line: no markdown, no numbering prefixes, no empty strings.",
+    "- Every array entry is one plain, non-empty string: no markdown, no numbering prefixes, no blank strings, no numbers/objects/nulls.",
+    "- requirements MUST be a NON-EMPTY array (5-12 entries); an empty requirements list is refused.",
     "STRICT honesty + fidelity: derive EVERYTHING from the brief and the policies. Every requirement must trace to a sentence in the brief or a policy line; never invent platforms, dependencies, error codes, users, or features neither mentions. If the brief is vague, expand the faithful reading only and reflect the vagueness in edgeCases.",
     "Brief:",
     briefCapped,
@@ -508,6 +516,8 @@ export const REPAIR_FORBIDDEN_PRIMITIVE_NAMES = [
   "eval",
   "Function",
   "import",
+  // 353: mirrors codegen's addition — TS-runtime-only syntax under stripping.
+  "enum",
   "process",
   "require",
   "globalThis",
@@ -531,12 +541,27 @@ export const REPAIR_REFUSAL_ENVELOPE =
  *  verbatim by `repairSystemPrompt()`. */
 export const REPAIR_PRESERVED_RULES = [
   "export EXACTLY the required signatures and nothing more",
+  // 353 (prompt contract): every repair reply the validator can refuse is
+  // advertised here, so the model is never blind-sided by an unstated rule.
+  // `validateSynthesisModule` (codegen.server.ts) is the enforcement point;
+  // prompt-engine.test.ts links each rule below to its live validator.
+  "bind every name the reply's `exports` list claims",
+  "return one non-empty JSON object — no markdown fences, nothing before or after it",
   "zero imports/requires",
   `never reference a forbidden primitive (${REPAIR_FORBIDDEN_PRIMITIVE_NAMES.join(", ")})`,
   "never use Math.random (nondeterministic primitive)",
+  "never inject a compiler/linter suppression pragma (@ts-ignore/@ts-nocheck/@ts-expect-error/eslint-disable)",
+  "keep a .ts chunk JSX-free — no raw JSX elements and no `JSX.*` namespace type",
+  "compute a money amount as unit price × quantity in integer minor units",
+  "never redeclare a shared contract type the build injects (the canonical alias is authoritative)",
   "no planning prose in the module body",
   "await every async call",
   "never redeclare a name another chunk already exports",
+  // fixes/349-P6: the three classes that reached emit and killed the product —
+  // each has a live validator in codegen.server.ts (see prompt-engine.test.ts).
+  "never write CommonJS module/exports residue or `export =` (the emitted tree is ESM)",
+  "annotate EVERY function parameter and return type (no implicit any)",
+  "keep the envelope within the module size bound (fit the output budget)",
 ] as const;
 
 /**

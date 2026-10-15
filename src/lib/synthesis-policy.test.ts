@@ -10,12 +10,19 @@ import assert from "node:assert/strict";
 import {
   adaptiveChunkSize,
   candidatesLogDetail,
+  estimatedChunkOutputChars,
+  estimatedFunctionOutputChars,
+  outputBoundedChunkSize,
+  planningChunkSize,
   P6_SYNTH_CANDIDATES_DEFAULT,
   P6_SYNTH_CANDIDATES_MAX,
   P6_SYNTH_CHUNK_MAX,
   P6_SYNTH_CHUNK_MIN,
   P6_SYNTH_CHUNK_RETRY_CANDIDATES,
+  P6_SYNTH_FN_OUTPUT_BASE,
+  P6_SYNTH_FN_OUTPUT_PER_SIG_CHAR,
   P6_SYNTH_MODULE_BUDGET,
+  P6_SYNTH_OUTPUT_BUDGET_CHARS,
   resolveChunkResampleCandidates,
   resolveSynthesisCandidates,
   selectBestOfN,
@@ -104,6 +111,59 @@ describe("fixes/343-1 selectBestOfN (lazy, deterministic)", () => {
     assert.match(res.outcomes[1]!, /candidate 2: selected/);
   });
 
+  // fixes/348: opt-in quality-directed ranking — among PASSING candidates the
+  // highest brief-vocabulary coverage wins; the rank never overrides a gate.
+  it("ranked: among passing candidates the highest coverage wins (tie → earliest)", async () => {
+    const res = await selectBestOfN<number>(
+      4,
+      async (i) => i,
+      async (c) => ({ passed: true, reason: `clears gates ${c}` }),
+      { rank: (c) => (c === 2 ? 0.9 : 0.5), rankTarget: 1 },
+    );
+    assert.equal(res.winner, 2, "the 0.90-coverage candidate beats the 0.50 ones");
+    assert.equal(res.chosen, 2);
+    assert.match(res.outcomes[2]!, /^candidate 3: selected — clears gates 2 \(brief coverage 0\.90\)$/);
+    assert.match(res.outcomes[0]!, /candidate 1: passed, not selected/);
+    assert.match(res.outcomes[3]!, /candidate 4: passed, not selected/);
+  });
+
+  it("ranked: a passing candidate already at rankTarget stops the search (Pareto)", async () => {
+    let produced = 0;
+    const res = await selectBestOfN<number>(
+      4,
+      async (i) => {
+        produced += 1;
+        return i;
+      },
+      async () => ({ passed: true, reason: "clears gates" }),
+      { rank: (c) => (c === 1 ? 1 : 0.2), rankTarget: 1 },
+    );
+    assert.equal(produced, 2, "candidate 2 already reaches the target — no later sample is bought");
+    assert.equal(res.winner, 1);
+  });
+
+  it("ranked: a failing candidate's high rank never overrides the gate", async () => {
+    const res = await selectBestOfN<number>(
+      3,
+      async (i) => i,
+      async (c) => (c === 0 ? { passed: true, reason: "valid" } : { passed: false, reason: "invalid" }),
+      { rank: (c) => (c === 0 ? 0.3 : 0.99), rankTarget: 1 },
+    );
+    assert.equal(res.winner, 0, "the only gate-passing candidate wins despite a lower rank");
+    assert.match(res.outcomes[1]!, /candidate 2: rejected/);
+  });
+
+  it("ranked: no passing candidate ⇒ winner null even when ranks are present", async () => {
+    const res = await selectBestOfN<number>(
+      3,
+      async (i) => i,
+      async () => ({ passed: false, reason: "invalid" }),
+      { rank: () => 1, rankTarget: 1 },
+    );
+    assert.equal(res.winner, null);
+    assert.equal(res.chosen, null);
+  });
+
   it("a null sample is a lost candidate, never a crash; writer stops when none passes", async () => {
     const res = await selectBestOfN(
       3,
@@ -158,14 +218,17 @@ describe("fixes/343-1 selectBestOfN (lazy, deterministic)", () => {
   });
 });
 
-describe("A9/PR-15 adaptiveChunkSize (clamp(floor(budget/avgSigChars), 4, 12))", () => {
-  it("clamps into [4,12]; empty/no-signature input keeps the legacy default 8", () => {
-    assert.equal(P6_SYNTH_CHUNK_MIN, 4);
+describe("A9/PR-15 adaptiveChunkSize (clamp(floor(budget/avgSigChars), 2, 12))", () => {
+  it("clamps into [2,12]; empty/no-signature input keeps the legacy default 8", () => {
+    // fixes/349-P6: the floor was lowered 4→2 so a self-contained,
+    // import-forbidden chunk is asked to export a count it can actually reach.
+    assert.equal(P6_SYNTH_CHUNK_MIN, 2);
     assert.equal(P6_SYNTH_CHUNK_MAX, 12);
     assert.equal(adaptiveChunkSize([]), 8, "no signatures ⇒ legacy default");
     assert.equal(adaptiveChunkSize(["   ", ""], P6_SYNTH_MODULE_BUDGET), 8, "blank rows are not signatures");
     assert.equal(adaptiveChunkSize(["x".repeat(60)]), 8, "budget 480 / 60 chars = 8 (legacy parity)");
-    assert.equal(adaptiveChunkSize(["x".repeat(120)]), 4, "long signatures shrink a chunk to the floor");
+    assert.equal(adaptiveChunkSize(["x".repeat(120)]), 4, "480 / 120 = 4, still above the lowered floor");
+    assert.equal(adaptiveChunkSize(["x".repeat(300)]), 2, "480 / 300 = 1 → clamped up to the lowered floor 2");
     assert.equal(adaptiveChunkSize(["x".repeat(40)]), 12, "short signatures grow a chunk to the ceiling");
   });
 
@@ -174,5 +237,56 @@ describe("A9/PR-15 adaptiveChunkSize (clamp(floor(budget/avgSigChars), 4, 12))",
     assert.equal(adaptiveChunkSize(["x".repeat(100)], Number.NaN), adaptiveChunkSize(["x".repeat(100)]));
     assert.equal(adaptiveChunkSize(null as unknown as string[], undefined), 8);
     assert.equal(adaptiveChunkSize(["ok"], 1_000_000), P6_SYNTH_CHUNK_MAX);
+  });
+});
+
+describe("fixes/349-P6 planningChunkSize (bound work by ESTIMATED output, not a fixed count)", () => {
+  it("estimates one function's output as a body baseline + a signature-length term", () => {
+    assert.equal(estimatedFunctionOutputChars(""), P6_SYNTH_FN_OUTPUT_BASE);
+    assert.equal(estimatedFunctionOutputChars("abcd"), P6_SYNTH_FN_OUTPUT_BASE + 4 * P6_SYNTH_FN_OUTPUT_PER_SIG_CHAR);
+    assert.equal(estimatedChunkOutputChars(["abcd", "efgh"]), 2 * (P6_SYNTH_FN_OUTPUT_BASE + 4 * P6_SYNTH_FN_OUTPUT_PER_SIG_CHAR));
+    assert.equal(estimatedChunkOutputChars(["  ", ""]), 0, "blank rows cost nothing");
+    assert.equal(estimatedChunkOutputChars(null as unknown as string[]), 0, "hostile input ⇒ 0, never a throw");
+  });
+
+  it("outputBoundedChunkSize caps a chunk whose estimated output exceeds the budget", () => {
+    // 55-char signature ⇒ est 900 + 220 = 1120 chars; the 9 600-char budget fits 8.
+    const sig = "export function collectRent0(payment: Payment): Receipt";
+    const eight = Array.from({ length: 20 }, () => sig);
+    assert.equal(outputBoundedChunkSize(eight), 8, "eight functions ≈ 8 960 chars fit; nine would not");
+    assert.equal(outputBoundedChunkSize([]), 8, "no signatures ⇒ legacy default");
+    // A tiny budget forces the lowered floor (2), never below.
+    assert.equal(outputBoundedChunkSize(eight, 100), P6_SYNTH_CHUNK_MIN, "clamped to the floor");
+    assert.equal(outputBoundedChunkSize(eight, 1_000_000), P6_SYNTH_CHUNK_MAX, "clamped to the ceiling");
+    assert.equal(outputBoundedChunkSize(eight, Number.NaN), 8, "hostile budget ⇒ default budget");
+    assert.equal(P6_SYNTH_OUTPUT_BUDGET_CHARS, 9_600);
+  });
+
+  it("planningChunkSize is the TIGHTER of the text-adaptive and estimated-output sizes", () => {
+    const short = Array.from({ length: 20 }, () => "x".repeat(40));
+    // text-adaptive = 12; estimated output (1 060 each) = 9 → the output bound wins.
+    assert.equal(adaptiveChunkSize(short), 12);
+    assert.equal(outputBoundedChunkSize(short), 9);
+    assert.equal(planningChunkSize(short), 9, "output bound is tighter");
+    const typical = Array.from({ length: 20 }, () => "export function collectRent0(payment: Payment): Receipt");
+    assert.equal(planningChunkSize(typical), 8, "typical corpus signatures keep the legacy chunk size");
+    assert.equal(planningChunkSize([]), 8);
+    assert.equal(planningChunkSize(short), planningChunkSize(short), "deterministic");
+  });
+});
+
+describe("fixes/354 selector determinism (same inputs ⇒ same chosen candidate)", () => {
+  const runSelector = async () => {
+    const judge = async (c: number) => (c === 2 ? { passed: true, reason: "clears gates" } : { passed: false, reason: `gate rejected ${c}` });
+    const res = await selectBestOfN<number>(4, async (i) => i, judge, { rank: (c) => (c === 2 ? 0.9 : 0.5), rankTarget: 1 });
+    return res;
+  };
+  it("selectBestOfN double-run yields an identical winner + outcome row (deterministic selector)", async () => {
+    const a = await runSelector();
+    const b = await runSelector();
+    assert.equal(a.winner, 2);
+    assert.deepEqual(a.outcomes, b.outcomes, "same inputs ⇒ identical candidate outcome row");
+    assert.equal(a.winner, b.winner);
+    assert.deepEqual(candidatesLogDetail("chunk 1/2", 4, a.winner, a.outcomes), candidatesLogDetail("chunk 1/2", 4, b.winner, b.outcomes));
   });
 });

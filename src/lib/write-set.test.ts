@@ -5,10 +5,10 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyWrite, applyWrites, assertSafeRelPath, rollback, snapshotPaths } from "./write-set.ts";
+import { applyWrite, applyWrites, assertSafeRelPath, rollback, snapshotPaths, WRITE_SET_LOCK } from "./write-set.ts";
 import { ERROR_CODES } from "./errors.ts";
 
 const tmp = (): string => mkdtempSync(join(tmpdir(), "rapidtool-writeset-"));
@@ -168,6 +168,49 @@ describe("write-set — snapshotPaths / applyWrite / rollback", () => {
     assert.equal(codeOf(() => assertSafeRelPath("../etc/passwd")), "RT_E_VALIDATION");
     assert.ok((ERROR_CODES as readonly string[]).includes("RT_E_VALIDATION"));
     assert.ok((ERROR_CODES as readonly string[]).includes("RT_E_PATH_KIND_MISMATCH"));
+  });
+
+  // W352 (R-18): emit must be atomic — staging + rename, and a reclaimable
+  // lock so a killed writer's partial set is marked and reclaimed.
+  it("applyWrite stages then renames: no temp residue, prior bytes never torn", () => {
+    const root = tmp();
+    try {
+      mkdirSync(root, { recursive: true });
+      applyWrite(root, "a.ts", "one\n");
+      applyWrite(root, "a.ts", "two\n");
+      assert.equal(readFileSync(join(root, "a.ts"), "utf8"), "two\n");
+      const residue = readdirSync(root).filter((n) => n.includes(".rtws-"));
+      assert.deepEqual(residue, [], "staged temps are renamed away, never left behind");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("applyWrites refuses a LIVE write-set lock and reclaims a DEAD one", () => {
+    const root = tmp();
+    try {
+      mkdirSync(root, { recursive: true });
+      const lockPath = join(root, WRITE_SET_LOCK);
+      // A live owner (the parent process) holds the set.
+      writeFileSync(lockPath, JSON.stringify({ pid: process.ppid }), "utf8");
+      let caught: { code?: string } | null = null;
+      try {
+        applyWrites(root, [{ path: "a.ts", body: "A\n" }]);
+      } catch (e) {
+        caught = e as { code?: string };
+      }
+      assert.ok(caught, "a live lock must refuse");
+      assert.equal(caught!.code, "RT_E_BUSY");
+      assert.equal(existsSync(join(root, "a.ts")), false, "nothing is written under a live lock");
+      // A dead owner's stranded lock (a killed writer) is reclaimed and swept.
+      writeFileSync(lockPath, JSON.stringify({ pid: 999999 }), "utf8");
+      const snap = applyWrites(root, [{ path: "a.ts", body: "A\n" }]);
+      assert.equal(readFileSync(join(root, "a.ts"), "utf8"), "A\n");
+      assert.equal(existsSync(lockPath), false, "a completed set releases its lock");
+      assert.deepEqual(snap.get("a.ts"), { existed: false, bytes: null });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("a physically-escaping junction is RT_E_PATH_KIND_MISMATCH (wrong-kind path, not validation)", (t) => {

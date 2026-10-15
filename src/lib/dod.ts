@@ -20,6 +20,7 @@
 // Run: node --experimental-strip-types --test src/lib/gates.test.ts
 // ---------------------------------------------------------------------------
 import type { Artifact, HitlDecision, OracleTest, PhaseId, Project } from "./types.ts";
+import type { ErrorCode } from "./errors.ts";
 import { canonicalStem, fnv1a } from "./algorithms.ts";
 import { evaluatePolicy, seatLabel, seatTokenPath, type PolicySeat } from "./policy.ts";
 import {
@@ -41,9 +42,142 @@ export type GateItem = {
    *  keyless floor) instead of stranding a reader on a bare criterion. Registry
    *  items with nothing state-specific to say leave it unset. */
   unmetReason?: (p: Project) => string;
+  /**
+   * Optional honest QUALIFIER for a probe that PASSES but whose pass is not a
+   * product-complete fact — the case this hook exists for is `p6-arch`'s
+   * vacuous PASS when no tree exists (a SKIP). `runGate` reports it in its
+   * `advisories` list, `gateArtifact` renders it, and it NEVER changes a
+   * probe's pass/fail, the evidence hash, or any criterion. Absent ⇒ an
+   * ordinary pass with nothing to qualify. Return a string, or an object with a
+   * `code` (from `errors.ts`) so the qualifier is machine-classifiable.
+   */
+  advisory?: (p: Project) => string | { note: string; code?: ErrorCode } | null;
   /** `runGate`-only: the evaluated `unmetReason` (absent on registry items and
    *  on met criteria). */
   reason?: string;
+  /**
+   * The CLASS of evidence this criterion accepts when it passes. Additive and
+   * honest: it never changes a probe's verdict or the evidence hash. It exists
+   * so a green gate records WHAT it verified — e.g. `p6-verified` accepts an
+   * EXECUTED tree-run (spec tests), NOT the emitted package.json's declared
+   * `typecheck`/`build`, and `p6-arch` accepts a structural mapping that may be
+   * a no-tree SKIP. Absent ⇒ `"field-predicate"`.
+   */
+  evidenceClass?: EvidenceClassName;
+  /**
+   * The registry code a FAILED criterion carries (from `errors.ts`). Additive:
+   * `runGate` prepends it to the returned unmet `reason` so a red criterion is
+   * machine-classifiable, never bare prose. Absent ⇒ no code (legacy items).
+   */
+  code?: ErrorCode;
+};
+
+/** A passed criterion whose pass is qualified (e.g. a SKIP, not product-complete). */
+export type GateAdvisory = {
+  id: string;
+  criterion: string;
+  note: string;
+  /**
+   * ADDITIVE (2026-10-06): the registry code naming WHAT was not verified by
+   * this qualified pass (`RT_E_CLAIM_UNVERIFIED` for a pass that proves
+   * presence/structure only; `RT_E_SUBSTANCE_EMPTY` for an empty-body artifact;
+   * `RT_E_PLAN_UNDERPRODUCED` for a stub/as-yet-unimplemented surface). Absent
+   * on a benign N/A pass that imposes no requirement. Never changes the verdict
+   * or the evidence hash.
+   */
+  code?: ErrorCode;
+};
+
+/**
+ * What a criterion's PASS actually attests. The names are deliberately narrow so
+ * a reader cannot inflate a green gate into a stronger claim than the bytes
+ * support (the `p6-verified` / `p6-arch` honesty gap this exists to close).
+ */
+export type EvidenceClassName =
+  | "artifact-presence"
+  | "ledger-record"
+  | "field-predicate"
+  | "executed-self-test"
+  | "executed-tree-tests"
+  | "structural-tree-map"
+  | "lexical-brief-fit"
+  | "product-surface-map"
+  | "built-artifact";
+
+/** One line per class explaining exactly what it verifies. */
+export const EVIDENCE_CLASS_NOTE: Record<EvidenceClassName, string> = {
+  "artifact-presence": "an artifact of the expected kind exists",
+  "ledger-record": "a decision-ledger approval row records the actor",
+  "field-predicate": "a plain project-field predicate holds",
+  "executed-self-test": "the engine's deterministic template self-test executed and passed",
+  "executed-tree-tests":
+    "a machine tree-run executed the emitted tree's OWN spec tests — the emitted package.json's DECLARED typecheck/build were NOT run",
+  "structural-tree-map":
+    "a capability→file structural mapping holds — an absent-tree pass is a SKIP, not product-complete",
+  "lexical-brief-fit": "the brief's nouns appear as identifiers in the generated source",
+  "product-surface-map":
+    "the emitted bytes carry the surface the brief's kind demands (a page + nav path / a game input+loop+canvas / a runnable non-stub entry exposing the declared surface) — a STRUCTURAL byte read, NOT an execution",
+  "built-artifact": "a real BUILT artifact (the emitted package's declared build actually ran)",
+};
+
+/**
+ * The classes that attest the product was actually EXECUTED or BUILT. A PASS
+ * whose met classes are all outside this set rests on presence/structure/ledger
+ * evidence only — it must be read as "the bytes look right", never "the product
+ * runs or builds". The single set both `buildEvidenceClass` and the acceptance
+ * reader classify against.
+ *
+ * A3-E8 (2026-10-06): `executed-self-test` is deliberately NOT in this set. The
+ * p6-test floor runs the ENGINE'S DETERMINISTIC TEMPLATE self-test — engine
+ * code testing itself, not the emitted product — so a green gate whose only
+ * executed arm is that floor is NON-executed product evidence and must be
+ * qualified weak (`RT_E_CLAIM_UNVERIFIED`). The pre-fix set included it, which
+ * let a green P6 gate resting on the placeholder read as an executed pass.
+ * `executed-tree-tests` (the emitted tree's own specs) and `built-artifact`
+ * (the declared build actually ran) remain the executed arms.
+ */
+export const EXECUTED_EVIDENCE_CLASSES: ReadonlySet<EvidenceClassName> = new Set([
+  "executed-tree-tests",
+  "built-artifact",
+]);
+
+/** A weak-evidence qualifier: a green gate whose met classes prove no execution. */
+export type EvidenceQualification = {
+  /** True iff ≥1 criterion passed and none was executed/built evidence. */
+  weak: boolean;
+  /** Why the pass is qualified (empty when not weak). */
+  note: string;
+  /** The registry code that names the class (`RT_E_CLAIM_UNVERIFIED`). */
+  code: ErrorCode | null;
+};
+
+/**
+ * The evidence-class reading a gate records alongside its verdict. Additive: it
+ * never changes `pass`, `unmet`, `advisories` or `evidenceHash`.
+ */
+export type GateEvidenceClass = {
+  /** Every criterion evaluated, with the class of its accepted/rejected evidence. */
+  byCriterion: Array<{ id: string; accepted: boolean; class: EvidenceClassName; note: string }>;
+  /** The classes of the MET criteria, deduped and sorted. */
+  classes: EvidenceClassName[];
+  /**
+   * True iff some MET criterion is backed by a real BUILT artifact. No current
+   * criterion is — `p6-verified` runs the emitted tree's own spec tests, not the
+   * emitted package.json's declared `typecheck`/`build` — so a green P6 gate
+   * reports `false`, and a green gate can never be read as "the emitted product
+   * builds" when it was not built.
+   */
+  productBuildVerified: boolean;
+  /** One sentence naming what a green gate did (and did not) verify. */
+  note: string;
+  /**
+   * ACTIONABLE qualifier (additive): when every MET criterion rests on
+   * non-executed evidence (presence/structural/ledger/lexical), this names the
+   * class and carries `RT_E_CLAIM_UNVERIFIED`, so a green seal can never be read
+   * as "the product builds" when nothing ran. Absent ⇒ an ordinary grep of a
+   * pre-qualification object.
+   */
+  qualification?: EvidenceQualification;
 };
 
 // --- defensive probe helpers -------------------------------------------------
@@ -56,8 +190,33 @@ function briefHasVocabulary(brief: string): boolean {
   return briefTokens(brief).some((t) => !BRIEF_STOPWORDS.has(t) && t.length > 2);
 }
 
-const hasArtifact = (p: Project, phase: number, kind: string): boolean =>
-  (p.artifacts ?? []).some((a) => a.phase === phase && a.kind === kind);
+/**
+ * ARTIFACT-SUBSTANCE probe (A3-E6, 2026-10-06): an artifact-presence criterion
+ * is MET only when the expected artifact row exists AND carries non-empty body
+ * bytes. The pre-fix probe passed on `hasArtifact` alone and reported a 0-byte
+ * body only as an advisory — and an advisory never changes a verdict — so "P3
+ * produced its MCP artifact" was literally true of nothing. A recorded-but-empty
+ * body is now an unmet criterion (`emptyArtifactUnmetReason` names it).
+ */
+const artifactHasSubstance = (p: Project, phase: number, kind: string): boolean =>
+  (p.artifacts ?? []).some((a) => {
+    if (a?.phase !== phase || a.kind !== kind) return false;
+    const body = typeof (a as { body?: unknown }).body === "string" ? (a as { body: string }).body : "";
+    return body.trim() !== "";
+  });
+
+/** The honest, coded STATE line for a FAILED substance probe (A3-E6): a missing
+ *  row and a recorded-but-empty body are different states, and each is coded so
+ *  a red criterion is machine-classifiable rather than bare prose. */
+const emptyArtifactUnmetReason =
+  (phase: number, kind: string) =>
+  (p: Project): string => {
+    const artifacts = (p.artifacts ?? []).filter((a) => a?.phase === phase && a.kind === kind);
+    if (artifacts.length === 0) {
+      return `RT_E_PLAN_UNDERPRODUCED · no ${kind} artifact row is recorded for P${phase}`;
+    }
+    return `RT_E_SUBSTANCE_EMPTY · the ${kind} artifact row(s) for P${phase} carry EMPTY bodies (0 bytes) — artifact-presence proves a row was recorded, not that anything was produced`;
+  };
 
 /** 216 (T0.8 — actor-truthful HITL probe): the old `phaseComplete` asked only
  *  whether the phase RECORD was complete, so four criteria asserting "HITL
@@ -178,21 +337,34 @@ const policyConsistentApproval = (row: HitlDecision, phase: number): boolean => 
   return verdict.decision === "allow";
 };
 
-const approvalActor = (p: Project, phase: number): "human" | "autopilot" | null => {
-  // A1-35: the append-only journal's NEWEST approve row speaks for the phase
-  // (mirrors engine.refusalClassOf's newest-first scan) — first-wins let a
-  // stale pre-reject row shadow a later re-approval. The winner's actor is
-  // validated, not trusted: a junk `decidedBy` fails the criterion instead of
-  // riding out through a "human" | "autopilot" signature it never satisfied.
+/**
+ * A1-35 / A3-E14: the ONE approval rule. The append-only journal's NEWEST
+ * approve row that the policy seam permits speaks for the phase (mirrors
+ * engine.refusalClassOf's newest-first scan); first-wins let a stale pre-reject
+ * row shadow a later re-approval. The winner is VALIDATED, not trusted — a
+ * policy-inconsistent row fails closed. Returns the ROW (not just the actor) so
+ * an exported consumer can anchor to the same row the gate probe reads instead
+ * of restating the rule; judgment.ts's rung-1 `blocked:hitl` actor previously
+ * used an `.find` (OLDEST row, no policy re-validation) and could name a stale
+ * actor this rule rejects.
+ */
+export function approvedDecisionRow(p: Project, phase: number): HitlDecision | null {
   const decisions = p.decisions ?? [];
   for (let i = decisions.length - 1; i >= 0; i--) {
     const row = decisions[i];
     if (row?.phase !== phase || row.decision !== "approve") continue;
     if (!policyConsistentApproval(row, phase)) return null;
-    const actor = row.decidedBy;
-    return actor === "human" || actor === "autopilot" ? actor : null;
+    return row;
   }
   return null;
+}
+
+const approvalActor = (p: Project, phase: number): "human" | "autopilot" | null => {
+  const row = approvedDecisionRow(p, phase);
+  if (!row) return null;
+  // A junk `decidedBy` fails the criterion instead of riding out through a
+  // "human" | "autopilot" signature it never satisfied.
+  return row.decidedBy === "human" || row.decidedBy === "autopilot" ? row.decidedBy : null;
 };
 const approved = (p: Project, phase: number): boolean => approvalActor(p, phase) !== null;
 
@@ -255,6 +427,46 @@ export function isStubSource(source: string): boolean {
   if (hasTodoMarker(source)) return true;
   if (isReexportOnlySource(source)) return true;
   return false;
+}
+
+/**
+ * The deterministic keyless P6 template shape (`sandbox.buildPhase6Module`): a
+ * named job list plus the template functions. Single-sourced here (was private
+ * in doctor.ts) so the two quality readers classify the same bytes identically.
+ */
+export function isDeterministicTemplateModule(source: string): boolean {
+  const s = typeof source === "string" ? source : "";
+  return (
+    /\bconst JOBS = \[/.test(s) && /\bfunction synthesize\s*\(/.test(s) && /\bfunction test_no_skip\s*\(/.test(s)
+  );
+}
+
+/** The three-way class ONE module's bytes fall into (see `classifyModuleSource`). */
+export type ModuleClass = "stub" | "reexport" | "real";
+
+/**
+ * The ONE module classifier (item 3 — the two quality readers must agree by
+ * construction). Every consumer — `product-quality.moduleCensus` (the whole-tree
+ * census) and `doctor.classifyJobSource` (the job-dir census compile-check's
+ * `substance` reads) — routes through THIS, so the same bytes can never receive
+ * two contradictory verdicts. Rules, in order:
+ *
+ *   1. absent/blank source            → `stub`
+ *   2. `TODO(E-15)` / `throw … TODO`  → `stub`
+ *   3. the deterministic P6 template  → `stub`
+ *   4. reexport/import-only after comment strip → `reexport`
+ *   5. otherwise                      → `real`
+ *
+ * This is exactly the pre-unification `doctor.classifyJobSource` rule set; the
+ * whole-tree census adopts it so a reexport-only bridge and a template stub can
+ * never be counted `real` on one surface and a leftover on the other.
+ */
+export function classifyModuleSource(source: string): ModuleClass {
+  if (typeof source !== "string" || source.trim() === "") return "stub";
+  if (hasTodoMarker(source)) return "stub";
+  if (isDeterministicTemplateModule(source)) return "stub";
+  if (isReexportOnlySource(source)) return "reexport";
+  return "real";
 }
 
 /** The two explicit leftover-job / floor declarations (E-15 markers). Their
@@ -385,6 +597,19 @@ export function archProductComplete(t: ArchTrace): boolean {
     t.missing.length === 0 &&
     t.stubFiles.length === 0
   );
+}
+
+/** The newest `p6.synthesis.*` journal event (or null when no synthesis ran).
+ *  The ordering is the append-only log's own; the engine appends a chunk's
+ *  per-attempt `p6.synthesis.attempt`, then its `p6.synthesis.candidates`, then
+ *  a terminal `p6.synthesis.refused` — so the newest event names how a keyed
+ *  synthesis ended. A pure read of project logs. */
+function newestSynthesisEvent(p: Project): string | null {
+  const synthLogs = (p.logs ?? []).filter(
+    (l) => typeof l?.event === "string" && l.event.startsWith("p6.synthesis."),
+  );
+  const newest = synthLogs[synthLogs.length - 1];
+  return newest ? newest.event : null;
 }
 
 /** Primary declared name a typeSignature line demands: `export function
@@ -628,6 +853,234 @@ export function liveResearchAttemptUnavailable(p: Project): boolean {
   );
 }
 
+// --- kind-aware product surface (additive) ----------------------------------
+//
+// The lexical / structural P6 probes (p6-brief-fit, p6-arch) never noticed that
+// the emitted product did not MATCH the brief's KIND: ten fresh trees carried no
+// router and zero page files yet several passed the tree-run checks, a "game"
+// shipped no input/loop/canvas, and a CLI could emit an entry that throws
+// `TODO(E-15)`. These probes close that: they read the emitted bytes (tree +
+// generatedSource) and demand the surface the brief's kind requires. They are
+// ADDITIVE (appended to DOD[6]) and never loosen an existing criterion.
+
+export type ProductSurfaceKind = "web" | "game" | "runnable" | "none";
+
+/** The brief's own delivery-kind keyword rows — the SAME words and precedence as
+ *  `engine.deliveryKindOf`'s `DELIVERY_KIND_KEYWORDS` (replicated here because
+ *  engine.ts imports this module; a parity test in dod.test.ts pins the two so
+ *  they cannot drift silently). Matching is TOKEN-based (hyphens split), exactly
+ *  as the engine does — so "command-line" is the tokens `command`+`line` and a
+ *  bare `cli` is required, never a substring. */
+const KIND_ROWS: ReadonlyArray<{ kind: "app" | "tool" | "game" | "library" | "service"; words: readonly string[] }> = [
+  { kind: "library", words: ["library", "package", "sdk", "npm", "module", "statistics"] },
+  {
+    kind: "app",
+    words: [
+      "ui", "dashboard", "board", "desk", "portal",
+      "site", "website", "web", "page", "pages", "screen", "screens", "tab", "tabs",
+      "menu", "catalogue", "catalog", "shop", "storefront", "retail", "mobile", "ios", "android",
+    ],
+  },
+  { kind: "tool", words: ["cli", "command-line", "commandline", "terminal", "console-tool", "parse", "convert", "agent", "script"] },
+  { kind: "game", words: ["game", "play", "arcade"] },
+  { kind: "service", words: ["api", "service", "webhook", "worker"] },
+];
+const KIND_UI_SURFACE_WORDS = [
+  "ui", "screen", "screens", "dashboard", "desk", "portal",
+  "site", "website", "web", "page", "pages", "menu",
+  "catalogue", "catalog", "shop", "storefront",
+];
+/** Raw-text forms used for the SURFACE CONTRACT decision (not the kind). */
+const KIND_GAME_RE = /\b(?:game|arcade)\b/i;
+const KIND_UI_SURFACE_RE =
+  /\b(?:ui|screen|screens|dashboard|desk|portal|site|website|web|page|pages|menu|catalogue|catalog|shop|storefront)\b/i;
+
+/** The brief's delivery kind (mirror of `engine.deliveryKindOf` with no stored
+ *  kind). Exported so the parity test can pin it against the engine's decision. */
+export function briefDeliveryKind(brief: string): "app" | "tool" | "game" | "library" | "service" {
+  const tokens = new Set(String(brief ?? "").toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  const hit = (h: string): boolean =>
+    tokens.has(h) ||
+    tokens.has(`${h}s`) ||
+    tokens.has(`${h}es`) ||
+    (h.endsWith("y") && tokens.has(`${h.slice(0, -1)}ies`));
+  const uiSurface = KIND_UI_SURFACE_WORDS.some(hit);
+  for (const row of KIND_ROWS) {
+    if (uiSurface && (row.kind === "library" || row.kind === "tool")) continue;
+    if (row.words.some(hit)) return row.kind;
+  }
+  return "app";
+}
+
+/** Which surface contract a project's brief demands. The stored `Project.kind`
+ *  wins when present (the engine stamped it); otherwise the brief classifies.
+ *  A game (by kind or by an explicit game/arcade noun) is always the game
+ *  contract; a cli/library/service kind is the runnable contract; an app-kind
+ *  brief imposes the web contract only when it NAMES a page surface. */
+export function productSurfaceKindOf(project: Pick<Project, "brief" | "kind">): ProductSurfaceKind {
+  const brief = typeof project.brief === "string" ? project.brief : "";
+  const kind = project.kind ?? briefDeliveryKind(brief);
+  if (kind === "game" || KIND_GAME_RE.test(brief)) return "game";
+  if (kind === "tool" || kind === "library" || kind === "service") return "runnable";
+  return KIND_UI_SURFACE_RE.test(brief) ? "web" : "none";
+}
+
+const PAGE_PATH_RE = /(?:^|\/)(?:pages?|routes?|views?|screens?)(?:\/|$)|(?:^|\/)page\.(?:tsx?|jsx?)$|(?:^|\/)[^/]+\.page\.(?:tsx?|jsx?)$/i;
+const ROUTER_MARKER_RE =
+  /@tanstack\/react-router|from\s+['"]react-router|createBrowserRouter|createFileRoute|<RouterProvider|<Routes[\s>]|<Route[\s>]|useRoutes\s*\(|next\/navigation|next\/router|vue-router/;
+const NAV_MARKER_RE = /<nav[\s>]|<Link[\s>]|\bhref\s*=|useNavigate\s*\(|\brouter\s*\.\s*push\s*\(/i;
+const GAME_INPUT_RE =
+  /onKeyDown|onkeydown|onKeyUp|onkeyup|addEventListener\(\s*['"`]key|keydown|keyup|\bWASD\b|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|pointerdown|mousedown|touchstart|onClick|onclick/i;
+const GAME_LOOP_RE = /requestAnimationFrame|\bsetInterval\s*\(|gameLoop\b|\btick\s*\(|\bloop\s*\(|fixed timestep/i;
+const GAME_CANVAS_RE = /<canvas|getContext\s*\(|createCanvas|CanvasRenderingContext|\bcanvas\b/i;
+const ENTRY_PATH_RE = /(?:^|\/)(?:index|main|cli|run-cli|entry|app)\.(?:ts|tsx|js|jsx|mjs|cjs)$/i;
+const BARREL_PATH_RE = /(?:^|\/)generated\.(?:ts|js|mjs)$/i;
+
+export type RunnableEntryRead = {
+  /** The entry module path found (priority: kind entry → src/generated barrel), or null. */
+  path: string | null;
+  /** True when no entry resolved, or the entry's own bytes are a TODO/template stub. */
+  stub: boolean;
+  /** The declared surface names the brief names (`(`- or `<`-suffixed backticks). */
+  declared: string[];
+  /** Declared names NOT present as implementation identifiers in the tree union. */
+  missingDeclared: string[];
+};
+
+export type ProductSurfaceTrace = {
+  kind: ProductSurfaceKind;
+  /** True when the criterion imposes a requirement (kind !== "none"). */
+  applicable: boolean;
+  /** Real page-surface files (path matches a page route/pattern). */
+  pageFiles: string[];
+  /** A navigation/routing path exists (router marker OR nav markup). */
+  navPath: boolean;
+  inputPresent: boolean;
+  loopPresent: boolean;
+  canvasPresent: boolean;
+  entry: RunnableEntryRead;
+  /** Human note naming the state (why applicable/unmet). */
+  note: string;
+};
+
+/** The declared surface the brief names: backtick identifiers immediately
+ *  followed by `(`/`<` (a call, a signature, or a CLI `<command> <file>`). */
+export function declaredSurfaceNames(brief: string): string[] {
+  const out = new Set<string>();
+  for (const m of String(brief ?? "").matchAll(/`([A-Za-z_$][A-Za-z0-9_$]*)(?=\s*[<(])/g)) out.add(m[1]);
+  return [...out];
+}
+
+/** The (path, source) files the surface probes read: the generated tree plus —
+ *  as a pathless member — the single generatedSource module (legacy floor), plus
+ *  (ADDITIVE, 2026-10-06) the emitter's OWN emitted file list when the record
+ *  carries one under the additive `emittedSurface` field, and any caller-supplied
+ *  `extraFiles` (the same list `readProductQuality` already unions for its
+ *  byte census).
+ *
+ *  WHY `emittedSurface`: the scaffold OWNS the web page/router surface
+ *  (`src/ui/pages/*`, `src/ui/router.tsx`), the game canvas surface
+ *  (`src/ui/console.tsx`), and the entry shell (`src/main.ts`) — none of which
+ *  is ever a `generatedTree` row (measured: a full marketing emit writes those
+ *  files while `generatedTree` carries only the LLM modules). Reading only the
+ *  tree made the kind-surface criteria UNSATISFIABLE by any real build, so the
+ *  emitted surface is read here. Absent/foreign shape ⇒ no change (the tree read
+ *  is byte-identical to before). */
+function surfaceFiles(
+  p: Project,
+  extraFiles: readonly { path?: unknown; source?: unknown }[] = [],
+): Array<{ path: string; source: string }> {
+  const tree = Array.isArray(p.generatedTree) ? p.generatedTree : [];
+  const out: Array<{ path: string; source: string }> = [];
+  for (const f of tree) {
+    if (f && typeof f.path === "string" && typeof f.source === "string") out.push({ path: f.path, source: f.source });
+  }
+  const emitted = (p as { emittedSurface?: unknown }).emittedSurface;
+  for (const f of [...(Array.isArray(emitted) ? emitted : []), ...extraFiles]) {
+    const row = f && typeof f === "object" ? (f as { path?: unknown; source?: unknown }) : null;
+    if (row && typeof row.path === "string" && typeof row.source === "string") {
+      out.push({ path: row.path, source: row.source });
+    }
+  }
+  if (typeof p.generatedSource === "string" && p.generatedSource.length > 0) out.push({ path: "", source: p.generatedSource });
+  return out;
+}
+
+/** True when an entry module's own bytes are a stub AND it is not a reexport-only
+ *  barrel whose target chain resolves to a real in-tree implementation. */
+function entrySourceIsStub(
+  file: { path: string; source: string },
+  byPath: ReadonlyMap<string, { path: string; source: string }>,
+): boolean {
+  if (!isStubSource(file.source)) return false;
+  if (isReexportOnlySource(file.source) && !hasTodoMarker(file.source)) {
+    return !reexportTargetsResolveToReal(file, byPath);
+  }
+  return true;
+}
+
+/** Pure, deterministic product-surface trace over the emitted bytes. */
+export function productSurfaceTrace(
+  p: Project,
+  extraFiles: readonly { path?: unknown; source?: unknown }[] = [],
+): ProductSurfaceTrace {
+  const kind = productSurfaceKindOf(p);
+  const files = surfaceFiles(p, extraFiles);
+  const realFiles = files.filter((f) => f.path !== "" && f.source.trim() !== "");
+  const pageFiles = realFiles.filter((f) => PAGE_PATH_RE.test(f.path.replace(/\\/g, "/"))).map((f) => f.path);
+  const unionSource = files.map((f) => f.source).join("\n");
+  const navPath = ROUTER_MARKER_RE.test(unionSource) || NAV_MARKER_RE.test(unionSource);
+  const inputPresent = GAME_INPUT_RE.test(unionSource);
+  const loopPresent = GAME_LOOP_RE.test(unionSource);
+  const canvasPresent = GAME_CANVAS_RE.test(unionSource);
+
+  const declared = declaredSurfaceNames(typeof p.brief === "string" ? p.brief : "");
+  const union = unionSource;
+  const missingDeclared = declared.filter((n) => implementationIdentifierHits([n], union).length === 0);
+  const entryFile =
+    realFiles.find((f) => ENTRY_PATH_RE.test(f.path.replace(/\\/g, "/"))) ??
+    realFiles.find((f) => BARREL_PATH_RE.test(f.path.replace(/\\/g, "/"))) ??
+    null;
+  // The entry is a stub when absent, blank/TODO/template, or a reexport-only
+  // module whose target chain does NOT resolve to a real in-tree implementation
+  // — the SAME in-tree barrel exemption `archTrace` applies (the emitter's own
+  // `src/generated.ts` entry barrel is machine assembly, not a leftover job).
+  const byPath = new Map(realFiles.map((f) => [f.path, f] as const));
+  const entry: RunnableEntryRead = {
+    path: entryFile ? entryFile.path : null,
+    stub: entryFile === null || entrySourceIsStub(entryFile, byPath),
+    declared,
+    missingDeclared,
+  };
+
+  const applicable = kind !== "none";
+  let note: string;
+  if (kind === "none") note = "N/A — the brief names no web/game/cli/library/service surface contract";
+  else if (kind === "web") note = appliedNote(p, pageFiles.length > 0 && navPath, `page surface=${pageFiles.length ? pageFiles.join(", ") : "none"} nav/router=${navPath}`);
+  else if (kind === "game") note = appliedNote(p, inputPresent && loopPresent && canvasPresent, `input=${inputPresent} loop=${loopPresent} canvas=${canvasPresent}`);
+  else note = appliedNote(p, !entry.stub && missingDeclared.length === 0, `entry=${entry.path ?? "none"}${entry.stub ? " (TODO/absent stub)" : ""}${missingDeclared.length ? ` missing declared: ${missingDeclared.join(", ")}` : ""}`);
+
+  return { kind, applicable, pageFiles, navPath, inputPresent, loopPresent, canvasPresent, entry, note };
+}
+
+function appliedNote(p: Project, ok: boolean, detail: string): string {
+  const tree = Array.isArray(p.generatedTree) ? p.generatedTree.length : 0;
+  return `${ok ? "met" : "UNMET"} (${tree > 0 ? `tree ${tree} file(s)` : "single-module/no tree"}): ${detail}`;
+}
+
+/** Honest STATE reason for a FAILED kind-aware surface criterion. */
+function surfaceUnmetReason(p: Project, which: ProductSurfaceKind): string {
+  const t = productSurfaceTrace(p);
+  const code = which === "runnable" ? "RT_E_PLAN_UNDERPRODUCED" : "RT_E_UI_UNWIRED";
+  const detail =
+    which === "web"
+      ? `page surface=${t.pageFiles.length ? t.pageFiles.join(", ") : "none"}; navigation/routing=${t.navPath}`
+      : which === "game"
+        ? `input=${t.inputPresent}; loop=${t.loopPresent}; canvas=${t.canvasPresent}`
+        : `entry=${t.entry.path ?? "none"}${t.entry.stub ? " (TODO stub or absent)" : ""}${t.entry.missingDeclared.length ? `; declared surface not implemented: ${t.entry.missingDeclared.join(", ")}` : ""}`;
+  return `${code} · the emitted bytes do not carry the ${which} surface the brief's kind demands — ${detail}`;
+}
+
 // --- DoD registry -------------------------------------------------------------
 
 /**
@@ -640,6 +1093,18 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     {
       id: "p0-scorecard",
       criterion: "Feasibility scorecard present with 5 axes",
+      // Five ROW KEYS is not five ASSESSED axes: all-blank labels prove shape only.
+      advisory: (p) => {
+        const axes = p.scorecard?.axes ?? [];
+        if (axes.length < 5) return null;
+        const labelled = axes.filter((a) => typeof a?.label === "string" && a.label.trim() !== "");
+        return labelled.length === 0
+          ? {
+              note: `SKIP — all ${axes.length} scorecard axis rows are unlabelled; the count probe verifies ROW COUNT, not that any axis was assessed`,
+              code: "RT_E_SUBSTANCE_EMPTY",
+            }
+          : null;
+      },
       probe: (p) => p.scorecard != null && (p.scorecard.axes?.length ?? 0) >= 5,
     },
     {
@@ -652,6 +1117,17 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     {
       id: "p0-lattice",
       criterion: "Intent lattice primed with at least one job",
+      // One blank job row is not one job.
+      advisory: (p) => {
+        const jobs = p.lattice?.jobs ?? [];
+        if (jobs.length < 1) return null;
+        return jobs.every((j) => typeof j !== "string" || j.trim() === "")
+          ? {
+              note: `SKIP — the lattice carries ${jobs.length} job row(s) but every one is blank; "at least one job" is unproven`,
+              code: "RT_E_SUBSTANCE_EMPTY",
+            }
+          : null;
+      },
       probe: (p) => p.lattice != null && (p.lattice.jobs?.length ?? 0) >= 1,
     },
     {
@@ -662,6 +1138,17 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       id: "p0-brief-grounded",
       criterion:
         "Non-empty brief produced job/entity vocabulary (lattice.vague must be false when the brief has ≥1 vocabulary-bearing token)",
+      // A vocabulary-free brief (a label, a stub brief) passes this probe
+      // VACUOUSLY: there is no brief vocabulary to ground, so the pass verifies
+      // nothing about grounding. Surfaced as a coded SKIP so it can never be
+      // read as "the brief was grounded".
+      advisory: (p) =>
+        briefHasVocabulary(p.brief)
+          ? null
+          : {
+              note: "SKIP — the brief carries NO vocabulary-bearing token, so this criterion verifies nothing (a vocabulary-free brief passes vacuously)",
+              code: "RT_E_CLAIM_UNVERIFIED",
+            },
       probe: (p) => !(p.lattice?.vague === true && briefHasVocabulary(p.brief)),
     },
   ],
@@ -669,13 +1156,28 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     {
       id: "p1-graph",
       criterion: "Dispatcher topology graph artifact exists for P1",
-      probe: (p) => hasArtifact(p, 1, "graph"),
+      evidenceClass: "artifact-presence",
+      unmetReason: emptyArtifactUnmetReason(1, "graph"),
+      probe: (p) => artifactHasSubstance(p, 1, "graph"),
     },
   ],
   2: [
     {
       id: "p2-memory",
       criterion: "Memory contains all three kinds (episodic, semantic, procedural)",
+      // The three KINDS being present is not three non-empty rows.
+      advisory: (p) => {
+        const rows = p.memory ?? [];
+        const kinds = new Set(rows.map((m) => m?.kind));
+        if (!["episodic", "semantic", "procedural"].every((k) => kinds.has(k as never))) return null;
+        const nonEmpty = rows.filter((m) => typeof m?.text === "string" && m.text.trim() !== "");
+        return nonEmpty.length === 0
+          ? {
+              note: `SKIP — all three memory kinds are present but every row body is blank; kind presence is not content`,
+              code: "RT_E_SUBSTANCE_EMPTY",
+            }
+          : null;
+      },
       probe: (p) => kindsPresent(p, ["episodic", "semantic", "procedural"]),
     },
     {
@@ -688,14 +1190,18 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     {
       id: "p3-mcp",
       criterion: "MCP/A2A contract artifact exists for P3",
-      probe: (p) => hasArtifact(p, 3, "mcp"),
+      evidenceClass: "artifact-presence",
+      unmetReason: emptyArtifactUnmetReason(3, "mcp"),
+      probe: (p) => artifactHasSubstance(p, 3, "mcp"),
     },
   ],
   4: [
     {
       id: "p4-security",
       criterion: "Security isolation artifact exists for P4",
-      probe: (p) => hasArtifact(p, 4, "security"),
+      evidenceClass: "artifact-presence",
+      unmetReason: emptyArtifactUnmetReason(4, "security"),
+      probe: (p) => artifactHasSubstance(p, 4, "security"),
     },
     {
       // 216o (T-107.3 · P0-02/P0-06 · W5-L3): the four "decision ledger records
@@ -707,6 +1213,7 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // AGREE with its tag (label, gate, action, token path) or it fails closed.
       id: "p4-approved",
       criterion: "P4 approved — decision ledger records the approver (human or autopilot)",
+      evidenceClass: "ledger-record",
       probe: (p) => approved(p, 4),
     },
   ],
@@ -714,11 +1221,14 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     {
       id: "p5-validation",
       criterion: "Validation artifact exists for P5",
-      probe: (p) => hasArtifact(p, 5, "validation"),
+      evidenceClass: "artifact-presence",
+      unmetReason: emptyArtifactUnmetReason(5, "validation"),
+      probe: (p) => artifactHasSubstance(p, 5, "validation"),
     },
     {
       id: "p5-complete",
       criterion: "P5 approved — decision ledger records the approver (human or autopilot)",
+      evidenceClass: "ledger-record",
       probe: (p) => approved(p, 5),
     },
   ],
@@ -733,6 +1243,7 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // floor a later "tested" verdict builds on (04_verification_design §6).
       id: "p6-test",
       criterion: "Last template self-test run passed",
+      evidenceClass: "executed-self-test",
       probe: (p) =>
         p.lastTest != null &&
         p.lastTest.ok === true &&
@@ -742,12 +1253,18 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     {
       id: "p6-source",
       criterion: "Generated source is non-empty",
-      probe: (p) => typeof p.generatedSource === "string" && p.generatedSource.length > 0,
+      // VACUOUS-PASS fix (2026-10-06): the probe read `length > 0`, so a single
+      // whitespace byte (or a lone "\n") satisfied a criterion named
+      // "non-empty". Whitespace-only source is empty in substance; the trim
+      // makes the criterion honest without lowering any bar.
+      probe: (p) => typeof p.generatedSource === "string" && p.generatedSource.trim().length > 0,
     },
     {
       id: "p6-artifact",
       criterion: "Generated code artifact exists for P6",
-      probe: (p) => hasArtifact(p, 6, "code"),
+      evidenceClass: "artifact-presence",
+      unmetReason: emptyArtifactUnmetReason(6, "code"),
+      probe: (p) => artifactHasSubstance(p, 6, "code"),
     },
     {
       // E-07 (04_verification_design §8.1–8.4): machine-verification promotion
@@ -778,6 +1295,11 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       id: "p6-verified",
       criterion:
         'Machine verification promoted a tested verdict (lastTest.label === "tested" with evidenceHash)',
+      // The honesty line: this accepts an EXECUTED tree-run of the emitted
+      // tree's own spec tests. It does NOT run the emitted package.json's
+      // declared `typecheck`/`build` (unsatisfiable on every fresh temp-dir
+      // tree), so the gate records `executed-tree-tests`, never `built-artifact`.
+      evidenceClass: "executed-tree-tests",
       probe: (p) => {
         const lt = p.lastTest as {
           ok?: boolean;
@@ -812,6 +1334,16 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       criterion:
         "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode)",
       unmetReason: briefFitUnmetReason,
+      evidenceClass: "lexical-brief-fit",
+      // A vocabulary-free brief imposes no identifier demand, so the pass is
+      // VACUOUS (nothing was checked). Surfaced as a coded SKIP, never silent.
+      advisory: (p) =>
+        briefHasVocabulary(p.brief)
+          ? null
+          : {
+              note: "SKIP — the brief carries no vocabulary-bearing token, so no brief noun can be demanded (vacuous pass)",
+              code: "RT_E_CLAIM_UNVERIFIED",
+            },
       probe: (p) => {
         // fixes/255 §P1: in tree mode generatedSource is the ESM BARREL
         // (`export * from …` only) — measured 0 brief hits on a fully
@@ -847,22 +1379,109 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // archTrace() carries the reqTrace detail the engine's P6 stamp surfaces.
       id: "p6-arch",
       criterion:
-        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)",
+        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path) — a no-tree PASS is a SKIP, not product-complete",
+      evidenceClass: "structural-tree-map",
+      // The vacuous pass, surfaced honestly and WITHOUT changing the verdict:
+      // an absent tree still passes (so the keyless floor is not hard-broken),
+      // but `runGate` now reports this SKIP in its `advisories` list and the
+      // recorded gate artifact names it — so a no-tree state can no longer read
+      // as product-complete. archProductComplete() remains false on the skip.
+      advisory: (p) =>
+        archTrace(p).present
+          ? null
+          : {
+              note: "SKIP — no generatedTree: p6-arch passes vacuously on the single-module/keyless path; this is NOT product-complete (archProductComplete=false)",
+              code: "RT_E_CLAIM_UNVERIFIED",
+            },
+      // A3-E7 (2026-10-06): a FAILED no-tree p6-arch names WHICH attempt state
+      // landed the floor (a dangling attempt vs a recorded refusal), coded.
+      unmetReason: (p) => {
+        if (archTrace(p).present) return "";
+        const newest = newestSynthesisEvent(p);
+        if (newest === "p6.synthesis.attempt") {
+          return "RT_E_PLAN_UNDERPRODUCED · keyed synthesis was ATTEMPTED and dangled with no terminal outcome — no generatedTree landed";
+        }
+        if (newest === "p6.synthesis.refused") {
+          return "RT_E_PLAN_UNDERPRODUCED · keyed synthesis was ATTEMPTED and REFUSED — no generatedTree landed (the single-module floor stands)";
+        }
+        return "";
+      },
       probe: (p) => {
         const t = archTrace(p);
         if (t.present) return t.missing.length === 0 && t.stubFiles.length === 0;
-        // W61 C8 (FINDINGS O-03): an absent tree is a legitimate SKIP only on
-        // the keyless floor. When the NEWEST `p6.synthesis.*` log is a bare
-        // `attempt` with no terminal outcome recorded, a keyed synthesis dangled
-        // and landed no tree — the probe FAILS CLOSED rather than passing
-        // vacuously over exactly the under-production it exists to catch. A
-        // recorded terminal (`refused`, etc.) or no synthesis log at all (the
-        // deterministic floor) leaves the legacy pass.
-        const synthLogs = (p.logs ?? []).filter(
-          (l) => typeof l?.event === "string" && l.event.startsWith("p6.synthesis."),
-        );
-        const newest = synthLogs[synthLogs.length - 1];
-        return !(newest && newest.event === "p6.synthesis.attempt");
+        // W61 C8 (FINDINGS O-03) + A3-E7: an absent tree is a legitimate SKIP
+        // only on the pure keyless floor. When the NEWEST `p6.synthesis.*` log
+        // is a bare `attempt` with no terminal outcome (a dangling keyed
+        // synthesis) OR a recorded terminal `refused` (a keyed synthesis ran
+        // and was rejected), the probe FAILS CLOSED rather than passing
+        // vacuously over exactly the under-production it exists to catch. Only
+        // no synthesis log at all (the deterministic floor) leaves the legacy
+        // advisory pass.
+        const newest = newestSynthesisEvent(p);
+        return !(newest === "p6.synthesis.attempt" || newest === "p6.synthesis.refused");
+      },
+    },
+    {
+      // ADDITIVE (kind-aware surfaces): a brief that names web pages must land
+      // at least one real page surface AND a navigation/routing path. Measured:
+      // ten fresh trees carried no router and zero page files yet passed the
+      // tree-run checks — nothing checked that the product matched the brief's
+      // kind. A non-web brief imposes nothing (advisory N/A). Fails CLOSED on a
+      // web brief with no surface — a skip is never a pass.
+      id: "p6-web-surface",
+      criterion:
+        "Web-kind product surface: a brief naming pages carries ≥1 real page surface AND a navigation/routing path (a non-web brief imposes nothing)",
+      code: "RT_E_UI_UNWIRED",
+      evidenceClass: "product-surface-map",
+      advisory: (p) =>
+        productSurfaceKindOf(p) === "none"
+          ? "N/A — the brief names no web page surface; this criterion imposes no requirement"
+          : null,
+      unmetReason: (p) => surfaceUnmetReason(p, "web"),
+      probe: (p) => {
+        if (productSurfaceKindOf(p) !== "web") return true;
+        const t = productSurfaceTrace(p);
+        return t.pageFiles.length > 0 && t.navPath;
+      },
+    },
+    {
+      // ADDITIVE (kind-aware surfaces): a game brief must land an input surface,
+      // a loop, AND a canvas/rendering surface.
+      id: "p6-game-surface",
+      criterion:
+        "Game-kind product surface: a game brief carries an input surface, a loop, and a canvas/rendering surface (a non-game brief imposes nothing)",
+      code: "RT_E_UI_UNWIRED",
+      evidenceClass: "product-surface-map",
+      advisory: (p) =>
+        productSurfaceKindOf(p) === "none"
+          ? "N/A — the brief names no game surface; this criterion imposes no requirement"
+          : null,
+      unmetReason: (p) => surfaceUnmetReason(p, "game"),
+      probe: (p) => {
+        if (productSurfaceKindOf(p) !== "game") return true;
+        const t = productSurfaceTrace(p);
+        return t.inputPresent && t.loopPresent && t.canvasPresent;
+      },
+    },
+    {
+      // ADDITIVE (kind-aware surfaces): a cli/library/service brief must land a
+      // runnable entry that is NOT a throw-TODO stub and that exposes the
+      // surface the brief declares (measured: one emitted CLI's entry threw
+      // TODO(E-15) on every command). A non-runnable brief imposes nothing.
+      id: "p6-runnable-entry",
+      criterion:
+        "Runnable-kind entry: a cli/library/service brief carries a non-stub entry (not a throw-TODO/absent module) implementing the declared surface (a non-runnable brief imposes nothing)",
+      code: "RT_E_PLAN_UNDERPRODUCED",
+      evidenceClass: "product-surface-map",
+      advisory: (p) =>
+        productSurfaceKindOf(p) === "none"
+          ? "N/A — the brief names no cli/library/service surface; this criterion imposes no requirement"
+          : null,
+      unmetReason: (p) => surfaceUnmetReason(p, "runnable"),
+      probe: (p) => {
+        if (productSurfaceKindOf(p) !== "runnable") return true;
+        const t = productSurfaceTrace(p);
+        return !t.entry.stub && t.entry.missingDeclared.length === 0;
       },
     },
   ],
@@ -870,6 +1489,17 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     {
       id: "p7-competitors",
       criterion: "At least two competitors mapped",
+      // Two ROWS is not two MAPPED competitors: blank names prove nothing.
+      advisory: (p) => {
+        const list = p.competitors ?? [];
+        const named = list.filter((c) => typeof c?.name === "string" && c.name.trim() !== "");
+        return list.length >= 2 && named.length < 2
+          ? {
+              note: `SKIP — ${list.length} competitor row(s) present but only ${named.length} carries a name; "mapped" is unproven for the rest`,
+              code: "RT_E_SUBSTANCE_EMPTY",
+            }
+          : null;
+      },
       probe: (p) => (p.competitors?.length ?? 0) >= 2,
     },
     {
@@ -893,17 +1523,34 @@ export const DOD: Record<PhaseId, GateItem[]> = {
         (p.research?.length ?? 0) > 0 ||
         p.meta?.liveUnavailable === true ||
         liveResearchAttemptUnavailable(p),
+      // A corpus ROW with zero fetched items is an empty corpus: the probe's
+      // `length > 0` would otherwise pass it. (The liveUnavailable waiver path
+      // writes no rows and is documented honest, so it is not qualified here.)
+      advisory: (p) => {
+        const rows = p.research ?? [];
+        if (rows.length === 0) return null;
+        const withItems = rows.filter((r) => Array.isArray(r?.items) && r.items.length > 0);
+        return withItems.length === 0
+          ? {
+              note: `SKIP — ${rows.length} research row(s) present but none carries a fetched item; the corpus is empty in substance`,
+              code: "RT_E_SUBSTANCE_EMPTY",
+            }
+          : null;
+      },
     },
   ],
   8: [
     {
       id: "p8-ui",
       criterion: "UI artifact exists for P8",
-      probe: (p) => hasArtifact(p, 8, "ui"),
+      evidenceClass: "artifact-presence",
+      unmetReason: emptyArtifactUnmetReason(8, "ui"),
+      probe: (p) => artifactHasSubstance(p, 8, "ui"),
     },
     {
       id: "p8-complete",
       criterion: "P8 approved — decision ledger records the approver (human or autopilot)",
+      evidenceClass: "ledger-record",
       probe: (p) => approved(p, 8),
     },
   ],
@@ -911,11 +1558,14 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     {
       id: "p9-cicd",
       criterion: "CI/CD artifact exists for P9",
-      probe: (p) => hasArtifact(p, 9, "cicd"),
+      evidenceClass: "artifact-presence",
+      unmetReason: emptyArtifactUnmetReason(9, "cicd"),
+      probe: (p) => artifactHasSubstance(p, 9, "cicd"),
     },
     {
       id: "p9-complete",
       criterion: "P9 approved — decision ledger records the approver (human or autopilot)",
+      evidenceClass: "ledger-record",
       probe: (p) => approved(p, 9),
     },
   ],
@@ -923,14 +1573,18 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     {
       id: "p10-edge",
       criterion: "Edge inference artifact exists for P10",
-      probe: (p) => hasArtifact(p, 10, "edge"),
+      evidenceClass: "artifact-presence",
+      unmetReason: emptyArtifactUnmetReason(10, "edge"),
+      probe: (p) => artifactHasSubstance(p, 10, "edge"),
     },
   ],
   11: [
     {
       id: "p11-tools",
       criterion: "Live tool artifact exists for P11",
-      probe: (p) => hasArtifact(p, 11, "tools"),
+      evidenceClass: "artifact-presence",
+      unmetReason: emptyArtifactUnmetReason(11, "tools"),
+      probe: (p) => artifactHasSubstance(p, 11, "tools"),
     },
   ],
   12: [
@@ -966,6 +1620,111 @@ function evaluate(project: Project, items: GateItem[]): { ok: boolean }[] {
 }
 
 /**
+ * Build the additive evidence-class reading from the same probe results the
+ * verdict uses. Purely descriptive: it reads `item.evidenceClass` (default
+ * `"field-predicate"`) and never changes a verdict, the unmet list or the
+ * evidence hash. `productBuildVerified` is true only when a MET criterion's
+ * class is `"built-artifact"` — no current criterion is, which is the point:
+ * a green P6 gate did not build the emitted package.
+ */
+function buildEvidenceClass(items: GateItem[], results: { ok: boolean }[]): GateEvidenceClass {
+  const byCriterion = items.map((item, i) => {
+    const cls = item.evidenceClass ?? "field-predicate";
+    return { id: item.id, accepted: results[i].ok, class: cls, note: EVIDENCE_CLASS_NOTE[cls] };
+  });
+  const classes = [...new Set(byCriterion.filter((c) => c.accepted).map((c) => c.class))].sort();
+  const productBuildVerified = classes.includes("built-artifact");
+  const note = productBuildVerified
+    ? "green evidence includes a real built artifact"
+    : classes.includes("executed-tree-tests")
+      ? 'green evidence is EXECUTED tree-run spec tests, not a BUILT product — the emitted package.json declares typecheck/build that this gate did NOT run; a green gate must not be read as "the emitted product builds"'
+      : classes.length === 0
+        ? "no criterion passed — this gate verifies nothing"
+        : `green evidence classes: ${classes.join(", ")}`;
+  // ACTIONABLE qualifier: every met class is non-executed evidence. This is the
+  // "label / artifact-presence" case the honesty gap named — a green seal that
+  // proves presence or structure, never that the product ran or built.
+  const weak = classes.length > 0 && classes.every((c) => !EXECUTED_EVIDENCE_CLASSES.has(c));
+  const qualification: EvidenceQualification = weak
+    ? {
+        weak: true,
+        code: "RT_E_CLAIM_UNVERIFIED",
+        note:
+          `this PASS rests on NON-EXECUTED evidence only (classes: ${classes.join(", ")}) — it verifies presence/structure/` +
+          `ledger, NOT that the emitted product runs or builds; a green seal here must not be read as "the product builds".`,
+      }
+    : { weak: false, note: "", code: null };
+  return { byCriterion, classes, productBuildVerified, note, qualification };
+}
+
+// --- gate-evidence qualification over a persisted record (2026-10-06) -------
+//
+// The ONE reader every GREEN-GATE surface shares (acceptance's fleet reading,
+// doctor's factory claim, product-quality's reading): it re-runs each COMPLETE
+// phase's DoD gate and reports the CLASS of evidence the green verdict rests
+// on, with `RT_E_CLAIM_UNVERIFIED` when every met criterion is non-executed
+// (presence / ledger / structural / lexical). "Agree by construction": all
+// three call THIS function, so they can never state a different qualification
+// for the same bytes.
+
+export type GateEvidencePhaseRow = {
+  phase: number;
+  /** Classes of the MET criteria for this phase's gate. */
+  classes: EvidenceClassName[];
+  productBuildVerified: boolean;
+  /** True when the phase passed but no met criterion is executed/built evidence. */
+  weak: boolean;
+  note: string;
+};
+
+export type GateEvidenceReading = {
+  /** One row per COMPLETE phase (the gates that are surfaced). */
+  phases: GateEvidencePhaseRow[];
+  /** Phases whose green gate rests on non-executed evidence only. */
+  weakPhases: number[];
+  /** Phases whose green evidence includes a real BUILT artifact (always [] today). */
+  productBuildVerifiedPhases: number[];
+  note: string;
+};
+
+/** Pure, total: a non-object input yields the empty reading (never a fabricated pass). */
+export function gateEvidenceOfProject(project: unknown): GateEvidenceReading {
+  const p = project && typeof project === "object" && !Array.isArray(project) ? (project as { phases?: unknown }) : null;
+  const records = Array.isArray(p?.phases) ? (p!.phases as unknown[]) : [];
+  const phases: GateEvidencePhaseRow[] = [];
+  for (const r of records) {
+    if (!r || typeof r !== "object" || Array.isArray(r)) continue;
+    const row = r as { id?: unknown; status?: unknown };
+    const id = typeof row.id === "number" ? row.id : Number(row.id);
+    if (!Number.isInteger(id) || id < 0 || id > 12) continue;
+    if (row.status !== "complete") continue;
+    const gate = runGate(project as Project, id);
+    const ec = gate.evidenceClass;
+    phases.push({
+      phase: id,
+      classes: ec.classes,
+      productBuildVerified: ec.productBuildVerified,
+      weak: ec.qualification?.weak === true,
+      note: ec.qualification?.weak ? ec.qualification.note : ec.note,
+    });
+  }
+  const weakPhases = phases.filter((x) => x.weak).map((x) => x.phase);
+  const productBuildVerifiedPhases = phases.filter((x) => x.productBuildVerified).map((x) => x.phase);
+  return {
+    phases,
+    weakPhases,
+    productBuildVerifiedPhases,
+    note: phases.length === 0
+      ? "no complete phase recorded — no gate evidence to qualify"
+      : productBuildVerifiedPhases.length > 0
+        ? `green evidence includes a BUILT artifact on phase(s) ${productBuildVerifiedPhases.join(", ")}`
+        : weakPhases.length > 0
+          ? `green gate(s) on phase(s) ${weakPhases.join(", ")} rest on NON-EXECUTED evidence only (RT_E_CLAIM_UNVERIFIED) — a green seal must not be read as "the product builds"`
+          : "green gate evidence includes executed evidence on every complete phase",
+  };
+}
+
+/**
  * Machine-checkable DoD gate for one phase. evidenceHash = FNV-1a over the
  * sorted "id:pass|fail" pairs of every probe — a VERDICT-VECTOR fingerprint,
  * not artifact evidence: the same probe verdict set always yields the same
@@ -977,25 +1736,34 @@ function evaluate(project: Project, items: GateItem[]): { ok: boolean }[] {
 export function runGate(
   project: Project,
   phase: number,
-): { pass: boolean; unmet: GateItem[]; evidenceHash: string } {
+): {
+  pass: boolean;
+  unmet: GateItem[];
+  advisories: GateAdvisory[];
+  evidenceHash: string;
+  evidenceClass: GateEvidenceClass;
+} {
   const items = DOD[phase as PhaseId];
   // A22: an unregistered phase must fail loudly — never a vacuous pass with a
   // constant "empty evidence" hash.
   if (!items) {
+    const unregistered: GateItem[] = [
+      {
+        id: `unregistered-${phase}`,
+        criterion: `No DoD criteria registered for phase ${phase}`,
+        // V1-M2 (345 F2): the refusal is self-describing, never a bare
+        // TypeError — `evaluate(project, undefined)` is unreachable and the
+        // reason names why the phase cannot pass vacuously.
+        reason: `phase ${phase} is outside the registered gate graph — runGate refuses rather than passing vacuously`,
+        probe: () => false,
+      },
+    ];
     return {
       pass: false,
-      unmet: [
-        {
-          id: `unregistered-${phase}`,
-          criterion: `No DoD criteria registered for phase ${phase}`,
-          // V1-M2 (345 F2): the refusal is self-describing, never a bare
-          // TypeError — `evaluate(project, undefined)` is unreachable and the
-          // reason names why the phase cannot pass vacuously.
-          reason: `phase ${phase} is outside the registered gate graph — runGate refuses rather than passing vacuously`,
-          probe: () => false,
-        },
-      ],
+      unmet: unregistered,
+      advisories: [],
       evidenceHash: String(fnv1a(`unregistered:${phase}`)),
+      evidenceClass: buildEvidenceClass(unregistered, [{ ok: false }]),
     };
   }
   const results = evaluate(project, items);
@@ -1010,16 +1778,45 @@ export function runGate(
     .filter((r) => !r.ok)
     .map(({ item }) => {
       const reason = item.unmetReason?.(project);
-      if (typeof reason !== "string" || reason.trim() === "") return item;
+      // A registry code (when the item carries one) is PREPENDED to the reason so
+      // a red criterion is machine-classifiable, never bare prose; the evidence
+      // hash hashes `id:pass|fail` only and is unaffected.
+      if (typeof reason !== "string" || reason.trim() === "") {
+        if (typeof item.code === "string") {
+          return { ...item, reason: item.code, criterion: `${item.criterion} — ${item.code}` };
+        }
+        return item;
+      }
       return { ...item, reason, criterion: `${item.criterion} — ${reason}` };
     });
+  // The symmetric honest surface for a QUALIFIED PASS: an `advisory`-bearing
+  // criterion that PASSES reports why its pass is not product-complete (the
+  // p6-arch no-tree SKIP). It never changes the verdict or the evidence hash.
+  const advisories = items
+    .map((item, i) => ({ item, ok: results[i].ok }))
+    .filter((r) => r.ok)
+    .map(({ item }) => {
+      const raw = item.advisory?.(project);
+      if (raw === null || raw === undefined) return null;
+      const note = typeof raw === "string" ? raw : raw.note;
+      if (typeof note !== "string" || note.trim() === "") return null;
+      const code = typeof raw === "string" ? undefined : raw.code;
+      return { id: item.id, criterion: item.criterion, note, ...(code ? { code } : {}) };
+    })
+    .filter((a): a is GateAdvisory => a !== null);
   // 322 X3 (OBS-6): verdict-vector fingerprint only — see the runGate docstring;
   // it does not cover artifact content.
   const evidence = items
     .map((item, i) => `${item.id}:${results[i].ok ? "pass" : "fail"}`)
     .sort()
     .join("|");
-  return { pass: unmet.length === 0, unmet, evidenceHash: String(fnv1a(evidence)) };
+  return {
+    pass: unmet.length === 0,
+    unmet,
+    advisories,
+    evidenceHash: String(fnv1a(evidence)),
+    evidenceClass: buildEvidenceClass(items, results),
+  };
 }
 
 /**
@@ -1056,9 +1853,16 @@ export function readyFor(
 /** Render a gate verdict as a standard artifact (kind "gate", per ArtifactKind). */
 export function gateArtifact(
   phase: number,
-  r: { pass: boolean; unmet: string[]; evidenceHash: string },
+  r: {
+    pass: boolean;
+    unmet: string[];
+    evidenceHash: string;
+    advisories?: GateAdvisory[];
+    evidenceClass?: GateEvidenceClass;
+  },
 ): Artifact {
   const title = `DoD gate — P${phase}`;
+  const advisories = Array.isArray(r.advisories) ? r.advisories : [];
   const body = [
     `# ${title}`,
     ``,
@@ -1067,8 +1871,43 @@ export function gateArtifact(
     ...(r.unmet.length > 0
       ? [`Unmet criteria:`, ...r.unmet.map((u) => `- ${u}`)]
       : [`All criteria met for phase ${phase}.`]),
+    // An honest qualifier for a PASS that is not product-complete (the p6-arch
+    // no-tree SKIP). Rendered only when one exists — an ordinary pass is
+    // byte-identical to before.
+    ...(advisories.length > 0
+      ? [
+          ``,
+          `Qualified passes (**NOT** product-complete):`,
+          ...advisories.map((a) => `- ${a.id}: ${a.note}${a.code ? ` [code: ${a.code}]` : ""}`),
+        ]
+      : []),
+    // ADDITIVE (additive-only): the class of evidence a PASS accepted, so a
+    // green gate records WHAT it verified — in particular that a green P6 gate
+    // ran executed tree-run spec tests and did NOT build the emitted package.
+    // Rendered only when the caller supplies the reading (an ordinary call is
+    // byte-identical to before).
+    ...(r.evidenceClass
+      ? [
+          ``,
+          `Evidence class (what a PASS verified):`,
+          `- accepted: ${r.evidenceClass.classes.join(", ") || "none"}`,
+          `- product build verified: ${r.evidenceClass.productBuildVerified ? "yes" : "no"} — ${r.evidenceClass.note}`,
+          // ACTIONABLE qualifier (additive): a PASS whose met evidence is all
+          // non-executed (label / artifact-presence / structural) is rendered
+          // LOUDLY, with its code, so a green seal is never read as "it builds".
+          ...(r.evidenceClass.qualification?.weak
+            ? [
+                `- **QUALIFIED**: ${r.evidenceClass.qualification.note}`,
+                `- code: ${r.evidenceClass.qualification.code ?? "RT_E_CLAIM_UNVERIFIED"}`,
+              ]
+            : []),
+        ]
+      : []),
     ``,
-    `Evidence hash: ${r.evidenceHash}`,
+    // A3-E15: the label says what the value IS — a verdict-vector fingerprint,
+    // not content evidence. The old "Evidence hash:" read as artifact evidence
+    // a reader could trust (it never was one).
+    `Verdict fingerprint (FNV-1a over sorted id:pass|fail — NOT artifact content): ${r.evidenceHash}`,
   ].join("\n");
   return {
     id: `gate-p${phase}-${r.evidenceHash.slice(0, 8)}`,
@@ -1134,6 +1973,8 @@ export function recordGateInto(project: Project, phase: PhaseId): Project {
     pass: r.pass,
     unmet,
     evidenceHash: r.evidenceHash,
+    advisories: r.advisories,
+    evidenceClass: r.evidenceClass,
   });
   return {
     ...project,
@@ -1301,7 +2142,8 @@ export function hardDodBlockInto(
       ? [`Unmet criteria:`, ...r.unmet.map((g) => `- ${g.id}: ${g.criterion}`)]
       : [`No unmet criteria were reported (blocked on an empty/unknown gate).`]),
     ``,
-    `Evidence hash: ${r.evidenceHash}`,
+    // A3-E15: the label says what the value IS (a verdict-vector fingerprint).
+    `Verdict fingerprint (FNV-1a over sorted id:pass|fail — NOT artifact content): ${r.evidenceHash}`,
     ``,
     `> Fix the unmet evidence (re-run the phase, deepen research, run real`,
     `> verification) or turn Hard DoD off for this project to advance.`,

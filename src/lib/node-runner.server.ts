@@ -444,7 +444,10 @@ export function redactSecrets(text: string): string {
   // echo them). split/join — never build a RegExp from a key (metachar-safe).
   for (const name of ["DEEPSEEK_API_KEY", "XAI_API_KEY", "TAVILY_API_KEY"]) {
     const apiKey = process.env[name];
-    if (typeof apiKey === "string" && apiKey.length > 0) {
+    // A present-but-blank value is the documented keyless disable; `" "` is a
+    // common shell quirk. Redacting a whitespace-only key would replace EVERY
+    // space in the text, so require non-whitespace content (347).
+    if (typeof apiKey === "string" && apiKey.trim().length > 0) {
       out = out.split(apiKey).join("[secret-hidden]");
     }
   }

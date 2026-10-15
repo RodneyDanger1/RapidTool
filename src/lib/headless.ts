@@ -26,11 +26,18 @@ import {
   applyPhaseResult,
   approveHitl,
   emptyProject,
+  // 2026-10-05: the engine's off-intent relevance filter — the headless research
+  // overlay applies the SAME partition the engine's fetchResearch does, so an
+  // off-topic listing/category page never earns the headless corpus or an
+  // artifact (engine.ts owns the filter semantics; this is the single call).
+  filterRelevantResearch,
   hydrateProject,
   inferName,
   liveDegradeRow,
   liveLayer,
   liveLayerFailureRow,
+  // A4-E9: the additive `degraded` phase marker for a thrown live/keyed pass.
+  markPhaseDegraded,
   // W36 N2 (fixes/281): F3-01 residue closed — engine.ts exports readWildPlan (R13-f02 landed it;
   // store.ts consumes it); the former inline accessor in generateWildPlan is re-pointed to it.
   readWildPlan,
@@ -39,6 +46,9 @@ import {
   sealHonesty,
   stageWildPlan,
   stampPacket,
+  // A4-E2(c)/A4-E3: the ONE honest terminal-status derivation (complete vs
+  // complete_with_failures) shared by the run boundary and `summary`.
+  terminalStatusOf,
   unlockRetry,
   withLiveDegradeRows,
 } from "./engine.ts";
@@ -51,7 +61,7 @@ import { exportPacketText, exportProjectJson, importProject, slugName } from "./
 import { applyReportResult, validateReport, type ReportApplyReason } from "./report-intake.ts";
 import { canEnter, PHASES, PHASE_LAST, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
 import { evaluatePolicy, seatLabel, seatTokenPath } from "./policy.ts";
-import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
+import { applyWrites, rollback, snapshotPaths, WRITE_SET_LOCK } from "./write-set.ts";
 // T-107.7 (W33 lane L2 write half · W36 lane N2 read half): the real run
 // checkpoint. headless IS the bare-Node host whose runs know a project working
 // dir — the per-phase commit below writes the bounded snapshot beside
@@ -548,6 +558,9 @@ async function bareNodeLiveOverlay(
   let cited = false;
   let provider: string | null = null;
   let narrative: string | null = null;
+  // W61 C9 parity: how many findings the relevance filter dropped (logged below
+  // only when non-zero, so a clean run stays byte-identical).
+  let droppedOffIntent = 0;
   // OV-29 (fixes/252, W19-L1): coded rows for the two degrades below that used
   // to be comment-only. Folded into OV-13's shape — a keyed failure (or a
   // failed keyless search) must leave a coded, visible row, never a silent
@@ -561,8 +574,32 @@ async function bareNodeLiveOverlay(
     const query = researchQueryFor(project, phase);
     const result = isTavilyConfigured() ? await tavilySearch(query) : await freeWebSearch(query);
     if (result && result.ok === true && (result.items?.length ?? 0) > 0) {
-      items = result.items as ResearchItem[];
-      cited = true;
+      // W61 C9 parity (2026-10-05): apply the engine's off-intent relevance
+      // filter to the headless findings — the engine's fetchResearch drops
+      // category/listing pages before they earn the corpus; the headless path
+      // used to persist them verbatim (`items` above). Accepted findings land
+      // in the artifacts/corpus; dropped ones are excluded but counted below so
+      // a filter that removed everything reads as "ran, nothing relevant" (a
+      // cited:false return), never as a fabricated corpus entry.
+      const relevant = filterRelevantResearch(project, phase, result.items as ResearchItem[]);
+      items = relevant.accepted as ResearchItem[];
+      droppedOffIntent = relevant.dropped.length;
+      cited = items.length > 0;
+      if (droppedOffIntent > 0) {
+        // Visible, coded-class warn row: an off-intent drop is never silent
+        // (honesty contract — a filtered result is not a fabricated one).
+        degradeRows.push({
+          ts: Date.now(),
+          phase,
+          level: "warn",
+          event: `p${phase}.live.research.filtered`,
+          detail: `${droppedOffIntent} off-intent result(s) dropped by the relevance filter (W61 C9) — ${
+            items.length === 0
+              ? "no relevant finding landed"
+              : `${items.length} relevant finding(s) kept`
+          }.`,
+        });
+      }
       // M-10 drift fix: remember which backend actually served the findings
       // (the engine's corpus entries carry `provider`; headless's must too).
       provider =
@@ -766,7 +803,12 @@ export async function runPhase(
     // record nothing: no live layer ran.
     const floor = applyPhaseResult(project, phase);
     if (!opts.live) return floor;
-    return { ...floor, logs: [...floor.logs, liveLayerFailureRow(phase, err)].slice(-200) };
+    // A4-E9: stamp the phase RECORD as degraded as well as the coded row, so a
+    // thrown live pass is distinguishable from a genuine floor completion.
+    return markPhaseDegraded(
+      { ...floor, logs: [...floor.logs, liveLayerFailureRow(phase, err)].slice(-200) },
+      phase,
+    );
   }
 }
 
@@ -1074,6 +1116,11 @@ export type RunResult = {
    *  a red-gate completion that the CLI surfaces as RT_E_GATES_FAILED, never
    *  as a byte-identical clean 0. */
   sealedWithFailures: boolean;
+  /** A4-E2(c) / A4-E3 (Decision D2(c)): the honest terminal status —
+   *  `complete_with_failures` when the run sealed `complete` with a dirty seal
+   *  (a recorded failed DoD gate), never a bare `complete`. Present only for a
+   *  `complete` outcome; absent on parks/caps/errors. */
+  terminalStatus?: "complete" | "complete_with_failures";
   /** W48 · 334-2 (L2): the coded class of the newest P6 synthesis refusal THIS
    *  invocation recorded (`<RT_E code> · <reason>`, codegen's refusal-log
    *  shape) — absent when the invocation appended no refusal. A P6-synthesis
@@ -1422,6 +1469,15 @@ export async function runUntilGate(
      *  the free-search corpus (P7's `p7-research`), but must not key the
      *  P8–P12 narratives. Default false ⇒ byte-identical. */
     researchLive?: boolean;
+    /** A4-E2(a) / Decision D2(a): the opt-in ADVISORY TAIL. On an `enforceDod`
+     *  run a red P6 hard-blocks the advance, so P7–P12 stay `locked` and the
+     *  run never reaches its terminal artifacts. With this flag set, the tail
+     *  phases are driven onward with enforcement temporarily relaxed (exactly
+     *  the advisory `advanceOnce` semantics) after the recorded hard block, and
+     *  the run's own `enforceDod` flag is restored on the returned record. One
+     *  `p6.tail.after-red` warn row names the transition. Default off ⇒
+     *  byte-identical. */
+    advisoryTail?: boolean;
   } = {},
 ): Promise<RunResult> {
   const autopilot = Boolean(opts.autopilot);
@@ -1469,6 +1525,72 @@ export async function runUntilGate(
     }
     if (r.stopped) break;
   }
+  // A4-E2(a) / Decision D2(a): the opt-in ADVISORY TAIL — after a red P6 the
+  // hard block stops the advance, so P7–P12 stay `locked` and the run never
+  // reaches its terminal artifacts. When `advisoryTail` is set the tail phases
+  // are driven with enforcement temporarily relaxed (EXACTLY the advisory
+  // `advanceOnce` semantics), the run's own `enforceDod` flag is restored, and
+  // one `p6.tail.after-red` warn row records the transition.
+  let tailRan = false;
+  if (
+    opts.advisoryTail === true &&
+    dodBlocked &&
+    p.currentPhase === 6 &&
+    p.status !== "complete" &&
+    p.status !== "awaiting_hitl" &&
+    p.status !== "blocked"
+  ) {
+    p = {
+      ...p,
+      logs: [
+        ...(p.logs ?? []),
+        {
+          ts: Date.now(),
+          phase: 6 as PhaseId,
+          level: "warn" as const,
+          event: "p6.tail.after-red",
+          detail:
+            "P6 hard-DoD block is recorded; the ADVISORY TAIL advances P7–P12 with enforcement relaxed (opts.advisoryTail) — the tail artifacts are advisory and the red P6 gate still stands.",
+        },
+      ].slice(-200),
+    };
+    let tailIterations = 0;
+    while (
+      tailIterations < maxSteps &&
+      p.status !== "complete" &&
+      p.status !== "awaiting_hitl" &&
+      p.status !== "blocked"
+    ) {
+      tailIterations += 1;
+      const before = p;
+      const r = await advanceOnce(
+        { ...p, enforceDod: false },
+        autopilot,
+        live,
+        opts.p6Deps,
+        opts.proven,
+        machineGates,
+        researchLive,
+      );
+      p = r.project;
+      if (r.error) events.push(r.error);
+      if (
+        p.currentPhase !== before.currentPhase ||
+        (p.artifacts?.length ?? 0) > (before.artifacts?.length ?? 0)
+      ) {
+        steps += 1;
+        commitRunCheckpoint(opts.checkpointDir, p);
+      }
+      if (r.stopped) break;
+    }
+    // Restore the run's own enforcement intent — the tail relaxes it, it does
+    // not silently flip the project's declared mode.
+    p = p.enforceDod === true ? p : { ...p, enforceDod: true };
+    tailRan = true;
+    events.push(
+      `advisory-tail: P7–P12 driven after a red P6 (p6.tail.after-red); tail phase ${p.currentPhase}`,
+    );
+  }
   // T-107.7 (W33 lane L2): a COMPLETE seal is terminal — nothing to resume ⇒
   // the checkpoint is cleared. Parks / caps / errors keep theirs: those ARE the
   // crash-recovery states `resume` exists for.
@@ -1478,7 +1600,7 @@ export async function runUntilGate(
   // T0.4: a hard-DoD block is its own terminal outcome (not "error") so CLI
   // and eval can distinguish "tool exploded" from "gate refused advance".
   const outcome: RunOutcome =
-    dodBlocked
+    dodBlocked && !tailRan
       ? "dod"
       : p.status === "awaiting_hitl"
         ? "hitl"
@@ -1606,6 +1728,14 @@ export async function runUntilGate(
   // same one the P12 delivery writer uses — so the CLI gate can branch without
   // re-deriving red gates.
   const sealedWithFailures = outcome === "complete" && !sealHonesty(finalProject).clean;
+  // A4-E2(b) / Decision D2(b): stamp the packet on ANY stop — a parked / capped
+  // / hard-blocked / errored run reaches its terminal artifact with a packet
+  // that describes the record as returned (previously the hard-DoD block
+  // returned from `finishPhase` BEFORE `stampPacket`, so the packet kept
+  // describing the pre-block state). A3 adds the `blockedAt:{phase,unmet[]}`
+  // section to the compile for a stop behind a red gate; this call is what
+  // makes that section land on every stop.
+  finalProject = stampPacket(finalProject);
   // W46 · 332-2 (L1 / AW45-c06) + W48 · 334-2 (L1/L3): fold this invocation's
   // measured session spend and its newest keyed outcome onto the project record
   // so the saved record and the returned `summary` carry the RUN's cost, and a
@@ -1622,6 +1752,8 @@ export async function runUntilGate(
       refusalAfter.detail !== refusalBefore.detail)
       ? p6RefusalCode(refusalAfter.detail)
       : undefined;
+  const terminalStatus: "complete" | "complete_with_failures" | undefined =
+    outcome === "complete" ? (sealedWithFailures ? "complete_with_failures" : "complete") : undefined;
   return {
     project: finalProject,
     steps,
@@ -1629,6 +1761,7 @@ export async function runUntilGate(
     events,
     outcome,
     sealedWithFailures,
+    ...(terminalStatus ? { terminalStatus } : {}),
     ...(code ? { code } : {}),
   };
 }
@@ -2153,7 +2286,9 @@ export function summary(project: Project): ProjectSummary {
   return {
     name: project.name,
     currentPhase: project.currentPhase,
-    status: project.status,
+    // A4-E2(c)/A4-E3: a dirty seal must NOT render as a plain `complete` — the
+    // summary is the surface the CLI and the console read for the status chip.
+    status: terminalStatusOf(project),
     phaseCounts,
     lastGate,
     researchCount,
@@ -2399,6 +2534,11 @@ export type EmitProjectResult = {
    *  `null` when the trail's last verdict is not red (absent on the `probe`
    *  policy, which never consults the trail). */
   redTree?: RedTreeRef | null;
+  /** R2-01 (W352): the recorded below-floor refusal this emit shipped THROUGH
+   *  (`underProduced: "banner"` only). Its presence means the emitted tree is a
+   *  real but below-floor PARTIAL carrying the caution banner — never a silent
+   *  pass. Absent when the emitted plan is at/above the floor. */
+  underProduced?: { code: "RT_E_PLAN_UNDERPRODUCED"; detail: string } | null;
 } | {
   ok: false;
   error: string;
@@ -2533,6 +2673,28 @@ export function redTreeBanner(trail: TreeRunTrail): string {
   ].join("\n");
 }
 
+/** R2-01 (W352): the unmissable banner stamped at the TOP of the emitted
+ *  `README.md` when a REAL-but-below-floor partial ships under
+ *  `underProduced: "banner"`. It states the recorded refusal — never a pass —
+ *  so the artifact cannot be read as a complete build. */
+export function underProducedBanner(detail: string): string {
+  const reason = String(detail ?? "").trim().replace(/^RT_E_PLAN_UNDERPRODUCED\s*·\s*/, "");
+  const tail = reason.replace(/\r?\n/g, " ").replace(/`/g, "'");
+  return [
+    "> [!CAUTION]",
+    "> ## BELOW-FLOOR PLAN - THIS ARTIFACT IS NOT A COMPLETE BUILD (RapidTool R2-01)",
+    ">",
+    "> The project's own P6 journal records a synthesis refusal (`RT_E_PLAN_UNDERPRODUCED`):",
+    "> the emitted tree is a REAL but BELOW-FLOOR PARTIAL - fewer modules than the brief-declared",
+    "> floor. It is an artifact of a refused plan, never a passing build, and its delivery",
+    "> commit is withheld.",
+    tail.length > 0 ? `> Recorded refusal: \`${tail}\`` : "> The recorded refusal carried no detail.",
+    ">",
+    "> Synthesize the missing declared module(s) and re-emit to green.",
+    "",
+  ].join("\n");
+}
+
 /** 216 (T-07 / F-07): what `emitProject` does when the project's tree-verdict
  *  trail is an UNCLEARED red (`p6.tree.failure` with no green run since).
  *  - `refuse` (default): return a coded `RT_E_TREE_RUN_FAILED` refusal BEFORE
@@ -2545,6 +2707,16 @@ export function redTreeBanner(trail: TreeRunTrail): string {
 export type EmitProjectOptions = {
   force?: boolean;
   redTree?: "refuse" | "banner" | "probe";
+  /** R2-01 parity (W352): a REAL-but-below-floor partial (`scaffoldProject`'s
+   *  `underProductionRefusalOf`) is refused BEFORE any write by default — the
+   *  ship path never materializes a below-floor plan. `banner` opts INTO
+   *  materializing the partial (scaffold's `allowUnderProduced`), stamps the
+   *  below-floor caution banner at the top of the emitted `README.md`, and
+   *  records the refusal on the result (`underProduced`), so the tree can land
+   *  honestly WITHOUT reading as a normal artifact. The refusal is never
+   *  dropped: callers keep their post-write floor seal (the CLI's
+   *  `planUnderproductionSeal`) and can never present it as a clean pass. */
+  underProduced?: "refuse" | "banner";
 };
 
 /** W-03 (fixes/271 · §R3-f01 + AMENDMENT): CJS residue the emit-time
@@ -2649,13 +2821,29 @@ export async function emitProject(
     };
   }
   const scaffold = await import("./scaffold.ts");
+  const underProducedPolicy = opts.underProduced ?? "refuse";
   // W-03 (fixes/271 · §R3-f01 + AMENDMENT): emit-time materialization — a
   // stored tree that still carries CJS residue is rewritten to importable ESM
   // BEFORE the scaffold runs (so the tree files AND the exported
   // `.rapidtool/project.json` record carry the same bytes). Clean / no-tree
   // projects return the same reference: byte-identical emits.
   const emitProjectInput = await materializeEmitTree(project);
-  const result = scaffold.scaffoldProject(emitProjectInput);
+  // R2-01 (W352) · W356 cross-lane contract: the caller's RESOLVED under-produced
+  // policy is forwarded EXPLICITLY on every path — an absent option must never be
+  // read as a silent default again. `"banner"` maps to scaffold's `"partial"`
+  // materialization (+ the legacy `allowUnderProduced` opt-in it still honors);
+  // `"refuse"` is passed as the literal `"refuse"`, which scaffold honors by
+  // refusing BEFORE any write (zero files, coded RT_E_PLAN_UNDERPRODUCED).
+  //
+  // W356 report gap: the recorded refusal is resolved on EVERY path (not only
+  // `"banner"`), so a landed partial can never ship without `underProduced` on
+  // the result — the "never a silent partial" contract is the report's, not the
+  // caller's, to keep.
+  const underProducedDetail = scaffold.underProductionRefusalOf(emitProjectInput);
+  const result = scaffold.scaffoldProject(emitProjectInput, {
+    underProduced: underProducedPolicy === "banner" ? "partial" : "refuse",
+    ...(underProducedPolicy === "banner" ? { allowUnderProduced: true } : {}),
+  });
   if (!result.ok) {
     // R2-01 (campaign #2): a scaffold refusal is coded. The below-floor refusal
     // already carries `RT_E_PLAN_UNDERPRODUCED` as its error's registered code
@@ -2674,15 +2862,26 @@ export async function emitProject(
   // 216 (T-07): under the `banner` policy the banner is prepended to the
   // README.md body BEFORE the lock and the file loop below, so it lands
   // atomically with — and cannot drift from — the rest of the emit.
-  const banner =
+  const redBanner =
     trail !== null && trail.last === "red" && redTreePolicy === "banner" ? redTreeBanner(trail) : null;
+  // W356: the below-floor banner is stamped only for the caller policy that
+  // ADMITTED the partial (`"banner"`); the report below is unconditional.
+  const underBanner =
+    underProducedPolicy === "banner" && underProducedDetail !== null
+      ? underProducedBanner(underProducedDetail)
+      : null;
+  const bannerParts = [redBanner, underBanner].filter((b): b is string => b !== null);
+  const banner = bannerParts.length > 0 ? bannerParts.join("\n") : null;
   const files = banner
     ? result.files.map((f) => (f.path === "README.md" ? { ...f, body: `${banner}\n${f.body}` } : f))
     : result.files;
   const target = resolve(dir);
   const intended = new Set(files.map((f) => f.path));
   const existing = walkEmitRel(target);
-  const leftovers = existing.filter((p) => !intended.has(p) && p !== ".rapidtool-emit.lock");
+  // `.rapidtool-emit.lock` and the write-set's own `.rapidtool-writeset.lock`
+  // are emit machinery, not user files: a stranded one (a killed emit) must be
+  // reclaimed by the next emit, never read as a foreign file to refuse on.
+  const leftovers = existing.filter((p) => !intended.has(p) && p !== ".rapidtool-emit.lock" && p !== WRITE_SET_LOCK);
   const ghosts = leftovers.filter((p) => GHOST_SPEC_RE.test(p) || p.startsWith("tests/"));
   const foreign = leftovers.filter((p) => !ghosts.includes(p));
   if (foreign.length > 0 && opts.force !== true) {
@@ -2732,11 +2931,13 @@ export async function emitProject(
     files.map((f) => f.path),
   );
   try {
-    const written: string[] = [];
-    for (const f of files) {
-      applyWrite(target, f.path, f.body, snap);
-      written.push(f.path);
-    }
+    // W352 (R-18): one atomic batch — each file staged (temp + rename) and the
+    // whole set guarded by the reclaimable write-set lock, so a kill mid-emit
+    // cannot leave a torn file, and a stranded lock marks a possibly-partial set
+    // for the next emit to reclaim. `applyWrites` rolls the set back on throw
+    // (the outer catch rolls back again, idempotently).
+    applyWrites(target, files, snap);
+    const written: string[] = files.map((f) => f.path);
     const wiped: string[] = [];
     for (const p of ghosts) {
       try {
@@ -2798,9 +2999,14 @@ export async function emitProject(
       ...(trail === null
         ? {}
         : {
-            redTreeBanner: banner !== null,
-            redTree: banner === null ? null : { failures: trail.failures, lastFailure: trail.lastFailure },
+            redTreeBanner: redBanner !== null,
+            redTree: redBanner === null ? null : { failures: trail.failures, lastFailure: trail.lastFailure },
           }),
+      // R2-01 (W352): the recorded below-floor refusal this PARTIAL shipped
+      // through — its presence is the machine-readable "never a silent pass".
+      ...(underProducedDetail !== null
+        ? { underProduced: { code: "RT_E_PLAN_UNDERPRODUCED" as const, detail: underProducedDetail } }
+        : {}),
     };
   } catch (err) {
     rollback(target, snap);
@@ -2831,12 +3037,46 @@ export async function emitProject(
 // ---------------------------------------------------------------------------
 export type LandEmittedTreeOptions = GitLandEmittedOptions;
 
-/** Land an EMITTED tree as one Conventional-Commits delivery commit (fixes/343_3). */
+/** W352 (R-19): run the oracle over the emitted dir as it exists NOW. A green
+ *  `--run` verdict describes the bytes of ITS invocation; an edit between then
+ *  and the commit would otherwise land unverified. Returns null when the dir
+ *  carries no emitted record (the git seam owns that structural refusal). */
+async function verifyEmittedDirBeforeCommit(dir: string): Promise<TreeRunOutcome | null> {
+  const target = resolve(dir);
+  if (!existsSync(join(target, ".rapidtool", "project.json"))) return null;
+  const ccSpec = "./compile-check." + "server.ts";
+  const cc = (await import(ccSpec)) as { treeRun?: (d: string) => Promise<TreeRunOutcome> };
+  if (typeof cc.treeRun !== "function") return null;
+  return await cc.treeRun(target);
+}
+
+/** Land an EMITTED tree as one Conventional-Commits delivery commit (fixes/343_3).
+ *  W352 (R-19): re-verify the tree immediately before landing — a commit must
+ *  be evidence of a VERIFIED tree, so a non-green re-run refuses and issues no
+ *  commit (the emitted tree stays on disk; delivery is withheld). */
 export async function landEmittedTree(
   subject: LandSubject,
   dir: string,
   opts: LandEmittedTreeOptions,
 ): Promise<GitLandResult<GitLandEmittedOk>> {
+  const verify = await verifyEmittedDirBeforeCommit(dir);
+  if (verify !== null && verify.ok !== true) {
+    const detail = [verify.error, ...(verify.tests ?? []).filter((t) => t.run !== "pass").slice(0, 1).map((t) => `${t.file}: ${t.run}`)]
+      .filter((s): s is string => typeof s === "string" && s.length > 0)
+      .join("; ");
+    // The failure shape `tree-run-red` is not in git.server.ts's GitLandFailure
+    // union (this lane does not own that file); the CLI reads reason/code/error.
+    return {
+      ok: false,
+      reason: "tree-run-red",
+      code: "RT_E_TREE_RUN_FAILED",
+      error:
+        "git delivery refused: the emitted tree did not re-verify green immediately before the commit" +
+        (detail ? ` (${detail.slice(0, 300)})` : "") +
+        " — a commit is evidence of a verified tree, so no commit was issued; the emitted tree is kept on disk.",
+      dir: resolve(dir),
+    } as unknown as GitLandResult<GitLandEmittedOk>;
+  }
   const { gitLandEmitted } = await import("./git.server.ts");
   return gitLandEmitted(subject, dir, opts);
 }
@@ -3331,8 +3571,24 @@ async function applyTreeRunTestedMint(project: Project, verdict: TreeRunOutcome)
       mintTreeRunTested?: (p: Project, o: TreeRunOutcome) => Project;
     };
     if (typeof codegen.mintTreeRunTested === "function") minted = codegen.mintTreeRunTested(project, verdict);
-  } catch {
-    /* deterministic floor stands — the honest gate record still runs */
+  } catch (err) {
+    // A4-E18 (P3): this catch used to swallow a codegen import/exec failure with
+    // NO coded row — a silent-skip region that read exactly like "the mint
+    // declined". Stamp the coded warn row (the deterministic floor still
+    // stands; the P6 DoD gate is then recorded red, never faked).
+    minted = {
+      ...project,
+      logs: [
+        ...(project.logs ?? []),
+        {
+          ts: Date.now(),
+          phase: 6 as PhaseId,
+          level: "warn" as const,
+          event: "p6.tree.tested.mint_failed",
+          detail: `${classifyError(err)} · tree-run tested mint unavailable (${(err instanceof Error ? err.message : String(err)).slice(0, 240)}) — no "tested" stamp minted; the P6 gate is recorded from the current state, never faked`,
+        },
+      ].slice(-200),
+    };
   }
   return withTreeRunVerdict(minted, verdict);
 }
@@ -3600,6 +3856,8 @@ function keepBestTree(
   // persisted, so the verdict on disk is the verdict of the tree on disk —
   // never keep a verdict computed over another tree (bakery-florist-orders:
   // the recorded gate failed p6-arch while the grafted tree passes it).
+  // 353: `kept` already carries the emitter surface stamped by codegen at tree
+  // creation, so the recompute below judges the tree this build ships.
   const recomputed = recordGateInto(kept, 6 as PhaseId);
   const g = (recomputed.phases ?? []).find((ph) => ph.id === 6)?.gate;
   const nextGate: P6JourneyResult["gate"] =
@@ -3629,6 +3887,12 @@ function keepBestTree(
  *  and appends a single `export { … };` list; both are removed here. The import
  *  strip matches the materializer's OWN specifier (codegen's `relTsImport`) so
  *  a model-authored import is never mistaken for a materializer one. Pure. */
+/** The generated shared-contract prelude's exact header (see codegen
+ *  `contractTypePreludeLines`) and a declaration line of its canonical shape. */
+const PRELUDE_HEADER_LINE_1 =
+  "// Generated shared interface contract (single source of truth — the build injects";
+const PRELUDE_HEADER_LINE_2 = "// these exact aliases; do not redeclare or redefine them).";
+const PRELUDE_DECL_RE = /^type [A-Za-z_$][\w$]* = \{.*\[key: string\]: unknown;?.*\};$/;
 function dematerializeAcceptedChunk(
   path: string,
   materialized: string,
@@ -3644,6 +3908,18 @@ function dematerializeAcceptedChunk(
     const isSiblingImport = siblingPaths.some((p) => p !== path && relTsImport(path, p) === spec);
     if (!isSiblingImport) break;
     start += 1;
+  }
+  // Strip any generated shared-contract prelude the materializer injected, so
+  // the reconstructed source is RAW again. Without this a resumed chunk is
+  // re-materialized with the SAME canonical aliases prepended a second time,
+  // and the tree's own tsc fails with `TS2300 Duplicate identifier`. The
+  // declaration shape requires the canonical `[key: string]: unknown;` body
+  // (`contractTypePreludeLines`), so a model-authored
+  // `type DayHours = { open: number; close: number };` is never mistaken for
+  // one; stacked preludes (a stale plan's aliases under a newer one) all strip.
+  while (lines[start] === PRELUDE_HEADER_LINE_1 && lines[start + 1] === PRELUDE_HEADER_LINE_2) {
+    start += 2;
+    while (start < lines.length && PRELUDE_DECL_RE.test(lines[start] ?? "")) start += 1;
   }
   let end = lines.length;
   while (end > start && lines[end - 1] === "") end -= 1;
@@ -5569,8 +5845,23 @@ export type PlanUnderproductionSeal = {
   detail: string;
 };
 
-export async function planUnderproductionSeal(project: Project): Promise<PlanUnderproductionSeal | null> {
-  const logs = Array.isArray(project?.logs) ? project.logs : [];
+/**
+ * fixes/353 — the gate-wiring seam for the drivers: stamp the emitter's own
+ * surface modules onto the project immediately before the P6 gate is recorded.
+ * Best-effort and pure: an import/scaffold failure returns the project
+ * unchanged, so the criteria stay honestly red rather than passing on a tree
+ * that was never emitted.
+ */
+export async function stampEmittedSurfaceForGate(project: Project): Promise<Project> {
+  try {
+    const scaffold = await import("./scaffold.ts");
+    return scaffold.stampEmittedSurface(project);
+  } catch {
+    return project;
+  }
+}
+
+export async function planUnderproductionSeal(project: Project): Promise<PlanUnderproductionSeal | null> {  const logs = Array.isArray(project?.logs) ? project.logs : [];
   const journaled = logs.some(
     (l) =>
       l !== null &&
@@ -6398,6 +6689,24 @@ function p6EdgeForWildStep(opts: {
   return runModeFor() === "keyed" ? runP6Edge : undefined;
 }
 
+/** W352 (R-20 / 347): the GENERAL keyed execution edge threaded into every wild
+ *  step for phases other than 6 and 7 — the SAME `runPhase(..., { live: true })`
+ *  live layer the sequential driver and the console bridge run (wild-bridge
+ *  `runWildEdgeForBridgeJson` delegates here). Before this, only the console
+ *  injected `livePhaseEdge`, so a keyed CLI/headless wild run executed the
+ *  deterministic FLOOR for every non-P6/P7 phase.
+ *  The injected seam wins in ANY key state (the engine's own contract); keyed
+ *  hosts default to the production live layer; keyless hosts thread nothing —
+ *  their bytes stay exactly the byte-identical floor. */
+function livePhaseEdgeForWildStep(opts: {
+  livePhaseEdge?: (phase: PhaseId, p: Project) => Promise<Project>;
+}): ((phase: PhaseId, p: Project) => Promise<Project>) | undefined {
+  if (typeof opts.livePhaseEdge === "function") return opts.livePhaseEdge;
+  return runModeFor() === "keyed"
+    ? (phase: PhaseId, p: Project) => runPhase(p, phase, { live: true })
+    : undefined;
+}
+
 /**
  * Wrapper over engine.wildStep — one bounded macro-run (default 24 steps,
  * clamped 1–48). Stops on any non-"advanced" outcome (paused/completed/noop)
@@ -6410,9 +6719,17 @@ export async function wildStartHeadless(
     maxSteps?: number;
     onEvent?: (seed: RtEventSeed) => void;
     agentSeal?: boolean;
+    /** A4-E11 (P2): the explicit opt-in that ARMS the documented coded machine
+     *  risk-acceptance path under the agent seal (declared rule id recorded on
+     *  the `wild.risk_accepted` row). Mirrors `wildStartRun`. */
+    acceptRiskUnderSeal?: string;
     /** 316 H3: injection seam for the P6 edge (mirrors the engine's
      *  `p6Edge`); production callers omit it — see `p6EdgeForWildStep`. */
     p6Edge?: (p: Project) => Promise<Project>;
+    /** W352 (R-20 / 347): injection seam for the GENERAL keyed edge (phases
+     *  other than 6/7); production callers omit it — see
+     *  `livePhaseEdgeForWildStep`. The injected seam wins in any key state. */
+    livePhaseEdge?: (phase: PhaseId, p: Project) => Promise<Project>;
     /** R13-f02: injection seam for the Auto-Review classifier that reviews a
      *  stored planner plan (tests); production omits it — `createNodeWildReviewer`
      *  binds the Node-side classifier, null keyless. */
@@ -6437,13 +6754,23 @@ export async function wildStartHeadless(
   // 316 H3: resolve the P6 edge ONCE per macro-run (keyed ⇒ the real
   // runP6Edge; keyless with no injected seam ⇒ undefined — nothing threaded).
   const p6Edge = p6EdgeForWildStep(opts);
+  // W352 (R-20): resolve the GENERAL keyed edge once (keyed ⇒ runPhase live;
+  // keyless with no injected seam ⇒ undefined — the byte-identical floor).
+  const livePhaseEdge = livePhaseEdgeForWildStep(opts);
   // R13-f02 (W33 lane L2): a keyed host plans before the loop advances; keyless
   // ⇒ attachWildPlan returns the project unchanged (no field, no log row).
   let current = await attachWildPlan(project);
   // R13-f02: review the planner rows and park before the first mutation.
-  const staged = await stageWildPlan(current, reviewer);
+  // A4-E5 (P1): the AGENT SEAL is threaded INTO `stageWildPlan` — under the seal
+  // a classifier APPROVE is the consent of record, so `stageWildPlan` logs
+  // `wild.plan_approved` and returns `staged:false` directly. The previous shape
+  // called the reviewer without the seal, which wrote a SPURIOUS
+  // `wild.paused_plan` park row into the append-only ledger that the caller then
+  // un-parked, and made `staged:true` a false signal.
+  const staged = await stageWildPlan(current, reviewer, { agentSeal: opts.agentSeal === true });
   current = staged.project;
   if (staged.staged) {
+    // A reject / not-configured / errored review still parks honestly.
     return {
       ok: true,
       project: foldInvocationEvidence(current, spendBaseline),
@@ -6464,8 +6791,11 @@ export async function wildStartHeadless(
     const res = await wildStep(current, {
       ...(reviewer ? { reviewer } : {}),
       ...(opts.agentSeal ? { agentSeal: true } : {}),
+      ...(opts.acceptRiskUnderSeal ? { acceptRiskUnderSeal: opts.acceptRiskUnderSeal } : {}),
       // 316 H3: the real P6 edge — the seal's DoD-repair pass re-runs it.
       ...(p6Edge ? { p6Edge } : {}),
+      // W352 (R-20): the general keyed edge for every non-P6/P7 phase.
+      ...(livePhaseEdge ? { livePhaseEdge } : {}),
       onEvent: opts.onEvent ?? (() => undefined),
     });
     steps += 1;
@@ -6608,9 +6938,19 @@ export async function wildStartRun(
     maxSteps?: number;
     onEvent?: (seed: RtEventSeed) => void;
     agentSeal?: boolean;
+    /** A4-E11 (P2): the explicit opt-in that ARMS the documented coded machine
+     *  risk-acceptance path under the agent seal — the declared rule id is
+     *  recorded verbatim on the `wild.risk_accepted` ledger row. Without it the
+     *  seam is never armed (test-only) and a persistent classifier reject parks
+     *  as before. Only meaningful together with `agentSeal: true`. */
+    acceptRiskUnderSeal?: string;
     /** 316 H3: injection seam for the P6 edge (mirrors the engine's
      *  `p6Edge`); production callers omit it — see `p6EdgeForWildStep`. */
     p6Edge?: (p: Project) => Promise<Project>;
+    /** W352 (R-20 / 347): injection seam for the GENERAL keyed edge (phases
+     *  other than 6/7); production callers omit it — see
+     *  `livePhaseEdgeForWildStep`. The injected seam wins in any key state. */
+    livePhaseEdge?: (phase: PhaseId, p: Project) => Promise<Project>;
     /** R13-f02: injection seam for the Auto-Review classifier that reviews a
      *  planner plan (tests); production omits it — `createNodeWildReviewer`
      *  binds the Node-side classifier, null keyless. */
@@ -6643,6 +6983,8 @@ export async function wildStartRun(
   // 316 H3: resolve the P6 edge ONCE for the whole driven run (keyed ⇒ the
   // real runP6Edge; keyless with no injected seam ⇒ undefined).
   const p6Edge = p6EdgeForWildStep(opts);
+  // W352 (R-20): the general keyed edge for every non-P6/P7 phase.
+  const livePhaseEdge = livePhaseEdgeForWildStep(opts);
   const now = Date.now();
   const started: Project = {
     ...project,
@@ -6668,7 +7010,9 @@ export async function wildStartRun(
   // unchanged bytes — see attachWildPlan).
   current = await attachWildPlan(current);
   // R13-f02: review the planner rows and park before the first mutation.
-  const staged = await stageWildPlan(current, reviewer);
+  // A4-E5: same agent-seal threading as `wildStartHeadless` above — an approved
+  // plan under the seal executes with NO spurious `wild.paused_plan` row.
+  const staged = await stageWildPlan(current, reviewer, { agentSeal: opts.agentSeal === true });
   current = staged.project;
   if (staged.staged) {
     return {
@@ -6689,8 +7033,11 @@ export async function wildStartRun(
     const res = await wildStep(current, {
       ...(reviewer ? { reviewer } : {}),
       ...(opts.agentSeal ? { agentSeal: true } : {}),
+      ...(opts.acceptRiskUnderSeal ? { acceptRiskUnderSeal: opts.acceptRiskUnderSeal } : {}),
       // 316 H3: the real P6 edge — the seal's DoD-repair pass re-runs it.
       ...(p6Edge ? { p6Edge } : {}),
+      // W352 (R-20): the general keyed edge for every non-P6/P7 phase.
+      ...(livePhaseEdge ? { livePhaseEdge } : {}),
       onEvent: opts.onEvent ?? (() => undefined),
     });
     steps += 1;

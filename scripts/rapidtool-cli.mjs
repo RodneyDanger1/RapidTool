@@ -196,17 +196,121 @@ const VALUELESS_VALUE_FLAGS = [
   "tree",
 ];
 
-/** Refuse a value flag parsed valueless, before ANY verb dispatch. */
-function refuseValuelessFlag(cmdName, key) {
+/** Refuse a value flag parsed valueless or with an empty value, before ANY
+ *  verb dispatch. `--x=` sets the key to "" (not `true`); both spellings melt
+ *  through a `typeof args.x === "string"` read and are silently ignored — the
+ *  C1-10 `--token-ledger=` repro silently disabled the cross-process cap. */
+function refuseValuelessFlag(cmdName, key, value) {
+  const how = value === true ? "it parsed as a flag with no value" : "it parsed with an empty value";
   return respond(
     {
       ok: false,
-      error: `${cmdName}: --${key} needs a value — it parsed as a flag with no value, so it would have been silently ignored.`,
+      error: `${cmdName}: --${key} needs a value — ${how}, so it would have been silently ignored.`,
       code: "RT_E_VALIDATION",
       remedy: `Pass the value (--${key} <value> or --${key}=<value>), or drop the flag if you did not mean to set it.`,
     },
     1,
   );
+}
+
+// W49 · 335-4 (Switchboard) closed the valueless/numeric value-flag classes; a
+// flag name the CLI does not know at all still rode parseArgs through to every
+// arm as an inert key (a typo like `emit --gti` read as a successful emit, and
+// a per-verb flag misplaced on another verb was silently dropped). The
+// documented contract is that `--help <verb>` lists a verb's accepted flags, so
+// an unknown flag is a usage error: refused pre-dispatch (exit 1,
+// RT_E_VALIDATION) naming the flag. This set is every `--flag` the CLI itself
+// references (help text + `args` reads); a guard test pins its parity with the
+// source so a new flag cannot ship without registering here.
+const KNOWN_FLAGS = new Set([
+  "accept", "actor", "advise", "advisory", "agent-seal", "allow-empty", "anchor", "apply",
+  "approve", "approve-all", "ask", "autopilot", "brief", "budget", "by", "check",
+  "dir", "draft", "effect", "evidence", "file", "find", "force", "from-gate",
+  "git", "help", "history", "html", "i-am-human", "id", "ids", "kind",
+  "knowledge", "knowledge-file", "limit", "list", "live", "mark-stale",
+  "max-steps", "mcp-call", "mcp-call-args", "name", "note", "out", "pause",
+  "phase", "policies", "project", "propose", "query", "reason", "red-tree",
+  "refute", "replace", "report", "require-verified", "resume", "resynthesize",
+  "run", "save", "seat", "slug", "start", "steps", "stop", "store", "supersede",
+  "tags", "title", "token-ledger", "tree", "unattended", "verify", "verify-kind",
+  "write",
+]);
+
+/** Refuse a flag the CLI does not recognise, before ANY verb dispatch. */
+function refuseUnknownFlag(cmdName, key) {
+  return respond(
+    {
+      ok: false,
+      error: `${cmdName}: unknown flag --${key} — it is not a flag this CLI accepts, so it would have been silently ignored.`,
+      code: "RT_E_VALIDATION",
+      remedy: `Run \`--help ${cmdName}\` for the verb's accepted flags, then fix the spelling or drop it.`,
+    },
+    1,
+  );
+}
+
+// B1-F2 (P1): KNOWN_FLAGS above is ONE global set, so a flag that belongs to
+// another verb was still silently accepted (`doctor --start` → ok:true;
+// `mine --dir . --git --limit 1` → ok:true) — contradicting the documented
+// contract that `--help <verb>` lists THE flags that verb accepts. The accepted
+// set is DERIVED from the verb's own synopsis (`USAGE.commands[verb]`), so the
+// doc IS the contract and a flag cannot ship without appearing in the verb line
+// it is read on. A flag parsed onto the wrong verb is refused coded BEFORE
+// dispatch, naming the verb and the remedy.
+let VERB_FLAGS = null;
+/** The flags `verb` documents in its own `--help` line, or null for an unknown verb. */
+function acceptedFlagsFor(verb) {
+  if (VERB_FLAGS === null) {
+    VERB_FLAGS = new Map();
+    for (const [name, line] of Object.entries(USAGE.commands)) {
+      VERB_FLAGS.set(name, new Set([...String(line).matchAll(/--([a-z][a-z0-9-]+)/g)].map((m) => m[1])));
+    }
+  }
+  return VERB_FLAGS.get(verb) ?? null;
+}
+
+/** Flags documented GLOBALLY (the README's own sections), so every verb may carry them. */
+const UNIVERSAL_FLAGS = new Set(["help", "token-ledger"]);
+
+/** Refuse a KNOWN flag that the dispatched verb does not document. */
+function refuseVerbFlag(cmdName, key) {
+  return respond(
+    {
+      ok: false,
+      error: `${cmdName}: --${key} is not a flag \`${cmdName}\` accepts — it is documented for a different verb, so it would have been silently ignored.`,
+      code: "RT_E_VALIDATION",
+      remedy: `\`--help ${cmdName}\` lists the flags \`${cmdName}\` accepts; run the flag's own verb instead, or drop it.`,
+    },
+    1,
+  );
+}
+
+// B1-F4 (P2): the headless lifecycle verbs (`deepen` / `wild`) return a typed
+// `{ ok:false, reason }` for their DOCUMENTED state refusals — and nothing else.
+// The arms used to relabel EVERY `ok:false` as RT_E_PHASE_ILLEGAL/exit 1, so an
+// internal/backend failure returned as a result would have read as a usage
+// error, contradicting the documented "exit 4 = backend or internal runtime
+// failure". Only a NAMED state reason is the phase-illegal class (carrying the
+// result's own code when it names one); anything else is an internal failure and
+// is re-thrown to the arm's own catch, which codes it and exits 4.
+const LIFECYCLE_STATE_REASONS = new Set([
+  "not-wild",
+  "not-active",
+  "already-active",
+  "already-complete",
+  "not-research",
+  "not-complete",
+]);
+
+/** @param {string} verb @param {{reason?:unknown,error?:unknown,code?:unknown}} res */
+function refuseLifecycle(verb, res) {
+  if (LIFECYCLE_STATE_REASONS.has(String(res.reason))) {
+    return respond(
+      { ok: false, reason: res.reason, error: res.error, code: typeof res.code === "string" ? res.code : "RT_E_PHASE_ILLEGAL" },
+      1,
+    );
+  }
+  throw new Error(`${verb}: unexpected refusal (${String(res.reason)}) — ${String(res.error)}`);
 }
 
 // W49 · 335-4 (Switchboard): the documented NUMERIC flags, whose non-numeric
@@ -429,8 +533,10 @@ function respond(result, exitCode) {
         // payload instead of an invented event name.
         event: "cli.invocation",
         // fixes/348 (W1): RtEventSeed.capture is REQUIRED (rt-events.ts:110) —
-        // the exit rows used to omit it entirely. Point it at this emit site.
-        capture: "scripts/rapidtool-cli.mjs:415",
+        // the exit rows used to omit it entirely. Point it at this emit site
+        // (the `cliLogEvent({` call above; scripts/diagnose-audit.test.mjs pins
+        // that this line number really is that call site).
+        capture: "scripts/rapidtool-cli.mjs:519",
         // fixes/348 (W1): the loaded project's current phase when one was
         // loaded, else the honest null (never a guessed phase).
         phase: CLI_PHASE,
@@ -737,7 +843,13 @@ async function keyResolutionDriver() {
 // Non-secret provenance respond() reads to build a dynamic remedy. NEVER the key.
 let KEY_SOURCE = null; // { kind, path, tail, conflict }
 
-/** Resolve DEEPSEEK_API_KEY from <cwd>/.env + the process env and INSTALL it. */
+/** Resolve DEEPSEEK_API_KEY + TAVILY_API_KEY from <cwd>/.env + the process env
+ *  and INSTALL both, each under the SAME documented precedence (`.env` wins; a
+ *  present-but-blank process value is an intentional disable) and the same
+ *  loud, coded, tail-only conflict signal. The research layer reads
+ *  `process.env.TAVILY_API_KEY` directly (`tavily.server.ts`), so without this
+ *  hop a configured `.env` Tavily key never reached P0/P7/P11 research on the
+ *  bare-Node path. Never prints a key — tails only. */
 async function installRepoEnvKey() {
   let text = "";
   try {
@@ -756,6 +868,15 @@ async function installRepoEnvKey() {
   // 401 then names `<cwd>/.env` rather than "the process environment".
   process.env.RAPIDTOOL_LLM_ENV_FILE = DOTENV_PATH;
   const parsed = mod.parseEnvFile(text);
+  // Loud, coded, tail-only. stderr only — stdout stays exactly one JSON object.
+  const warnConflict = (name, conflict) => {
+    try {
+      process.stderr.write(mod.formatShadowWarning(name, DOTENV_PATH, conflict) + "\n");
+    } catch {
+      /* stderr unusable — the conflict is still resolved, never silently */
+    }
+  };
+  // DeepSeek: install + record the active source (the provider's 401 provenance).
   const resolution = mod.resolveApiKey({
     name: "DEEPSEEK_API_KEY",
     envFileValue: parsed.DEEPSEEK_API_KEY ?? null,
@@ -775,14 +896,17 @@ async function installRepoEnvKey() {
     mod.setActiveKeySource(null);
     KEY_SOURCE = null;
   }
-  if (resolution.conflict) {
-    // Loud, coded, tail-only. stderr only — stdout stays exactly one JSON object.
-    try {
-      process.stderr.write(mod.formatShadowWarning("DEEPSEEK_API_KEY", DOTENV_PATH, resolution.conflict) + "\n");
-    } catch {
-      /* stderr unusable — the conflict is still resolved, never silently */
-    }
-  }
+  if (resolution.conflict) warnConflict("DEEPSEEK_API_KEY", resolution.conflict);
+  // Tavily (research): the SAME precedence. No active-source record — the
+  // Tavily provider reads process.env at call time and names the wire itself.
+  const tavily = mod.resolveApiKey({
+    name: "TAVILY_API_KEY",
+    envFileValue: parsed.TAVILY_API_KEY ?? null,
+    envFilePath: DOTENV_PATH,
+    processValue: process.env.TAVILY_API_KEY ?? null,
+  });
+  if (tavily.effective) process.env.TAVILY_API_KEY = tavily.effective.value;
+  if (tavily.conflict) warnConflict("TAVILY_API_KEY", tavily.conflict);
 }
 
 // ---------------------------------------------------------------------------
@@ -994,10 +1118,51 @@ function resolveCheckpointTarget(value) {
 // contract — parked → 2, hard-DoD block → 1 RT_E_GATE_PENDING, a complete seal
 // with failed gates is never a clean 0 → 1 RT_E_GATES_FAILED — and carries the
 // resume provenance (`checkpoint`) + `unattended: true` markers in `extras`.
-// The run/gate arm predates this helper and is intentionally untouched.
+// The run/gate arm predates this helper and is intentionally untouched, but
+// this mapper MUST NOT be a weaker door: before PR-16/B5's parity fix it had no
+// RUNLOCK scan and no no-progress refusal, so `resume`/`unattended` could
+// present a clean result produced against a moving tree, or an ok:true re-park
+// at 0 steps. Both are now refused coded, and `outcome` rides every branch.
 // ---------------------------------------------------------------------------
-function respondDriveOutcome(h, res, { path, extras = {} }) {
+function respondDriveOutcome(
+  h,
+  res,
+  /** @type {{ path?: string | null; extras?: Record<string, any>; runlockStartMs?: number | null }} */ {
+    path,
+    extras = {},
+    runlockStartMs = null,
+  },
+) {
   const sealed = h.summary(res.project);
+  // PR-16 (B5/C-11) in-run RUNLOCK guard — same contract as run/gate: if the
+  // repo's own `src/**`/`scripts/**` changed while this run executed, its bytes
+  // are suspect. A scheduler verb is not exempt.
+  const runlockViolations =
+    typeof h.runlockEditViolations === "function" && typeof runlockStartMs === "number"
+      ? h.runlockEditViolations(REPO_ROOT, runlockStartMs)
+      : [];
+  if (runlockViolations.length > 0) {
+    respond(
+      {
+        ok: false,
+        path,
+        ...extras,
+        code: "RT_E_SRC_EDITED_DURING_RUN",
+        error:
+          `the run overlapped a repo source edit (RUNLOCK): ${runlockViolations
+            .slice(0, 5)
+            .join(", ")}${runlockViolations.length > 5 ? ` (+${runlockViolations.length - 5} more)` : ""} ` +
+          "— the run's artifacts were produced against a moving tree; freeze the tree and re-run.",
+        runlock: { runStartMs: runlockStartMs, violations: runlockViolations },
+        steps: res.steps,
+        stopped: res.stopped,
+        outcome: res.outcome,
+        summary: sealed,
+      },
+      1,
+    );
+    return;
+  }
   if (res.outcome === "dod") {
     respond(
       {
@@ -1036,6 +1201,7 @@ function respondDriveOutcome(h, res, { path, extras = {} }) {
         steps: res.steps,
         stopped: res.stopped,
         events: res.events,
+        outcome: res.outcome,
         sealedWithFailures: true,
       },
       1,
@@ -1043,6 +1209,32 @@ function respondDriveOutcome(h, res, { path, extras = {} }) {
     return;
   }
   const parked = res.project.status === "awaiting_hitl" || res.project.status === "blocked";
+  // W61 B3 (parity with run/gate): a drive that advanced NOTHING and did not
+  // reach a designed park or a clean seal is STUCK — an ok:true/exit-0 re-park
+  // at 0 steps hides the stall. Surface it coded instead.
+  if (!parked && res.steps === 0 && res.outcome !== "complete") {
+    const lastEvent =
+      Array.isArray(res.events) && res.events.length > 0 ? res.events[res.events.length - 1] : null;
+    respond(
+      {
+        ok: false,
+        path,
+        ...extras,
+        code: "RT_E_GATE_PENDING",
+        error:
+          (typeof lastEvent === "string" && lastEvent.length > 0 ? lastEvent : "the drive made no progress") +
+          ` — it ran but advanced nothing (steps: 0, outcome: ${res.outcome}). ` +
+          "Resolve the stuck phase (a red P6 stall is reopened with `retry`) before re-running.",
+        summary: sealed,
+        steps: res.steps,
+        stopped: res.stopped,
+        events: res.events,
+        outcome: res.outcome,
+      },
+      1,
+    );
+    return;
+  }
   respond(
     {
       ok: true,
@@ -1060,9 +1252,33 @@ function respondDriveOutcome(h, res, { path, extras = {} }) {
       steps: res.steps,
       stopped: res.stopped,
       events: res.events,
+      outcome: res.outcome,
     },
     parked ? 2 : 0,
   );
+}
+
+/**
+ * Persist through the busy-aware helper (M6-04 parity for the single-decision
+ * verbs). A still-live writer gets the README-documented busy refusal at exit 1
+ * + RT_E_BUSY instead of the bare saveProject throw escaping to the global exit-4
+ * catch (the 308 map6 mislabel). `extras` ride the refusal (e.g. a drive mode).
+ */
+async function saveProjectBusyOrRefuse(h, path, project, extras = {}) {
+  const saved = await h.saveProjectBusyAware(path, project);
+  if (!saved.ok) {
+    respond(
+      {
+        ok: false,
+        path,
+        ...extras,
+        code: "RT_E_BUSY",
+        error: `${saved.error} — another writer held ${saved.lockPath} through the bounded retry window; wait for it to exit and re-run this verb.`,
+      },
+      1,
+    );
+  }
+  return saved;
 }
 
 /**
@@ -1077,7 +1293,7 @@ function respondDriveOutcome(h, res, { path, extras = {} }) {
  * `verifiedProduct` is true ONLY when every one of those is green. It never
  * weakens the substance/red gate (that gate still withholds the commit).
  */
-async function deliveryVerification(h, { dir, runVerdict, evidenceHash }) {
+async function deliveryVerification(h, { dir, runVerdict, evidenceHash, committed = true, noop = false }) {
   const run = runVerdict && typeof runVerdict === "object" ? runVerdict : null;
   const declared = run && typeof run.declaredScriptsVerified === "boolean" ? run.declaredScriptsVerified : null;
   let ui = { wired: false, entry: null, detail: "UI-wiring scan unavailable" };
@@ -1107,7 +1323,11 @@ async function deliveryVerification(h, { dir, runVerdict, evidenceHash }) {
   const verifiedProduct = run !== null && run.ok === true && declared === true && !run.unverifiedEntry && ui.wired === true;
   return {
     verifiedProduct,
-    committed: true,
+    // A no-op land (identical tree already committed) reports committed:false —
+    // the pre-fix record hardcoded true, so `git.noop:true, committed:false`
+    // still read as a fresh commit inside `verification`.
+    committed: committed === true,
+    noop: noop === true,
     treeRunOk: run ? run.ok === true : null,
     treeRunVerdictHash: run && typeof run.verdictHash === "string" ? run.verdictHash : null,
     treeRunTests:
@@ -1240,10 +1460,18 @@ async function main() {
   // are now redundant).
   if (cmd !== "wild" && flag(args, "agent-seal")) return refuseAgentSeal(cmd);
 
+  // Unknown flags are never silently absorbed: parseArgs stores ANY `--x` as a
+  // key, so a typo/misplaced flag used to ride to the verb as an inert key.
+  const unknownFlag = Object.keys(args).find((key) => key !== "_" && !KNOWN_FLAGS.has(key));
+  if (unknownFlag !== undefined) return refuseUnknownFlag(cmd, unknownFlag);
+
   // S3 (W46 · 332-4): a value flag with no value never rides through to a
   // silent default — refuse it coded, naming the flag, before ANY dispatch.
-  const bareValueFlag = VALUELESS_VALUE_FLAGS.find((key) => args[key] === true);
-  if (bareValueFlag !== undefined) return refuseValuelessFlag(cmd, bareValueFlag);
+  // `--x=` (an empty value) is the same class (C1-10 `--token-ledger=`).
+  const bareValueFlag = VALUELESS_VALUE_FLAGS.find(
+    (key) => args[key] === true || (typeof args[key] === "string" && args[key].trim() === ""),
+  );
+  if (bareValueFlag !== undefined) return refuseValuelessFlag(cmd, bareValueFlag, args[bareValueFlag]);
 
   // W49 · 335-4: the same refusal for a documented NUMERIC flag whose value is
   // present but not a non-negative integer (silently dropped before — see
@@ -1252,6 +1480,35 @@ async function main() {
     (key) => typeof args[key] === "string" && !/^\d+$/.test(args[key]),
   );
   if (badNumericFlag !== undefined) return refuseNonNumericFlag(cmd, badNumericFlag, args[badNumericFlag]);
+
+  // `wild --steps 0` was silently dropped by `steps ? {...}` and defaulted to
+  // 24. The documented contract is a POSITIVE bound (`--steps` clamps 1–48), so
+  // zero is refused as a usage error rather than quietly reshaped.
+  if (typeof args.steps === "string" && /^\d+$/.test(args.steps) && parseInt(args.steps, 10) === 0) {
+    return respond(
+      {
+        ok: false,
+        error: `${cmd}: --steps expects a positive integer (got ${args.steps}).`,
+        code: "RT_E_VALIDATION",
+        remedy: "Pass a positive step bound (--steps <n>, clamps 1–48), or drop the flag for the default.",
+      },
+      1,
+    );
+  }
+
+  // B1-F2: a KNOWN flag on the WRONG verb is the same silent-drop class as a
+  // typo. The accepted set is the verb's OWN documented line (see
+  // acceptedFlagsFor), so the help text IS the contract; an unknown verb is left
+  // to its own "Unknown subcommand" refusal. This check runs AFTER the
+  // valueless/numeric guards: a misplaced NUMERIC flag is refused with the more
+  // precise numeric message (the flag's own contract), and a misplaced boolean
+  // flag — the silent-drop defect — is refused here.
+  const accepted = acceptedFlagsFor(cmd);
+  const foreignFlag =
+    accepted === null
+      ? undefined
+      : Object.keys(args).find((key) => key !== "_" && !UNIVERSAL_FLAGS.has(key) && !accepted.has(key));
+  if (foreignFlag !== undefined) return refuseVerbFlag(cmd, foreignFlag);
 
   // C1-10 (KD-8): the opt-in cross-process campaign ledger PREFLIGHT. Load the
   // persistent ledger the caller named and refuse BEFORE any verb dispatches
@@ -1663,6 +1920,7 @@ async function main() {
         // The notice rides `checkpoint` — never a silent switch.
         const stale = fileProject ? h.checkpointSupersededBy(resumed.project, resumed.resumedFrom.phase, fileProject) : null;
         if (stale && stale.superseded && fileProject) {
+          const runlockStartMs = Date.now();
           const res = await h.runUntilGate(fileProject, {
             autopilot: flag(args, "autopilot"),
             live: flag(args, "live"),
@@ -1671,6 +1929,7 @@ async function main() {
           if (t.file) h.saveProject(t.file, res.project);
           respondDriveOutcome(h, res, {
             path: t.file,
+            runlockStartMs,
             extras: {
               resumed: false,
               checkpoint: {
@@ -1687,6 +1946,7 @@ async function main() {
           return;
         }
         const ageMs = Date.now() - resumed.savedAt;
+        const runlockStartMs = Date.now();
         const res = await h.runUntilGate(resumed.project, {
           autopilot: flag(args, "autopilot"),
           live: flag(args, "live"),
@@ -1695,6 +1955,7 @@ async function main() {
         if (t.file) h.saveProject(t.file, res.project);
         respondDriveOutcome(h, res, {
           path: t.file ?? t.dir,
+          runlockStartMs,
           extras: {
             resumed: true,
             checkpoint: { path: resumed.path, savedAt: resumed.savedAt, ageMs, resumedFrom: resumed.resumedFrom },
@@ -1796,6 +2057,7 @@ async function main() {
         // expansion chain with accepted cross-project lessons (same resolver
         // as run/gate).
         const proven = await resolveProvenRows("unattended", args, project);
+        const runlockStartMs = Date.now();
         const res = await h.runUntilGate(project, {
           autopilot: true,
           live: true,
@@ -1804,7 +2066,7 @@ async function main() {
           ...(proven.present ? { proven: proven.rows } : {}),
         });
         if (t.file) h.saveProject(t.file, res.project);
-        respondDriveOutcome(h, res, { path: t.file ?? t.dir, extras });
+        respondDriveOutcome(h, res, { path: t.file ?? t.dir, runlockStartMs, extras });
         return;
       }
 
@@ -1991,8 +2253,9 @@ async function main() {
           );
         }
         const updated = h.approve(project, { force: flag(args, "force"), actor: humanSeat ? humanSeat.actor : undefined, humanSeatToken: humanSeat ? humanSeat.humanSeatToken : undefined });
-        h.saveProject(requireProjectPath(args, "approve"), updated);
-        respond({ ok: true, path: requireProjectPath(args, "approve"), summary: h.summary(updated) }, 0);
+        const approvePath = requireProjectPath(args, "approve");
+        await saveProjectBusyOrRefuse(h, approvePath, updated);
+        respond({ ok: true, path: approvePath, summary: h.summary(updated) }, 0);
         return;
       }
 
@@ -2094,8 +2357,9 @@ async function main() {
           return respond({ ok: false, error: humanSeat.error, code: "RT_E_VALIDATION" }, 1);
         }
         const updated = h.reject(project, note.value, humanSeat ? humanSeat.actor : { decidedBy: "autopilot", seat: "harness" });
-        h.saveProject(requireProjectPath(args, "reject"), updated);
-        respond({ ok: true, path: requireProjectPath(args, "reject"), summary: h.summary(updated) }, 0);
+        const rejectPath = requireProjectPath(args, "reject");
+        await saveProjectBusyOrRefuse(h, rejectPath, updated);
+        respond({ ok: true, path: rejectPath, summary: h.summary(updated) }, 0);
         return;
       }
 
@@ -2126,8 +2390,9 @@ async function main() {
             1,
           );
         }
-        h.saveProject(requireProjectPath(args, "retry"), updated);
-        respond({ ok: true, path: requireProjectPath(args, "retry"), summary: h.summary(updated) }, 0);
+        const retryPath = requireProjectPath(args, "retry");
+        await saveProjectBusyOrRefuse(h, retryPath, updated);
+        respond({ ok: true, path: retryPath, summary: h.summary(updated) }, 0);
         return;
       }
 
@@ -2139,11 +2404,16 @@ async function main() {
         try {
           reportText = await readReportSource(reportArg.value);
         } catch (err) {
+          // A missing/unreadable --report SOURCE is a usage-class error, not a
+          // missing PROJECT: ENOENT on `--report @missing` used to classify as
+          // RT_E_PROJECT_MISSING (the wrong class — the project loaded fine).
+          const missingSource =
+            err && typeof err === "object" && ((/** @type {any} */ (err).code === "ENOENT") || /ENOENT/.test(String((/** @type {any} */ (err).message))));
           return respond(
             {
               ok: false,
               error: `ingest: cannot read --report source: ${err instanceof Error ? err.message : String(err)}`,
-              ...errCode(err, "RT_E_PROJECT_MISSING"),
+              ...(missingSource ? { code: "RT_E_VALIDATION" } : errCode(err, "RT_E_VALIDATION")),
             },
             1,
           );
@@ -2167,7 +2437,7 @@ async function main() {
           // a duplicate retry (lost-ack recovery) is success with applied:false,
           // never a fabricated applied:true.
           const res = h.ingestResult(project, report);
-          h.saveProject(path, res.project);
+          await saveProjectBusyOrRefuse(h, path, res.project);
           respond(
             { ok: true, path, summary: h.summary(res.project), applied: res.applied, reason: res.reason },
             0,
@@ -2177,17 +2447,17 @@ async function main() {
           // ReportRejectedError carrying the project with its report.rejected
           // trail log — persist the trail, then exit 1 (validation class).
           if (err && typeof err === "object" && err.name === "ReportRejectedError" && err.project) {
-            try {
-              h.saveProject(path, err.project);
-            } catch (saveErr) {
-              console.error(saveErr instanceof Error && saveErr.stack ? saveErr.stack : String(saveErr));
+            const trail = await h.saveProjectBusyAware(path, err.project);
+            if (!trail.ok) {
+              // A busy writer is the documented exit-1 class, not exit 4.
               return respond(
                 {
                   ok: false,
-                  error: `${err.message} (note: could not persist the rejection trail)`,
-                  ...errCode(saveErr, "RT_E_INTERNAL"),
+                  path,
+                  error: `${err.message} (note: could not persist the rejection trail: ${trail.error})`,
+                  code: "RT_E_BUSY",
                 },
-                4,
+                1,
               );
             }
             return respond(
@@ -2358,6 +2628,22 @@ async function main() {
               1,
             );
           }
+          // `--require-verified` opts into exit 5 for a green-but-unverified
+          // tree-run. Without `--run` in the SAME invocation no verdict is
+          // computed, so the flag was a silent no-op — refuse it rather than
+          // let a gate believe its strictness applied.
+          if (flag(args, "require-verified") && !flag(args, "run")) {
+            return respond(
+              {
+                ok: false,
+                error:
+                  "emit --require-verified requires --run — it opts into exit 5 for a green-but-unverified emitted tree-run, which is only computed when --run is requested; without --run the flag is a silent no-op.",
+                code: "RT_E_VALIDATION",
+                remedy: "Add --run (to compute the verdict the flag judges), or drop --require-verified.",
+              },
+              1,
+            );
+          }
           const dest = typeof args.out === "string" ? { path: args.out, fallback: false, error: null } : defaultOutputDir(h, project);
           const dir = dest.path;
           const target = resolve(dir);
@@ -2368,6 +2654,11 @@ async function main() {
           const res = await h.emitProject(project, target, {
             force: flag(args, "force"),
             ...(typeof redTree === "string" ? { redTree } : {}),
+            // R2-01 (W352): `--red-tree banner` admits a REAL-but-below-floor
+            // partial WITH the caution banner; the post-write floor seal below
+            // still records RT_E_PLAN_UNDERPRODUCED and withholds the commit,
+            // so the tree lands without ever reading as a clean pass.
+            ...(redTree === "banner" ? { underProduced: "banner" } : {}),
           });
           if (!res.ok) {
             // R2-01: a below-floor scaffold refusal must seal the floor code as
@@ -2398,10 +2689,27 @@ async function main() {
               refusal.planUnderproduced = seal;
               if (!floorRefused) {
                 refusal.code = seal.code;
+                // B1-F8b: the wording must be TRUE on BOTH paths. A pre-write
+                // scaffold refusal (the strict below-floor path, and every
+                // pre-write refusal) writes NOTHING, so "the emitted tree is kept
+                // on disk" pointed at a directory this invocation never
+                // populated; a bannered partial (Decision D1's default) DID
+                // materialize a tree. The scaffold's own `files` list is the
+                // materialization evidence; the directory read is the fallback
+                // when the refusal is silent about it.
+                const emitted = /** @type {any} */ (res);
+                const refusalDir = typeof emitted.dir === "string" ? emitted.dir : target;
+                const wroteHere = Array.isArray(emitted.files) && emitted.files.length > 0;
+                const dirHasContent = existsSync(refusalDir) && readdirSync(refusalDir).length > 0;
+                const disk = wroteHere
+                  ? `the emitted tree is kept on disk at ${refusalDir} —`
+                  : dirHasContent
+                    ? `this invocation wrote NO files (the directory ${refusalDir} still holds an earlier tree) —`
+                    : `this invocation wrote NO files — ${refusalDir} was never materialized —`;
                 refusal.error =
                   `emit refused at delivery: ${seal.detail} — a tree below the brief-driven floor ` +
                   `(${seal.emitted} file(s), ${seal.modules} module(s), floor ${seal.floor}) is an ` +
-                  "under-produced plan, never a normal artifact; the emitted tree is kept on disk — synthesize " +
+                  `under-produced plan, never a normal artifact; ${disk} synthesize ` +
                   "the missing module(s) and re-emit to green.";
               }
             }
@@ -2433,6 +2741,13 @@ async function main() {
           if (res.redTreeBanner === true) {
             payload.redTreeBanner = true;
             payload.redTree = res.redTree ?? null;
+          }
+          // R2-01 (W352): a below-floor partial shipped under --red-tree banner
+          // carries the caution banner and the recorded refusal — surface both
+          // so an agent driver can never read it as a clean emit.
+          if (res.underProduced) {
+            payload.underProducedBanner = true;
+            payload.underProduced = res.underProduced;
           }
           if (dest.fallback) {
             payload.fallback = true;
@@ -2690,10 +3005,13 @@ async function main() {
               };
             } else if (
               !flag(args, "allow-empty") &&
-              flag(args, "run") &&
-              runVerdict !== null &&
-              ((runVerdict.substance && runVerdict.substance.verdict === "empty") ||
-                (runVerdict.ok === true && h.treeRunTrail(project).last === "red"))
+              ((runVerdict !== null && runVerdict.substance && runVerdict.substance.verdict === "empty") ||
+                // The red trail is readable WITHOUT --run: an `emit --red-tree
+                // banner --git` (no --run) used to commit a RED-bannered tree
+                // because this hold was gated on `flag(args,"run")`. A commit
+                // is evidence of a clean, verified tree, so an uncleared red
+                // tree-run trail withholds it with no judging leg requested.
+                h.treeRunTrail(project).last === "red")
             ) {
               // W61 B1 (delivery): a commit is evidence of a substantive,
               // verified product. A tree the census reads as hollow (no job
@@ -2705,7 +3023,7 @@ async function main() {
               // BEFORE the run-red branch so an empty tree refuses with its OWN
               // specific code, never the generic tree-run-red.
               const why =
-                runVerdict.substance && runVerdict.substance.verdict === "empty"
+                runVerdict !== null && runVerdict.substance && runVerdict.substance.verdict === "empty"
                   ? 'the emitted tree has no substantive job modules (substance verdict "empty")'
                   : "the project carries an uncleared red tree-run trail";
               withheld = {
@@ -2784,6 +3102,8 @@ async function main() {
                   dir: res.dir,
                   runVerdict,
                   evidenceHash: deliveryEvidenceHash,
+                  committed: landed.committed,
+                  noop: landed.noop,
                 });
                 payload.git = {
                   dir: landed.dir,
@@ -2801,7 +3121,18 @@ async function main() {
                     "the commit landed, but the emitted product is NOT fully verified — read git.verification.unverifiedReasons";
                 }
               } else {
-                payload.git = { ok: false, reason: landed.reason, code: landed.code ?? "RT_E_INTERNAL", error: landed.error };
+                // W352 R-19: a refused delivery (including the pre-commit
+                // re-verification refusal) reports committed:false/skipped:true
+                // like every other withheld leg, so a caller never reads an
+                // absent `committed` as an unstated commit.
+                payload.git = {
+                  ok: false,
+                  committed: false,
+                  skipped: true,
+                  reason: landed.reason,
+                  code: landed.code ?? "RT_E_INTERNAL",
+                  error: landed.error,
+                };
               }
               if (!landed.ok) {
                 payload.ok = false;
@@ -3123,6 +3454,30 @@ async function main() {
         // ever persisted by this verb.
         const dirArg = requireArg(args, "dir", "tree-run");
         if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
+        // A missing/non-directory `--dir` is a USAGE error, not a red tree: the
+        // oracle cannot run over nothing, so this must refuse RT_E_VALIDATION
+        // instead of surfacing a synthetic RT_E_TREE_RUN_FAILED red verdict.
+        {
+          const dir = resolve(dirArg.value);
+          let dirStat = null;
+          try {
+            dirStat = statSync(dir);
+          } catch {
+            dirStat = null;
+          }
+          if (!dirStat) {
+            return respond(
+              { ok: false, dir, error: `tree-run: --dir ${JSON.stringify(dirArg.value)} does not exist — nothing to run.`, code: "RT_E_VALIDATION" },
+              1,
+            );
+          }
+          if (!dirStat.isDirectory()) {
+            return respond(
+              { ok: false, dir, error: `tree-run: --dir ${JSON.stringify(dirArg.value)} is not a directory.`, code: "RT_E_VALIDATION" },
+              1,
+            );
+          }
+        }
         try {
           const dir = resolve(dirArg.value);
           // PR-16 (B5/C-11): stamp the run window BEFORE executing the tree so a
@@ -3874,9 +4229,34 @@ async function main() {
       case "check": {
         // fixes/132 (C2): per-file compile verdicts over an EMITTED dir
         // (compile-check.server.ts). All pass → 0; any fail → 1 (verdicts
-        // carried on stdout); missing dir / internal error → 4.
+        // carried on stdout); a missing/non-directory --dir → 1
+        // (RT_E_VALIDATION, the usage class); an unexpected internal throw → 4.
         const dirArg = requireArg(args, "dir", "check");
         if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
+        // A missing/non-directory `--dir` is a usage error: `compileCheckDir`
+        // returns ok:false/checked:0 with a "not a directory" message, which the
+        // arm used to relabel RT_E_CHECK_FAILED (a red-compile verdict over a
+        // directory that was never compiled). Refuse RT_E_VALIDATION instead.
+        {
+          const dir = resolve(dirArg.value);
+          let dirStat = null;
+          try {
+            dirStat = statSync(dir);
+          } catch {
+            dirStat = null;
+          }
+          if (!dirStat || !dirStat.isDirectory()) {
+            return respond(
+              {
+                ok: false,
+                dir,
+                error: `check: --dir ${JSON.stringify(dirArg.value)} ${dirStat ? "is not a directory" : "does not exist"} — nothing to compile-check.`,
+                code: "RT_E_VALIDATION",
+              },
+              1,
+            );
+          }
+        }
         try {
           const cc = await checkDriver();
           const result = cc.compileCheckDir(resolve(dirArg.value));
@@ -3933,9 +4313,11 @@ async function main() {
             // the first not-ok tail); `scan` shipped an EMPTY one, so every
             // findings envelope auto-classified as the opaque RT_E_UNKNOWN
             // with NO message — an agent branching on `code` read a designed
-            // advisory outcome as an opaque failure. Name the outcome; the
+            // advisory outcome as an opaque failure. The explicit code (the
+            // check family's any-fail class) makes the coded branch stable; the
             // findings array remains the payload.
             payload.error = `scan: ${findings.length} advisory finding(s) in ${scan.dir} — heuristics, not verdicts; review findings[].rule (advisory, never blocks an emit)`;
+            payload.code = "RT_E_CHECK_FAILED";
           }
           return respond(payload, payload.ok ? 0 : 1);
         } catch (err) {
@@ -4154,12 +4536,34 @@ async function main() {
         // needed). Every skip (non-source, too large, over limit) is reported.
         const dir = requireArg(args, "dir", "mine");
         if (dir.error !== undefined) return respond({ ok: false, error: dir.error, code: "RT_E_VALIDATION" }, 1);
+        // B1-F4: a missing/non-directory --dir is a USAGE refusal (exit 1), not
+        // a vacuous empty map: `mineDir` walks whatever it is handed and returns
+        // ok:true/0 files for a path that is not there. Same class as `check`'s
+        // `--dir` guard.
+        const mineDirAbs = resolve(dir.value);
+        let mineStat = null;
+        try {
+          mineStat = statSync(mineDirAbs);
+        } catch {
+          mineStat = null;
+        }
+        if (!mineStat || !mineStat.isDirectory()) {
+          return respond(
+            {
+              ok: false,
+              dir: mineDirAbs,
+              error: `mine: --dir ${JSON.stringify(dir.value)} ${mineStat ? "is not a directory" : "does not exist"} — nothing to map.`,
+              code: "RT_E_VALIDATION",
+            },
+            1,
+          );
+        }
         const opts = {};
         if (typeof args.limit === "string" && /^\d+$/.test(args.limit)) {
           opts.maxFiles = parseInt(args.limit, 10);
         }
         try {
-          const res = await h.mineDir(resolve(dir.value), opts);
+          const res = await h.mineDir(mineDirAbs, opts);
           respond(
             {
               ok: true,
@@ -4173,9 +4577,11 @@ async function main() {
             0,
           );
         } catch (err) {
+          // B1-F4: an unexpected throw from the mapper is an INTERNAL failure
+          // (exit 4), never relabelled as a usage/validation error at exit 1.
           respond(
-            { ok: false, error: `mine: ${err instanceof Error ? err.message : String(err)}`, code: "RT_E_VALIDATION" },
-            1,
+            { ok: false, error: `mine: ${err instanceof Error ? err.message : String(err)}`, ...errCode(err, "RT_E_INTERNAL") },
+            4,
           );
         }
         return;
@@ -5016,6 +5422,27 @@ async function main() {
           );
         }
         const action = actions[0] ?? "step";
+        // 313/T4.4 — THE AGENT SEAL: `--agent-seal` opts the run into the
+        // classifier-as-approver path (coded [seat agent-seal] rows; never a
+        // 'human' seat). The engine arms read opts.agentSeal; this is the
+        // switch's last hop from the CLI.
+        const agentSeal = flag(args, "agent-seal");
+        // 2026-10-05: a governance flag is never silently ignored. `--pause` and
+        // `--stop` only mutate run state — they never drive the loop — so an
+        // `--agent-seal` beside them would be absorbed. Refuse it coded, naming
+        // the doors that DO carry it (start / resume / bare step all drive).
+        if (agentSeal && (action === "pause" || action === "stop")) {
+          return respond(
+            {
+              ok: false,
+              error: `wild: --agent-seal does not apply to --${action} — ${action} only mutates run state and never drives the classifier-as-approver loop, so the seal would be silently absorbed.`,
+              code: "RT_E_VALIDATION",
+              remedy:
+                "The seal opts the wild LOOP in: use `wild --start --agent-seal`, `wild --resume --agent-seal`, or bare `wild --agent-seal` on an active run. Drop the flag here.",
+            },
+            1,
+          );
+        }
         const path = requireProjectPath(args, "wild");
         // 174-3: pause/resume/step/stop must NOT force-stop a persisted active
         // run (CLI is the driver). --start still hydrates-stop so a crash
@@ -5050,35 +5477,44 @@ async function main() {
         // honest sink is cliLogEvent (NDJSON under logs/ via resolveLogDir —
         // seed shape matches wildStep's emits 1:1). Telemetry-side only: the
         // envelope and project bytes are untouched (no-op while rtServer null).
-        // 313/T4.4 — THE AGENT SEAL: `--agent-seal` opts the run into the
-        // classifier-as-approver path (coded [seat agent-seal] rows; never a
-        // 'human' seat). The engine arms read opts.agentSeal; this is the
-        // switch's last hop from the CLI.
-        const agentSeal = flag(args, "agent-seal");
         const opts = {
           ...(steps ? { maxSteps: steps } : {}),
           ...(agentSeal ? { agentSeal: true } : {}),
           onEvent: (seed) => cliLogEvent(seed),
         };
         try {
-          const res =
-            action === "start"
-              ? await h.wildStartRun(project, opts)
-              : action === "pause"
-                ? await h.wildPauseRun(project)
-                : action === "resume"
-                  ? await h.wildResumeRun(project)
-                  : action === "stop"
-                    ? await h.wildStopRun(project)
-                    : await h.wildStartHeadless(project, opts);
-          if (res.ok === false) {
-            return respond(
-              { ok: false, reason: res.reason, error: res.error, code: "RT_E_PHASE_ILLEGAL" },
-              1,
-            );
+          let res;
+          if (action === "start") {
+            res = await h.wildStartRun(project, opts);
+          } else if (action === "pause") {
+            res = await h.wildPauseRun(project);
+          } else if (action === "stop") {
+            res = await h.wildStopRun(project);
+          } else if (action === "resume") {
+            // 2026-10-05: `--resume` is not merely an unpause. A paused run's
+            // driver has exited (the console's startWildRun PA-01 contract), so
+            // resuming must CONTINUE the bounded loop — the documented
+            // `wild --resume continues the run` contract — or a non-expert sees
+            // a no-op. Unpause first, then drive one bounded macro-run through
+            // the same seam bare `wild` uses. A run that was NOT paused stays the
+            // byte-identical idempotent no-op the table documents.
+            const resumed = await h.wildResumeRun(project);
+            if (resumed.ok === false || resumed.changed !== true || resumed.project.wildRun?.active !== true) {
+              res = resumed;
+            } else {
+              const drove = await h.wildStartHeadless(resumed.project, opts);
+              res = drove.ok === false ? drove : { ...drove, changed: true };
+            }
+          } else {
+            res = await h.wildStartHeadless(project, opts);
           }
+          // B1-F4: the wild lifecycle's documented state refusals (not-wild /
+          // not-active / already-active / already-complete) are phase-illegal at
+          // exit 1, carrying the result's own code when it names one; an
+          // unrecognised refusal is internal and is re-thrown to the catch below.
+          if (res.ok === false) return refuseLifecycle("wild", res);
           const changed = res.changed ?? true;
-          if (changed) h.saveProject(path, res.project);
+          if (changed) await saveProjectBusyOrRefuse(h, path, res.project);
           respond(
             {
               ok: true,
@@ -5189,14 +5625,12 @@ async function main() {
         }
         try {
           const res = await h.deepenPhase(project, phase);
-          if (res.ok === false) {
-            return respond(
-              { ok: false, reason: res.reason, error: res.error, code: "RT_E_PHASE_ILLEGAL" },
-              1,
-            );
-          }
+          // B1-F4: only the documented STATE reasons are the phase-illegal class
+          // (exit 1); an unrecognised refusal is an internal failure and is
+          // re-thrown to this arm's catch (coded, exit 4).
+          if (res.ok === false) return refuseLifecycle("deepen", res);
           const path = requireProjectPath(args, "deepen");
-          if (res.changed) h.saveProject(path, res.project);
+          if (res.changed) await saveProjectBusyOrRefuse(h, path, res.project);
           respond(
             {
               ok: true,
@@ -5395,6 +5829,10 @@ async function main() {
           const stallRow = newestRow("sys.mainthread_stall");
           /** @type {{ ok: boolean; lastError: string | null }} */
           let persistHealth = { ok: true, lastError: null };
+          // A --project that fails to load is a usage-class refusal (RT_E_PROJECT_MISSING
+          // for ENOENT) held here, not merely recorded: diagnose must never return
+          // ok:true over a project it could not read (it used to).
+          let /** @type {unknown} */ loadFailure = null;
           let name = null;
           let status = null;
           let currentPhase = null;
@@ -5452,7 +5890,23 @@ async function main() {
                 ok: false,
                 lastError: loadErr instanceof Error ? loadErr.message : String(loadErr),
               };
+              loadFailure = loadErr;
             }
+          }
+          // A --project that could not be loaded is refused before any diagnosis
+          // is built: `diagnose --project <missing>` used to exit 0 with
+          // persistHealth.ok:false while every other verb refuses the same miss
+          // coded at exit 1. Same class, same exit.
+          if (loadFailure !== null) {
+            respond(
+              {
+                ok: false,
+                error: `diagnose: ${loadFailure instanceof Error ? loadFailure.message : String(loadFailure)}`,
+                ...errCode(loadFailure, "RT_E_VALIDATION"),
+              },
+              1,
+            );
+            return;
           }
           // K7 item 9 (W40 N5): the checkpoint snapshot `resume`/`unattended`
           // would re-enter, read-only via checkpoint.server.ts:readCheckpoint
@@ -5688,7 +6142,7 @@ const USAGE = {
     eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated — the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
     "tree-run": "tree-run --dir <dir> [--project <file.json>] [--require-verified]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0 (the envelope still names an unverified declared toolchain; --require-verified turns that state into exit 5); red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
     repair: "repair --dir <dir> --project <file.json> [--budget N] [--from-gate]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); PR-22 --from-gate re-opens a red RUNNING P6 first so the cycle targets the recorded unmet state instead of refusing as illegal; the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
-    edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
+    edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>] [--i-am-human]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat (--i-am-human claims the human seat through the ONE TTY-gated `humanSeatClaim` seam; --seat is not accepted here), then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
     summary: "summary --project <file.json>   # envelope: ok + summary incl. nextAction {kind,cmd,phase,why} — the SAME 7-arm vocabulary the console renders (run/approve/retry/done/running/fix-gate/unknown)",
     vault: "vault --project <file.json> [--out <dir>]   # one .md per note + _index.md MOC (default <home>/RapidTool Software/<slug>/vault)",
     search: "search --project <file.json> --query <text> [--limit <n>]  # token-overlap vault search",
@@ -5699,7 +6153,7 @@ const USAGE = {
     design: "design --project <file.json> [--html <out.html>]  # design tokens (+ standalone HTML when --html)",
     diagram: "diagram --project <file.json> --kind phases|architecture|flow [--out <file.svg>]  # SVG diagram",
     artifacts: "artifacts --project <file.json>           # index of project artifacts (id/phase/kind/title/bytes)",
-    doctor: "doctor [--tree <dir>] [--mcp-call <tool>] [--mcp-call-args <json>]  # capability pre-flight (llm/research/runner/node/factory). The `mcp` field reports the owner-gated MCP client honestly: OFF by default (RAPIDTOOL_MCP_ENABLED unset) — zero child spawned, tools null with the coded RT_E_MCP_DISABLED refusal; only when enabled AND RAPIDTOOL_MCP_SERVER is configured is the server's REAL tools/list returned (never fabricated). --mcp-call additionally runs the read-only round-trip for that tool",
+    doctor: "doctor [--project <file.json>] [--tree <dir>] [--mcp-call <tool>] [--mcp-call-args <json>]  # capability pre-flight (llm/research/runner/node/factory). The `mcp` field reports the owner-gated MCP client honestly: OFF by default (RAPIDTOOL_MCP_ENABLED unset) — zero child spawned, tools null with the coded RT_E_MCP_DISABLED refusal; only when enabled AND RAPIDTOOL_MCP_SERVER is configured is the server's REAL tools/list returned (never fabricated). --mcp-call additionally runs the read-only round-trip for that tool",
     diagnose: "diagnose [--project <file.json>]           # one-shot telemetry diagnosis from the NDJSON log tail: timeline + most-likely-cause heuristic + growth stats (no project required)",
     harvest: "harvest --project <file.json>               # bounded live-source harvest (repos/license/snippets) for the brief",
     swarm: "swarm --project <file.json>                  # deterministic advisory swarm critique of the current phase",

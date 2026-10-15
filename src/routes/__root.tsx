@@ -1,5 +1,13 @@
-import { useEffect } from "react";
-import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import { useEffect, type ReactNode } from "react";
+import {
+  createRootRoute,
+  HeadContent,
+  Outlet,
+  Scripts,
+  useRouterState,
+} from "@tanstack/react-router";
+import { authEnabled } from "@/lib/auth/client.ts";
+import { RedirectToSignIn, SIGN_IN_PATH, SignInGate } from "@/lib/auth/gates.tsx";
 import { AuthProvider } from "@/lib/auth/provider";
 import { AppNotFoundComponent } from "@/lib/error-component";
 import { installRtClient } from "@/lib/rt-client";
@@ -25,6 +33,26 @@ function TelemetryBoot() {
     installRtClient();
   }, []);
   return null;
+}
+
+/**
+ * Decision D3 · B2-F1: mount the sign-in gate for real when auth is enabled.
+ *
+ * `SignInGate` (and the redirect below) had ZERO importers, so a signed-out
+ * visitor never reached a sign-in surface at all. This is the mount site. The
+ * gate is only rendered when `authEnabled`, so the shipped
+ * `VITE_AUTH_ENABLED=false` default still renders `<Outlet />` byte-identically
+ * — a single-user local tool must not suddenly demand a login.
+ *
+ * `/login` is exempt: it renders the provider buttons itself, so redirecting it
+ * to itself would loop. A signed-out visitor on any other route is redirected
+ * to the real `/login` route (see `SIGN_IN_PATH`). While the session is still
+ * resolving `SignInGate` renders nothing, so there is no signed-out flash.
+ */
+function AuthGate({ children }: { children: ReactNode }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  if (pathname === SIGN_IN_PATH) return <>{children}</>;
+  return <SignInGate fallback={<RedirectToSignIn />}>{children}</SignInGate>;
 }
 
 export const Route = createRootRoute({
@@ -94,7 +122,13 @@ export const Route = createRootRoute({
         <TelemetryBoot />
         <PreviewHostBridge />
         <AuthProvider>
-          <Outlet />
+          {authEnabled ? (
+            <AuthGate>
+              <Outlet />
+            </AuthGate>
+          ) : (
+            <Outlet />
+          )}
         </AuthProvider>
         <Scripts />
       </body>

@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Eye,
   FastForward,
   Keyboard,
   Loader2,
@@ -65,6 +66,12 @@ import { phaseHandoff } from "@/lib/handoff";
 // sandbox.ts/dod.ts), so the console can render the same ranked outline the
 // Agent Packet carries instead of only a raw path list.
 import { repoMapElisionMarker, repoMapForProject } from "@/lib/repo-map";
+// Preview/export seam: the pure emitter -> real ZIP download (no server fs).
+import { buildSoftwareArchive } from "@/lib/software-export";
+// Decision D3 · B2-F3: the app's ONE real per-user server function. It runs
+// through authMiddleware/requireUserId, so calling it proves the auth chain
+// (an unauthenticated call is rejected 401). Wired into the Settings dialog.
+import { fetchVerifiedAccount } from "@/lib/auth/account.ts";
 import type { Artifact, ChatLogRow, JsonLog, PhaseId, PhaseRecord, PhaseStatus, Project, ProjectStatus } from "@/lib/types";
 import {
   buildVaultNotes,
@@ -103,6 +110,10 @@ import { RuntimeTimelinePane } from "@/components/runtime-timeline-pane.tsx";
 // (fixes/307_u2_pipeline.md) — 0 importers since 800a40d until this mount.
 // Additive sibling of PhaseProgressRail; nothing above is replaced.
 import { PipelineRail } from "@/components/pipeline-rail.tsx";
+// Preview-tab surface: renders the EMITTED product (entry document in a
+// sandboxed iframe + per-file tree) and packs it into a downloadable ZIP,
+// entirely from browser storage (scaffold.scaffoldProject is pure).
+import { SoftwarePreview } from "@/components/software-preview.tsx";
 
 /** One prior copilot turn — structural ChatTurn (chat.server.ts shape). */
 type ChatTurn = { role: "user" | "assistant"; text: string };
@@ -161,7 +172,7 @@ function PhaseGlyph({ status }: { status: PhaseStatus }) {
   );
 }
 
-type RunTab = "artifacts" | "packet" | "spec" | "crew" | "oracle" | "design" | "diagram" | "chat" | "vault" | "runtime" | "fixtures";
+type RunTab = "artifacts" | "preview" | "packet" | "spec" | "crew" | "oracle" | "design" | "diagram" | "chat" | "vault" | "runtime" | "fixtures";
 
 /**
  * Run-console destinations — ONE source for the tab strip, its aria-label and
@@ -173,9 +184,9 @@ type RunTab = "artifacts" | "packet" | "spec" | "crew" | "oracle" | "design" | "
  * through. Both labels below are now *derived from this array*, so they cannot
  * diverge from DOM order again.
  *
- * 111 TASK-05: ten peer tabs at equal visual weight is the owner's "LOTS OF
+ * 111 TASK-05: twelve peer tabs at equal visual weight is the owner's "LOTS OF
  * INFO" complaint. NN/g progressive disclosure (111 §2 #1) says rank and
- * defer, never delete — so all ten `RunTab` values stay reachable and every
+ * defer, never delete — so all twelve `RunTab` values stay reachable and every
  * `Tabs.Content value=` block below is byte-unchanged. `tier: "primary"`
  * renders on the strip; `"advanced"` is revealed by the "More panels" toggle.
  * `purpose` is the one-line plain-language information-scent text from
@@ -184,6 +195,7 @@ type RunTab = "artifacts" | "packet" | "spec" | "crew" | "oracle" | "design" | "
  */
 const RUN_TABS: { id: RunTab; label: string; purpose: string; tier: "primary" | "advanced" }[] = [
   { id: "artifacts", label: "Artifacts", purpose: "Every file this build produced", tier: "primary" },
+  { id: "preview", label: "Preview", purpose: "See the built product and download it", tier: "primary" },
   { id: "packet", label: "Agent packet", purpose: "The prompt to paste into a coding agent", tier: "primary" },
   { id: "chat", label: "Chat", purpose: "Ask questions about this build", tier: "primary" },
   { id: "spec", label: "Spec graph", purpose: "Which role owns which file, in order", tier: "advanced" },
@@ -209,8 +221,8 @@ function tabListLabel(tier: "primary" | "advanced"): string {
   return tier === "primary" ? `Run console panels: ${names}` : `More panels, revealed on demand: ${names}`;
 }
 
-/** Shared trigger styling — the class string is byte-identical to the ten
- *  inline copies it replaces, so the hover/active treatment is unchanged. */
+/** Shared trigger styling — the class string is byte-identical to the inline
+ *  copies it replaces, so the hover/active treatment is unchanged. */
 const TAB_TRIGGER_CLASS =
   "rt-tab flex shrink-0 flex-col items-start px-3 pt-1.5 pb-2 text-sm text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg";
 
@@ -1110,7 +1122,7 @@ function WildConsole({ project }: { project: Project }) {
    *  alert, the stop confirmation is a plain status. Before this every note
    *  ("Wild run stopped.") rendered `role="alert" text-danger`. */
   const [noteIsError, setNoteIsError] = useState(true);
-  const [busy, setBusy] = useState<"pause" | "resume" | "stop" | null>(null);
+  const [busy, setBusy] = useState<"start" | "pause" | "resume" | "stop" | null>(null);
   /** Every failure note goes through here so its tone can never be dropped. */
   const setNoteErr = (text: string) => {
     setNoteIsError(true);
@@ -1314,8 +1326,39 @@ function WildConsole({ project }: { project: Project }) {
     };
   }, [projectId, wild.enabled, runSeen]);
 
-  const visible = wild.enabled || runSeen || feed.length > 0 || note !== null;
+  // 351: keep the strip — and its clear "Start Wild Mode" affordance — visible
+  // whenever the build is runnable, not only once a run exists. A runnable but
+  // idle build previously showed no wild affordance at all below the rail.
+  const canStartWild = !wild.enabled && !runSeen && canExecute(project, false);
+  const visible = wild.enabled || runSeen || feed.length > 0 || note !== null || canStartWild;
   if (!visible) return null;
+
+  async function onStart() {
+    // Same enable→start sequence as the header toggle (setWildMode persists the
+    // edge BEFORE the start), with the refusal surfaced and the edge reverted —
+    // a refused start must never leave the switch reading "on".
+    setBusy("start");
+    try {
+      useRapid.getState().setWildMode(projectId, true);
+      const res = await useRapid.getState().startWildRun(projectId);
+      if (!res.ok) {
+        setNoteErr(
+          codedFailureText(
+            res.error && res.error.length > 0 ? res.error : "Wild run did not start.",
+            res.code,
+          ),
+        );
+        useRapid.getState().setWildMode(projectId, false);
+      } else {
+        setNote(null);
+      }
+    } catch (errCaught) {
+      setNoteErr(errCaught instanceof Error ? errCaught.message : String(errCaught));
+      useRapid.getState().setWildMode(projectId, false);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function onPauseToggle() {
     // Read live state — the prop snapshot may be stale by click time.
@@ -1417,6 +1460,22 @@ function WildConsole({ project }: { project: Project }) {
             "IDLE"
           )}
         </span>
+        {canStartWild ? (
+          <button
+            type="button"
+            onClick={() => void onStart()}
+            disabled={busy !== null}
+            title="Start the unattended loop — auto-approves eligible gates until the next human decision"
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-wild/50 bg-wild/10 px-2.5 text-2xs font-medium text-wild hover:bg-wild/20 disabled:cursor-default disabled:opacity-40"
+          >
+            {busy === "start" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Zap className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            Start Wild Mode
+          </button>
+        ) : null}
         {startedAt != null ? (
           <span className="font-mono text-xs text-faint tabular-nums">
             since {Math.max(0, Math.round((clock - startedAt) / 1000))}s
@@ -1469,6 +1528,12 @@ function WildConsole({ project }: { project: Project }) {
           </p>
         ) : null}
       </div>
+
+      {canStartWild ? (
+        <p className="mt-2 font-mono text-xs leading-relaxed text-faint">
+          Idle — start Wild Mode to auto-run gate-to-gate; it stops at the next human decision.
+        </p>
+      ) : null}
 
       {note ? (
         <p
@@ -2095,7 +2160,7 @@ export function RunScreen({ id }: { id: string }) {
   const [copiedHandoff, setCopiedHandoff] = useState(false);
   const [tab, setTab] = useState<RunTab>("artifacts");
   /** L3-05/L3-03 (346 E4): every `Tabs.Content` used to be forceMounted, so all
-   *  eleven panes mounted (and their server fetches fired) on load even when the
+   *  twelve panes mounted (and their server fetches fired) on load even when the
    *  user never opened them. Track the panes that have been ACTIVATED and mount
    *  a pane's body only then; once visited it stays mounted (the original
    *  forceMount intent for live streams). The active pane is always mounted. */
@@ -3102,6 +3167,17 @@ export function RunScreen({ id }: { id: string }) {
             </span>
           </label>
           <WildToggle project={project} />
+          {/* 351: one-click jump to the emitted-product Preview (the same tab
+              state the strip owns) so a finished build is one click from view. */}
+          <button
+            type="button"
+            onClick={() => setTab("preview")}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-border px-2 text-muted hover:border-accent/40 hover:text-fg"
+            title="Preview the emitted product and download it"
+          >
+            <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Preview</span>
+          </button>
           {/* 336-5: the view/config controls are one responsive group so the
               mobile disclosure can collapse them together with the chips while
               desktop DOM order is unchanged (they still follow Autopilot/Wild). */}
@@ -3699,7 +3775,7 @@ export function RunScreen({ id }: { id: string }) {
           <Tabs.Root value={tab} onValueChange={(v) => setTab(v as RunTab)}>
             {/* 111 TASK-05: progressive disclosure — three primary panels on the
                 strip, the remaining seven behind "More panels". The panels
-                themselves (the ten `Tabs.Content value=` blocks below) are
+                themselves (the twelve `Tabs.Content value=` blocks below) are
                 byte-unchanged, and `RunTab` is untouched. The old strip used
                 `overflow-x-auto`, which pushed the right-hand tabs outside both
                 F-pattern sweeps (111 §2 #10); the row now wraps instead. */}
@@ -3767,6 +3843,7 @@ export function RunScreen({ id }: { id: string }) {
                 `paneMounted` so an unopened pane never mounts or fetches
                 (L3-05/L3-03, 346 E4 — see the vault block below). */}
             <Tabs.Content value="artifacts" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Artifacts">
               <div className="flex gap-2 px-5 pt-3">
                 <input
                   ref={searchRef}
@@ -3828,9 +3905,21 @@ export function RunScreen({ id }: { id: string }) {
                   )
                 }
               />
+              </PaneBoundary>
+            </Tabs.Content>
+
+            <Tabs.Content value="preview" forceMount className="data-[state=inactive]:hidden">
+              {/* The emitted product itself: scaffold.scaffoldProject is pure, so
+                  the tree is produced here and rendered in a sandboxed iframe,
+                  then packed into a real ZIP — no server folder required.
+                  Lazy-mounted (the compile round-trip fires only once opened). */}
+              <PaneBoundary label="Run tab — Preview">
+              {paneMounted("preview") ? <SoftwarePreview project={project} /> : null}
+              </PaneBoundary>
             </Tabs.Content>
 
             <Tabs.Content value="packet" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Agent packet">
               {/* 343-2: the deterministic repo map — the same ranked outline the
                   Agent Packet carries, so the human sees which generated file
                   exports what and what depends on what. Rank is a documented,
@@ -3912,9 +4001,11 @@ export function RunScreen({ id }: { id: string }) {
                   Execute a phase to compile the packet.
                 </p>
               )}
+              </PaneBoundary>
             </Tabs.Content>
 
             <Tabs.Content value="spec" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Spec graph">
               <ol className="scroll-thin max-h-[65vh] space-y-2 overflow-y-auto px-5 py-4">
                 {(project.specGraph?.order ?? []).map((id, i) => {
                   const n = project.specGraph?.nodes.find((x) => x.id === id);
@@ -3933,9 +4024,11 @@ export function RunScreen({ id }: { id: string }) {
                   <li className="text-sm text-muted">Lattice empty — open a brief first.</li>
                 ) : null}
               </ol>
+              </PaneBoundary>
             </Tabs.Content>
 
             <Tabs.Content value="crew" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Crew">
               {/* 111 TASK-08 / 110 UI-05: this pane used to render an empty div
                   when there was no crew — indistinguishable from a broken tab,
                   while every sibling pane had an honest empty state. Same
@@ -3960,9 +4053,11 @@ export function RunScreen({ id }: { id: string }) {
                   ))}
                 </div>
               )}
+              </PaneBoundary>
             </Tabs.Content>
 
             <Tabs.Content value="oracle" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Oracle">
               <div className="px-5 py-4">
                 <p className="font-mono text-2xs text-muted uppercase tracking-wide">
                   Acceptance prose (A7 template)
@@ -3997,6 +4092,7 @@ export function RunScreen({ id }: { id: string }) {
                   {project.contracts.endpoints.length} endpoints
                 </p>
               ) : null}
+              </PaneBoundary>
             </Tabs.Content>
 
             {/* L3-05/L3-03 (346 E4): these panes are the expensive ones — vault
@@ -4007,14 +4103,19 @@ export function RunScreen({ id }: { id: string }) {
                 fetch and renders no DOM. forceMount keeps a visited pane alive
                 across later switches. */}
             <Tabs.Content value="vault" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Vault">
               {paneMounted("vault") ? <VaultPane project={project} /> : null}
+              </PaneBoundary>
             </Tabs.Content>
 
             <Tabs.Content value="fixtures" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Eval fixtures">
               {paneMounted("fixtures") ? <FixturesPanel /> : null}
+              </PaneBoundary>
             </Tabs.Content>
 
             <Tabs.Content value="runtime" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Runtime log">
               {paneMounted("runtime") ? (
                 <>
                   <RuntimeLogPane project={project} />
@@ -4026,18 +4127,25 @@ export function RunScreen({ id }: { id: string }) {
                   <RuntimeTimelinePane />
                 </>
               ) : null}
+              </PaneBoundary>
             </Tabs.Content>
 
             <Tabs.Content value="design" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Design">
               {paneMounted("design") ? <DesignPane project={project} /> : null}
+              </PaneBoundary>
             </Tabs.Content>
 
             <Tabs.Content value="diagram" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Diagram">
               {paneMounted("diagram") ? <DiagramPane project={project} /> : null}
+              </PaneBoundary>
             </Tabs.Content>
 
             <Tabs.Content value="chat" forceMount className="data-[state=inactive]:hidden">
+              <PaneBoundary label="Run tab — Chat">
               {paneMounted("chat") ? <ChatPane project={project} /> : null}
+              </PaneBoundary>
             </Tabs.Content>
           </Tabs.Root>
             </>
@@ -4168,6 +4276,13 @@ export function RunScreen({ id }: { id: string }) {
         </PaneBoundary>
       </div>
 
+      {/* R6-f12 / B2-F6: the dialogs + command palette are their own pane. Before
+          this they rendered AFTER every boundary in the screen root, so a render
+          throw in a modal (Settings/Guide/Shortcuts/Palette) unwound past the
+          whole Run screen to the router-level white screen. Bound here so a modal
+          crash shows one in-place `ui.pane_crash` panel and leaves the console
+          usable. */}
+      <PaneBoundary label="Dialogs and command palette">
       <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -4184,6 +4299,7 @@ export function RunScreen({ id }: { id: string }) {
           mod-chord) shortcuts while it is open (paletteOpenRef gate). Ctrl+K
           opens it; Escape / click-outside close it via its Radix dialog. */}
       <CmdPalette open={paletteOpen} onOpenChange={setPaletteOpen} entries={paletteEntries} />
+      </PaneBoundary>
     </div>
   );
 }
@@ -5155,8 +5271,11 @@ function RuntimeLogPane({ project }: { project: Project }) {
     <div className="flex flex-col gap-3 px-5 py-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-muted">
-          Runtime telemetry — uncaught errors, rejections, boundary crashes, persist failures and
-          watchdogs. Ring: {snap.stats.rows} row(s) · {snap.stats.criticalCount} critical · last
+          Runtime telemetry for THIS browser session only — uncaught errors, rejections, boundary
+          crashes, persist failures and watchdogs recorded by the in-memory ring. A CLI/headless run
+          writes its own log to disk (<span className="font-mono">.rapidtool/logs/rapidtool.ndjson</span>);
+          that on-disk tail is read by the <span className="font-mono">diagnose</span> CLI verb, not by
+          this pane. Ring: {snap.stats.rows} row(s) · {snap.stats.criticalCount} critical · last
           heartbeat {snap.ring.lastHeartbeat ? `${agoLabel(snap.ring.lastHeartbeat.ts)} ago` : "none"}
         </p>
         <button
@@ -7393,60 +7512,67 @@ function EnforceDodToggle({
   );
 }
 
-/** fixes/144 M1-L3 (D7/D9): "Export software" — the honest emit-path
- *  affordance. Emit is a CLI/server-seam action (scaffold.ts writes folders via
- *  node:fs); this page is client-side over localStorage and must NOT pretend to
- *  spawn the CLI. Surface = the exact command + the default output folder. The
- *  folder convention (<home>/RapidTool Software/<slug>/) duplicates the CLI's
- *  emit default on purpose — a browser cannot read os.homedir(); keep in sync
- *  with scripts/rapidtool-cli.mjs defaultOutputDir (fixes/144 M1 microstep 1). */
-function softwareOutDirHint(project: Project): string {
-  return `~/RapidTool Software/${slugName(project.name)}/`;
-}
-
+/** "Export software" — the browser emit-path. `scaffold.scaffoldProject` is
+ *  pure (Project JSON -> file list), so the console packs that EXACT tree into a
+ *  real ZIP in memory (zip.ts) and downloads it; no CLI, no server folder. The
+ *  Preview panel is the visual counterpart — it renders the same tree's entry
+ *  document before you download. A coded refusal from the emitter (below-floor
+ *  plan) is surfaced verbatim instead of producing an empty archive. */
 function ExportSoftwareBlock({ project }: { project: Project }) {
-  const [open, setOpen] = useState(false);
-  const slug = slugName(project.name);
-  const dir = softwareOutDirHint(project);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  function exportSoftware() {
+    setError(null);
+    setDone(null);
+    setBusy(true);
+    try {
+      const archive = buildSoftwareArchive(project);
+      if (!archive.ok) {
+        setError(`${archive.code ? `${archive.code} · ` : ""}${archive.error}`);
+        return;
+      }
+      const blob = new Blob([new Uint8Array(archive.bytes)], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = archive.filename;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setDone(`${archive.filename} — ${archive.fileCount} files`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="w-full">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="inline-flex min-h-11 items-center gap-2 rounded-md border border-accent/40 px-4 text-sm text-accent hover:border-accent/70 hover:bg-accent/5"
-      >
-        <Download className="h-4 w-4" />
-        Export software
-      </button>
-      {open ? (
-        <div className="mt-3 w-full rounded-md border border-border bg-raised px-4 py-3">
-          <p className="text-sm leading-relaxed text-fg">
-            Software export runs in the CLI — the emit seam writes folders server-side, and this
-            build lives in this browser, so there is no one-click folder export from this page.
-          </p>
-          <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-relaxed text-muted">
-            <li>
-              Save this project&apos;s JSON with the <span className="font-mono text-fg/80">Export</span>{" "}
-              button above (e.g. <code className="rounded-sm bg-raised px-1 font-mono text-xs">{slug}.json</code>).
-            </li>
-            <li>
-              From the RapidTool folder, emit the scaffold:
-              <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs leading-relaxed text-fg/90">
-                {`node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project "${slug}.json" --check`}
-              </pre>
-            </li>
-            <li>
-              The scaffold lands in the default output folder{" "}
-              <code className="rounded-sm bg-raised px-1 font-mono text-xs">{dir}</code> —{" "}
-              <span className="font-mono text-xs">~</span> is your home folder (here:{" "}
-              <code className="rounded-sm bg-raised px-1 font-mono text-xs">C:\Users\&lt;you&gt;</code>);
-              pass <code className="rounded-sm bg-raised px-1 font-mono text-xs">--out &lt;dir&gt;</code> to
-              override. Then <code className="rounded-sm bg-raised px-1 font-mono text-xs">npm install &amp;&amp; npm test</code>{" "}
-              inside the emitted folder runs its real oracle tests.
-            </li>
-          </ol>
-        </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={exportSoftware}
+          disabled={busy}
+          className="inline-flex min-h-11 items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-4 text-sm font-medium text-accent hover:border-accent/70 disabled:opacity-40"
+        >
+          <Download className="h-4 w-4" aria-hidden="true" />
+          Export software (.zip)
+        </button>
+        <span className="font-mono text-xs text-faint">
+          the emitted product tree, packed in your browser — open the Preview panel to see it first
+        </span>
+      </div>
+      {error ? (
+        <p role="alert" className="mt-2 font-mono text-xs text-danger">
+          {error}
+        </p>
+      ) : null}
+      {done ? (
+        <p role="status" className="mt-2 font-mono text-xs text-ok">
+          Downloaded {done}
+        </p>
       ) : null}
     </div>
   );
@@ -7527,6 +7653,49 @@ function Modal({
   );
 }
 
+/**
+ * D3 · B2-F3: the visible call site for the app's per-user server function.
+ * Opening Settings asks the server who it resolved for this request — the value
+ * comes back through `authMiddleware`, never from a client-supplied id. With
+ * auth disabled it is the shared `dev-user`; when auth is on and the caller is
+ * signed out the middleware rejects before the handler runs, and that rejection
+ * is surfaced here (no silent fallback).
+ */
+function VerifiedSessionRow() {
+  const [state, setState] = useState<
+    | { status: "loading" }
+    | { status: "ok"; userId: string; email: string | null }
+    | { status: "error"; message: string }
+  >({ status: "loading" });
+  useEffect(() => {
+    let cancelled = false;
+    fetchVerifiedAccount()
+      .then((account) => {
+        if (!cancelled) setState({ status: "ok", userId: account.userId, email: account.email });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setState({ status: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return (
+    <div className="flex items-center justify-between rounded-md border border-border bg-raised px-3 py-2">
+      <dt className="text-muted">Server-verified session</dt>
+      {state.status === "ok" ? (
+        <dd className="text-ok">{state.email ? `${state.userId} · ${state.email}` : state.userId}</dd>
+      ) : state.status === "error" ? (
+        <dd className="text-danger">rejected · {state.message}</dd>
+      ) : (
+        <dd className="text-faint">checking…</dd>
+      )}
+    </div>
+  );
+}
+
 /** Settings surface: explains where keys live (server-side .env, never the browser). */
 function SettingsDialog({
   open,
@@ -7560,6 +7729,7 @@ function SettingsDialog({
           <dt className="text-muted">Research backend</dt>
           <dd className={researchConfigured ? "text-ok" : "text-faint"}>{researchLabel}</dd>
         </div>
+        <VerifiedSessionRow />
       </dl>
       <p className="mt-4 text-xs leading-relaxed text-faint">
         With no backend configured the app runs in honest deterministic mode: research and scaffold rows
@@ -7702,7 +7872,7 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           ) : (
             <p
               className="mt-0.5 text-xs text-muted"
-              title="R13-f02: planning + classifier review are real on the server-side headless/CLI wild path (generateWildPlan → attachWildPlan → stageWildPlan, which parks at the wild.plan_review row before the first mutation). The console's store driver (store.startWildRun) stages a stored plan through that SAME stageWildPlan seam — engine.ts's one staging site for both real wild drivers — so a record carrying a planner plan is reviewed and parks at the plan review before the first mutation (the browser reviewer is null, so the row is the honest 'Auto-Review classifier not configured' review); no stored planner plan stages nothing (staged: false, no write). engine.readWildPlan returns the honest empty shape (steps: [], source: 'empty') — steps are never invented."
+              title="R13-f02: planning + classifier review are real on the server-side headless/CLI wild path (generateWildPlan → attachWildPlan → stageWildPlan, which parks at the wild.plan_review row before the first mutation). The console's store driver (store.startWildRun) stages a stored plan through that SAME stageWildPlan seam — engine.ts's one staging site for both real wild drivers — so a record carrying a planner plan is reviewed and parks at the plan review before the first mutation. The reviewer is host-aware (wild-review.ts createHostWildReviewer): in the browser it probes the server's LLM key and, when the key is present, routes the review through wild-bridge.ts to the production wildClassifierReview, so the row carries a real classifier verdict; only when the server reports no key is the reviewer null and the row the honest 'Auto-Review classifier not configured' review. No stored planner plan stages nothing (staged: false, no write). engine.readWildPlan returns the honest empty shape (steps: [], source: 'empty') — steps are never invented."
             >
               no plan on record — the reader finds no planner plan to stage, so a console start
               carries none (plan generation runs on the keyed server-side headless/CLI path, not

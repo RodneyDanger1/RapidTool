@@ -72,7 +72,17 @@ export async function getSessionUser(
   bearerToken?: string,
 ): Promise<VerifiedUser | null> {
   if (!authConfigured && !gateIdentityEnabled()) return null;
-  const request = getRequest();
+  let request: Request | undefined;
+  try {
+    request = getRequest();
+  } catch {
+    // No server request context (build, CLI, unit test): getRequest() THROWS
+    // outside the Start runtime rather than returning undefined, so a bare
+    // call leaked `No StartEvent found in AsyncLocalStorage` instead of the
+    // documented null. There is no request to resolve a session from, so the
+    // honest answer is "no user" — never an internal error.
+    return null;
+  }
   if (!request) return null;
   let headers = request.headers;
   if (bearerToken) {

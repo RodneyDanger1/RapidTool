@@ -61,7 +61,7 @@ import { estimateCostUsd, tokenCapFromEnv, totalTokens } from "./token-ledger.ts
 import type { TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
 // OV-9 (W18-L1): the product-complete producer's ONE derivation — the same
 // pure p6-arch trace the phase-6 gate reads (dod.ts, no node:fs in its graph).
-import { archProductComplete, archTrace } from "./dod.ts";
+import { archProductComplete, archTrace, classifyModuleSource } from "./dod.ts";
 import { fnv1a } from "./algorithms.ts";
 import { fixtureAcceptanceState, type FixtureAcceptanceState } from "./fixtures.ts";
 // PR-31/PR-32 (design §4.8 Option A): the additive machine acceptance aggregate
@@ -71,12 +71,20 @@ import {
   fleetAcceptanceFromProjects,
   fleetAlarms,
   fleetMetrics,
+  gateEvidenceOfProject,
   MACHINE_ACCEPTANCE_SEAT as ACCEPTANCE_MACHINE_SEAT,
   type FleetAcceptance,
   type FleetAlarms,
   type FleetMetrics,
   type FleetRunTelemetry,
+  type GateEvidenceReading,
 } from "./acceptance.ts";
+import { stageWiringReading, type StageWiringReading } from "./phases.ts";
+// 2026-10-05 product-quality lane: the ADDITIVE, byte-derived product reading
+// (web entry, router, distinct pages, styled layout, working ordering flow,
+// real modules, artifacts/phase). Pure + client-safe (no node: imports). It is
+// a SEPARATE reading from the factory acceptance bar and never flips any field.
+import { readProductQuality, type ProductQuality } from "./product-quality.ts";
 // 345 L2-X1: the acceptance gate's placeholder rule, shared so the doctor's
 // fixtures bar and maker-score's M1/M2 cannot disagree about one bar.
 import { fixturesHavePlaceholder } from "./brief-fixtures.ts";
@@ -151,6 +159,29 @@ export type DoctorFactory = {
   fleetMetrics: FleetMetrics;
   /** PR-32: threshold alarms; `fleetAlarms.tripped` is a hard failure. */
   fleetAlarms: FleetAlarms;
+  /**
+   * 2026-10-05 product-quality lane — the ADDITIVE, byte-derived reading of
+   * whether what landed is actually a product (real web entry, router + pages,
+   * styled layout, a working ordering flow for an ordering brief, real
+   * non-stub modules, artifacts/phase, and the `--no-empty-tree` /
+   * `--no-placeholder-only-tree` flags). It is derived from the trusted project
+   * record only; it never flips `autonomousSoftwareFactory` or any field above.
+   */
+  productQuality: ProductQuality;
+  /**
+   * ADDITIVE (2026-10-06, item 4): the P0–P12 stage-wiring census derived from
+   * the current project record — a completed phase with no non-empty deliverable
+   * (or a broken forward flow) is a coded failure, never a silent skip. Also
+   * rides `fleetAcceptance.stageWiring` so the CLI doctor envelope carries it.
+   */
+  stageWiring: StageWiringReading;
+  /**
+   * ADDITIVE (2026-10-06, item 2): the gate-evidence qualification of the
+   * current project — every green gate's accepted evidence class, with the
+   * non-executed (label/artifact-presence) passes named. Also rides
+   * `fleetAcceptance.gateEvidence`.
+   */
+  gateEvidence: GateEvidenceReading;
   /** W52 · 338-3: the derived human-acceptance conjunct (the project record's
    *  `decidedBy:"human"` stamp). Surfaced beside the machine signal so a
    *  no-human run reads "machine-complete, human stamp pending" instead of
@@ -183,45 +214,22 @@ export type JobInventory = {
 };
 
 /**
- * The deterministic keyless P6 template shape (`sandbox.buildPhase6Module`):
- * a named job list + the three template functions. A model/recorded job module
- * never carries all three (its exports are the spec's own signatures). Kept as
- * a local shape test — doctor.ts stays client-safe (no sandbox.ts import).
+ * The deterministic keyless P6 template shape — single-sourced in `dod.ts`
+ * (``isDeterministicTemplateModule``) so the job census here and the
+ * whole-tree census in `product-quality.ts` classify the same bytes with ONE
+ * rule. Kept as a local re-export-free alias for the historical signature.
  */
-function isDeterministicTemplateModule(source: string): boolean {
-  return (
-    /\bconst JOBS = \[/.test(source) &&
-    /\bfunction synthesize\s*\(/.test(source) &&
-    /\bfunction test_no_skip\s*\(/.test(source)
-  );
-}
 
-/** Classify one source file. Never invents a job body — stubs stay stubs. */
+/**
+ * Classify one source file. Never invents a job body — stubs stay stubs.
+ *
+ * 2026-10-06 (item 3): DELEGATES to `dod.classifyModuleSource`, the ONE
+ * classifier both this census and `product-quality.moduleCensus` read, so the
+ * `substance` reader compile-check surfaces and the product-quality census can
+ * never return two contradictory verdicts for the same bytes.
+ */
 export function classifyJobSource(source: string): JobSourceKind {
-  if (typeof source !== "string" || source.trim() === "") return "stub";
-  if (source.includes("TODO(E-15)")) return "stub";
-  if (/throw\s+new\s+Error\s*\(\s*(['"`])TODO\b/i.test(source)) return "stub";
-  // W45/331-4: the keyless floor (sandbox.buildPhase6Module) is a phase-
-  // bookkeeping placeholder that never implements the brief (its own doc; the
-  // p6-brief-fit DoD fails on it by construction). `scaffold.emitGeneratedHost`
-  // hosts it verbatim under the first job path, so counting it `real` made the
-  // census report {stubs:0,reexports:0,real:1} + leftover:false on a product
-  // with no job body at all. Count it as the leftover it is.
-  if (isDeterministicTemplateModule(source)) return "stub";
-  const code = source
-    .replace(/\/\*[\s\S]*?\*\//g, "\n")
-    .replace(/\/\/[^\n]*/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const stmts = code
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (stmts.length === 0) return "stub";
-  const reexport =
-    /^(export\s+(\*|\{[\s\S]*?\})\s+from\s+['"][^'"]+['"]|import\s+.+\s+from\s+['"][^'"]+['"])$/;
-  if (stmts.every((st) => reexport.test(st))) return "reexport";
-  return "real";
+  return classifyModuleSource(source);
 }
 
 export function inventoryFromJobSources(
@@ -844,6 +852,15 @@ export function factoryClaim(
   // by construction and cannot flip `autonomousSoftwareFactory` above.
   const fleetAcceptance = fleetAcceptanceFromProjects(evidence.fleet ?? []);
   const fleetTelemetry = evidence.fleetTelemetry ?? [];
+  // 2026-10-05 product-quality lane: read the current project's own bytes (the
+  // first trusted record the builders attach). Absent record ⇒ the all-absent
+  // reading (fail-closed), never a fabricated pass.
+  const productQuality = readProductQuality((evidence.fleet ?? [])[0]);
+  // ADDITIVE (2026-10-06): the stage-wiring census + gate-evidence qualification
+  // of the current project record. Both are also carried on `fleetAcceptance`
+  // (the field the CLI doctor envelope forwards).
+  const stageWiring = stageWiringReading((evidence.fleet ?? [])[0]);
+  const gateEvidence = gateEvidenceOfProject((evidence.fleet ?? [])[0]);
   return {
     autonomousSoftwareFactory,
     autonomousFactoryV2: fleetAcceptance.autonomousFactoryV2,
@@ -852,6 +869,9 @@ export function factoryClaim(
     fleetAlarms: fleetAlarms(fleetTelemetry),
     awaitingHumanAcceptance,
     machineVerifiedAcceptance: normalizeMachineVerifiedAcceptance(evidence.machineVerifiedAcceptance),
+    productQuality,
+    stageWiring,
+    gateEvidence,
     humanFixtures: human,
     leftoverJobsAreReexportsOrStubs: leftover,
     chatHasSlashToolsOnly: evidence.chatHasSlashToolsOnly !== false,

@@ -302,6 +302,12 @@ test("DoD gate verdicts are recorded on completion AND on HITL approval (A01 reg
     after0.artifacts.some((a) => a.kind === "gate" && a.phase === 0),
     "a gate artifact is emitted for P0",
   );
+  // 2026-10-05 parity with dod.recordGateInto: the console-recorded gate artifact
+  // carries the evidence-CLASS section (what a PASS verified), not just
+  // advisories — the CLI/headless recorder renders it.
+  const gateArt0 = after0.artifacts.find((a) => a.kind === "gate" && a.phase === 0);
+  assert.ok(gateArt0, "P0 gate artifact present");
+  assert.match(gateArt0!.body, /Evidence class \(what a PASS verified\)/, "the evidence class is recorded on the console gate artifact");
 
   // HITL approval (P4) records a gate on the just-approved phase (the bug review/01
   // suspected: that recordGate runs with the advanced currentPhase and misses).
@@ -374,6 +380,14 @@ test("autopilot approvals are journaled with the autopilot actor", () => {
     // console.log toys can no longer pass the gate.
     generatedSource:
       "function dispatchJobs(){ } function listTechs(){ } function orderParts(){ } function planReroutes(){ } function warehouseScan(){ } function regionalBoard(){ } function hvacShopDispatch(){ } function sameDaySla(){ } function offlineScan(){ }",
+    // 353: the brief names a "dispatch board" — a web surface — so the
+    // kind-aware `p6-web-surface` criterion applies. A gate-passing fixture
+    // must carry the emitted surface the scaffold actually writes (pages +
+    // router), exactly as a real emit would.
+    emittedSurface: [
+      { path: "src/ui/pages/DispatchBoardPage.tsx", source: "export function DispatchBoardPage(): string { return 'dispatch board'; }", hash: "fixture-page-hash", attempt: 0 },
+      { path: "src/ui/router.tsx", source: "export const routes = ['/board']; export function Router(): string { return '<nav><a href=\"#/board\">Board</a></nav>'; }", hash: "fixture-router-hash", attempt: 0 },
+    ],
     artifacts: [
       ...base.artifacts,
       {

@@ -39,9 +39,16 @@ export const authMiddleware = createMiddleware({ type: "function" })
     // `isolation.server.ts` — keep this import in sync so image `tsc` resolves
     // it, and so Vite does not ship `@tanstack/react-start/server` to the browser.
     const { assertSameSiteRequest } = await import("./isolation.server.ts");
-    const { requireUserId } = await import("./verify.server.ts");
+    const { getSessionUser, requireUserId } = await import("./verify.server.ts");
     // Reject scripted cross-site/sibling requests before touching per-user data.
     assertSameSiteRequest();
+    // The guard: throws `UnauthorizedError` when auth is on and the caller is
+    // signed out (or `AuthMisconfigurationError` on the fail-closed dev path).
     const userId = await requireUserId(context.bearerToken);
-    return next({ context: { userId } });
+    // The verified identity for per-user handlers. A second read is cheap — the
+    // session is cookie-cached (server.ts `cookieCache`) — and adds no trust:
+    // `requireUserId` above already enforced the auth contract. Null only on the
+    // auth-disabled dev path (no session to resolve).
+    const user = await getSessionUser(context.bearerToken);
+    return next({ context: { userId, email: user?.email ?? null } });
   });

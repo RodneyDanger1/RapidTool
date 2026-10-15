@@ -1,4 +1,4 @@
-import { PHASES, PHASE_BY_ID, PHASE_LAST, canEnter, phaseDef, priorsSealed } from "./phases.ts";
+import { PHASES, PHASE_BY_ID, PHASE_LAST, canEnter, phaseDef, priorsSealed, stageWiringReading } from "./phases.ts";
 import { DELIVERY_KINDS } from "./types.ts";
 import { clientSafeServerSpecifier } from "./server-spec.ts";
 // 312 C3 (CF-SE2-1): bounded settlement + trust gates for the wild-review /
@@ -33,10 +33,9 @@ import {
   stemToken,
   tokenizeWords,
 } from "./algorithms.ts";
-import { buildPhase6Module, healSource, runGenerated, sandboxClaim } from "./sandbox.ts";
+import { BRIEF_CORE_REGISTER, briefTokens, buildPhase6Module, healSource, runGenerated, sandboxClaim } from "./sandbox.ts";
 import {
   archTrace,
-  capabilityLine,
   failedGates,
   hardDodBlockInto,
   hardDodMessage,
@@ -59,7 +58,7 @@ import type { WildClassifierResult, WildReviewContext } from "./wild-mode.server
 // typed `{ ok: false, reason: "not-configured" }` and the engine falls back to
 // its deterministic path (honesty contract — never fabricate live output).
 import { complete, llmStatus } from "./llm.ts";
-import { research } from "./research.ts";
+import { RESEARCH_RELEVANCE_FLOOR, research, relevanceScore } from "./research.ts";
 // CF-SE2-3b (312 · E2): process-ledger completeness for the research narrative
 // (recordSessionSpend; client-safe pure module — no node:fs). 346 K3 adds the
 // read-only session-ledger delta the `wildStep` wrapper surfaces to a caller's
@@ -76,7 +75,7 @@ import {
 } from "./token-ledger.ts";
 import { runCode } from "./exec.ts";
 import type { ExecResult } from "./exec.ts";
-import { extractConstraints, phaseNarrative } from "./llm-tasks.ts";
+import { createLlmTasks, phaseNarrative, type Completer } from "./llm-tasks.ts";
 import { coerceAcceptanceFixtures } from "./brief-fixtures.ts";
 import type {
   Artifact,
@@ -118,6 +117,10 @@ type LessonSurface = {
     source?: MemoryEntry["source"],
   ) => MemoryEntry;
   absentLexNouns: (brief: string, lattice: IntentLattice | null) => string[];
+  /** L5 (98 §2.3): the user-correction lesson minted from a HITL decision row.
+   *  Its production caller is `rejectHitl`; the next regeneration reads it back
+   *  (lessonSteeringBlock) so a failed P1-P5 run's lesson changes the next run. */
+  correctionLesson: (project: Project, decision: HitlDecision) => MemoryEntry;
   selectLessons: (
     memory: readonly MemoryEntry[],
     phase: PhaseId,
@@ -141,6 +144,7 @@ void import("./knowledge.ts")
       vagueBriefLesson: m.vagueBriefLesson,
       templateEmissionLesson: m.templateEmissionLesson,
       absentLexNouns: m.absentLexNouns,
+      correctionLesson: m.correctionLesson,
       selectLessons: m.selectLessons,
       lessonLinesForBrief: m.lessonLinesForBrief,
       lessonRankLimit: m.EXPAND_LESSON_RANK_LIMIT,
@@ -369,7 +373,7 @@ function uiKindOf(project: Project): "cli-tool" | "library" | "ui" {
  *  (the word the brief wrote, plus a simple plural/s/es/ies) — see inferDomain.
  *  Register terms must therefore be words a brief of that domain actually
  *  uses; a generic English noun here hijacks every unrelated brief. */
-const DOMAIN_TERMS: Record<string, string[]> = {
+export const DOMAIN_TERMS: Record<string, string[]> = {
   "revenue-ops": ["crm", "pipeline", "lead", "sales"],
   operations: ["inventory", "warehouse", "sku", "stock"],
   marketplace: ["marketplace", "listing", "buyer", "seller", "storefront", "checkout"],
@@ -421,6 +425,25 @@ const DOMAIN_TERMS: Record<string, string[]> = {
 };
 const DOMAIN_ORDER = Object.keys(DOMAIN_TERMS);
 
+/** W62 · C1-07 remediation: register terms that NAME their vertical, so a lone
+ *  hit is decisive for a UI-surface brief instead of being demoted to
+ *  `custom-software`. Every term here is unambiguous (a "website"/"marketing"
+ *  brief is a web-marketing brief; a "storefront"/"till" brief is retail; an
+ *  "ios"/"android"/"mobile" brief is mobile). Generic-capable nouns that could
+ *  belong to another vertical are deliberately EXCLUDED — "site" (a construction
+ *  site), "catalogue" (a tool-library catalogue, the held-out brief),
+ *  "checkout"/"cart"/"basket" (marketplace), "native" (ordinary adjective). A
+ *  non-decisive lone hit keeps the C1-07 ≥2 rule, so an incidental noun still
+ *  cannot claim a whole vertical. */
+const DOMAIN_DECISIVE: ReadonlySet<string> = new Set([
+  // web-marketing
+  "website", "marketing", "seo", "landing",
+  // retail
+  "retail", "storefront", "till", "pos",
+  // mobile
+  "mobile", "ios", "android", "tablet", "touchscreen", "viewport", "one-handed", "tab-bar",
+]);
+
 export function inferDomain(brief: string): string {
   // 346 T1: surface-form matching (raw brief words + a simple plural/s/es/ies),
   // NOT canonicalStem. tokenizeWords stems every brief word, and comparing
@@ -440,19 +463,21 @@ export function inferDomain(brief: string): string {
     (term.endsWith("y") && tokens.has(`${term.slice(0, -1)}ies`));
   let best = "custom-software";
   let bestCount = 0;
+  let bestHits: string[] = [];
   // First domain in DOMAIN_ORDER wins a tie (deterministic, and additive-only:
   // a domain still needs strictly more matches than the current best). The old
   // longest-matched-term tie-break let a longer generic term ("dashboard")
   // outrank a shorter specific one ("stock") and typed an office inventory
   // tracker as analytics.
   for (const domain of DOMAIN_ORDER) {
-    let count = 0;
+    const hits: string[] = [];
     for (const raw of DOMAIN_TERMS[domain]) {
-      if (hit(raw)) count += 1;
+      if (hit(raw)) hits.push(raw);
     }
-    if (count > bestCount) {
+    if (hits.length > bestCount) {
       best = domain;
-      bestCount = count;
+      bestCount = hits.length;
+      bestHits = hits;
     }
   }
   // W62 · C1-07 (BUGLEDGER root cause): a single incidental register noun must
@@ -460,8 +485,12 @@ export function inferDomain(brief: string): string {
   // brief with count=1 vs 0." For a brief that declares a UI/app surface (the
   // software context), a vertical needs ≥2 distinct register hits; a lone
   // incidental noun otherwise drops to the honest `custom-software` default.
-  // (The seven fixtures carry ≥2 or 0 for their declared domain.)
-  return declaresUiSurface(typeof brief === "string" ? brief : "") && bestCount < 2
+  // Remediation: a lone hit on a DOMAIN_DECISIVE term (see above) is not
+  // incidental — a "bakery website" brief is a web-marketing brief, and the
+  // pre-fix ≥2 rule demoted it to `custom-software`, which then killed the
+  // domain-aware research topic, P3's surface and the domain label.
+  const soleDecisive = bestCount === 1 && bestHits.some((h) => DOMAIN_DECISIVE.has(h));
+  return declaresUiSurface(typeof brief === "string" ? brief : "") && bestCount < 2 && !soleDecisive
     ? "custom-software"
     : best;
 }
@@ -673,9 +702,22 @@ function domainLabel(domain: string): string {
   return labels[domain] ?? "custom software";
 }
 
-/** Lattice entities minus the vague-input fallbacks (the product's nouns). */
+/** Lattice entities minus the vague-input fallbacks (the product's nouns).
+ *  The brief's own content nouns (`lattice.briefNouns`, folded by A1) LEAD so a
+ *  bakery brief names donut/bread/menu/order instead of the LEX bank's generic
+ *  nouns; the LEX entities follow. Deduped by canonical stem, stable order. */
 function productNouns(project: Project): string[] {
-  return (project.lattice?.entities ?? []).filter((e) => e !== "operator" && e !== "record");
+  const fromBrief = project.lattice?.briefNouns ?? [];
+  const lex = (project.lattice?.entities ?? []).filter((e) => e !== "operator" && e !== "record");
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const n of [...fromBrief, ...lex]) {
+    const stem = tokenizeWords(n)[0] ?? n;
+    if (seen.has(stem)) continue;
+    seen.add(stem);
+    out.push(n);
+  }
+  return out;
 }
 
 /** Lattice jobs minus the vague-input fallback (the product's verbs/flows). */
@@ -746,8 +788,17 @@ function domainSurface(domain: string): string[] {
     logistics: ["geo / dispatch routing"],
     operations: ["inventory / SKU ledger"],
     analytics: ["warehouse / BI"],
+    // W61 C2's registers reach P3/P11 too — without these the web/retail/mobile
+    // domains fell through to a placeholder that CLAIMED the brief named
+    // external services (it may not have). Entries are category surfaces
+    // DECLARED for the domain, never services the brief named.
+    "web-marketing": ["content / SEO data", "site analytics", "enquiry / form delivery"],
+    retail: ["payment / checkout", "catalogue / POS feed"],
+    mobile: ["mobile API", "push / notification service"],
   };
-  return map[domain] ?? ["external services named by the brief"];
+  // Unknown/custom-software: no category surface is known, so NONE is claimed
+  // (honest) — the caller renders the empty list explicitly.
+  return map[domain] ?? [];
 }
 
 /** PostgreSQL type for one contract field type (`ulid`/`string`/`enum`/`int`/
@@ -1036,7 +1087,7 @@ export function synthesizePhase(
         `Sequential pipeline: ${flow}`,
         `State entities: ${nouns.length ? nouns.join(", ") : "records"}`,
         ``,
-        `Each step advances a ${primary} through its lifecycle in the ${domainLabel(domain)} domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).`,
+        `Each step advances a ${primary} through its lifecycle in the ${domainLabel(domain)} domain — DECLARED from the P0 lattice's jobs/entities (LEX vocabulary + brief content nouns), not observed runtime behaviour.`,
         ``,
         `> Derivation: a single sequential flow over ${primary}s; no parallel, event, or failover topology is claimed beyond what the brief states.`,
       ].join("\n");
@@ -1047,10 +1098,16 @@ export function synthesizePhase(
       };
     }
     case 2: {
-      // 118 P-D3: product-shaped persistence — the brief's nouns are the records,
-      // its verbs the operations. No FusionRank / localStorage engine internals.
+      // 118 P-D3: product-shaped persistence — the brief's nouns are the
+      // records, its verbs the operations. No FusionRank / localStorage engine
+      // internals. The entity/field model is the DECLARED A6 contract
+      // (`project.contracts`), never an assertion about observed reads/writes
+      // (the pre-fix body claimed "steps read and write that state").
       const nouns = productNouns(project);
       const jobs = productJobs(project);
+      const contractEntities = (project.contracts?.entities ?? []).filter(
+        (e) => e.name !== "Operator" && e.name !== "Record",
+      );
       return {
         artifacts: [
           art(
@@ -1058,12 +1115,15 @@ export function synthesizePhase(
             "memory",
             "Data model & retrieval",
             [
-              `Records: ${nouns.length ? nouns.join(", ") : "records"}`,
-              `Operations: ${jobs.length ? jobs.join(", ") : "core workflow"}`,
+              `Records (brief-derived nouns): ${nouns.length ? nouns.join(", ") : "records"}`,
+              `Operations (declared steps): ${jobs.length ? jobs.join(", ") : "core workflow"}`,
+              contractEntities.length > 0
+                ? `Declared data contract (A6, from the P0 lattice — a declaration, not observed access): ${contractEntities
+                    .map((e) => `${e.name}(${e.fields.map((f) => f.name).join(", ")})`)
+                    .join("; ")}`
+                : `Declared data contract: no LEX-derived entity model (the lattice fell back) — the records above are the brief's own nouns.`,
               ``,
-              `Each ${nouns[0] ?? "record"} is the unit of state; ${jobs[0] ?? "the workflow"} steps read and write that state in order.`,
-              ``,
-              `> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief.`,
+              `> Persistence is a DECLARATION (the plan's data model), not observed reads/writes; no database or durable store is claimed.`,
             ].join("\n"),
           ),
         ],
@@ -1071,7 +1131,13 @@ export function synthesizePhase(
         logs,
       };
     }
-    case 3:
+    case 3: {
+      // 118 P-D3: the surface is a DECLARATION of the domain's category
+      // surfaces — never a claim that the brief named these services. When the
+      // domain has no known category the list is EMPTY and the note says so
+      // (the pre-fix placeholder "external services named by the brief" was
+      // prose claiming evidence it did not have).
+      const surface = domainSurface(domain);
       return {
         artifacts: [
           art(
@@ -1081,9 +1147,11 @@ export function synthesizePhase(
             JSON.stringify(
               {
                 domain,
-                surface: domainSurface(domain),
+                surface,
                 note:
-                  "Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).",
+                  surface.length > 0
+                    ? "Category surfaces DECLARED for this domain — not services the brief named, and not implemented bindings (honest)."
+                    : "No external category surface is declared for this domain; none is claimed (honest).",
               },
               null,
               2,
@@ -1094,6 +1162,7 @@ export function synthesizePhase(
         memory: [mem("procedural", `Integration surface for ${domainLabel(domain)} declared from domain vocabulary.`, 0.93)],
         logs,
       };
+    }
     case 4: {
       // 118 P-D3: product-shaped security — protect the brief's own entities with
       // least-privilege roles. The engine's sandbox is the isolation half and is
@@ -1137,7 +1206,13 @@ export function synthesizePhase(
         },
       };
     }
-    case 5:
+    case 5: {
+      // The learning loop's ACTUAL state, derived here (not a stale constant):
+      // L1/L5 capture is implemented and read back into the next regeneration;
+      // drift capture and permanent-store promotion are declared. The pre-fix
+      // body printed a fixed capabilityLine that admitted "no loop behind it"
+      // even as the loop was wired.
+      const nouns = productNouns(project);
       return {
         artifacts: [
           art(
@@ -1151,10 +1226,11 @@ export function synthesizePhase(
               `  3. Phases execute strictly in order — the linear 0→12 graph.`,
               `  4. Every approval lands in the append-only decision journal.`,
               ``,
-              `Rejection policy: qualitative feedback is mandatory.`,
-              `Diagnostics: one JSON event per orchestration step.`,
+              `Data under validation: ${nouns.length ? nouns.slice(0, 6).join(", ") : "records"} (the brief's own product nouns — a declaration).`,
               ``,
-              `> ${capabilityLine("learning")}`,
+              `Rejection policy: qualitative feedback is mandatory. Diagnostics: one JSON event per orchestration step.`,
+              ``,
+              `> Learning loop — IMPLEMENTED: L1 vague-brief + L5 user-correction capture (a human reject's lesson is read back into the next regeneration). DECLARED: drift capture (E-19 unwired) and permanent-store promotion (human 'lesson --accept' only).`,
             ].join("\n"),
           ),
         ],
@@ -1168,6 +1244,7 @@ export function synthesizePhase(
           stakes: "Prevents infinite regeneration loops.",
         },
       };
+    }
     case 6: {
       const jobs = (project.lattice?.jobs ?? ["core"]).slice(0, 5);
       // T9/R-209 steering: rejection notes flow into the module; variant flips deterministically
@@ -1424,7 +1501,8 @@ export function synthesizePhase(
         logs,
       };
     }
-    case 11:
+    case 11: {
+      const surfaces = domainSurface(domain);
       return {
         artifacts: [
           art(
@@ -1434,8 +1512,11 @@ export function synthesizePhase(
             JSON.stringify(
               {
                 domain,
-                surfaces: domainSurface(domain),
-                note: "Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).",
+                surfaces,
+                note:
+                  surfaces.length > 0
+                    ? "Live surfaces DECLARED for this domain — not services the brief named, and not bound at runtime (honest)."
+                    : "No live category surface is declared for this domain; none is claimed (honest).",
               },
               null,
               2,
@@ -1454,6 +1535,7 @@ export function synthesizePhase(
             }
           : undefined,
       };
+    }
     case 12: {
       const endpoints = project.contracts?.endpoints ?? [];
       const paths =
@@ -1531,11 +1613,35 @@ export function synthesizePhase(
   }
 }
 
+/** W62 · C1-07-class remediation (P0): `intentLattice.vague` is computed from
+ *  the CLOSED LEX register, so a brief that named real product objects but no
+ *  LEX job/entity (the canonical bakery brief) sealed `vague:true` — and the
+ *  DoD probes `p0-verdict`/`p0-brief-grounded` then failed, hard-blocking a
+ *  keyed enforceDod run at P0. The lattice's additive `briefNouns` fold and the
+ *  sandbox product/domain register both prove such a brief DOES carry
+ *  vocabulary beyond LEX; calling it vocabulary-free is false. Normalize the
+ *  flag to the truth: `vague` stays true only when the brief names nothing the
+ *  register knows. A lattice already not vague is returned unchanged, and a
+ *  truly vocabulary-free brief ("hi", "build a tool for my team please") stays
+ *  vague — the L1 vague-brief lesson and the reframe park still fire. */
+function groundLatticeVague(lat: IntentLattice, brief: string): IntentLattice {
+  if (lat.vague !== true) return lat;
+  if (Array.isArray(lat.briefNouns) && lat.briefNouns.length > 0) return { ...lat, vague: false };
+  const tokens = briefTokens(stripOutOfScope(typeof brief === "string" ? brief : ""));
+  // A mere UI-surface noun ("page", "dashboard") is not grounding evidence — the
+  // gate's own vocabulary check treats those as stopwords — so only a registered
+  // PRODUCT/domain object counts (a bakery's `bakery`/`delivery`/`order`; the
+  // held-out tool library's `catalogue` is surface-only, so it stays vague).
+  return tokens.some((t) => BRIEF_CORE_REGISTER.has(t) && !UI_SURFACE_WORDS.includes(t))
+    ? { ...lat, vague: false }
+    : lat;
+}
+
 function attachAlgorithms(project: Project): Project {
   const ran = runAlgorithms(project);
   const next: Project = {
     ...project,
-    lattice: ran.lattice,
+    lattice: groundLatticeVague(ran.lattice, project.brief),
     schedule: ran.schedule,
     specGraph: ran.specGraph,
     contracts: ran.contracts,
@@ -1631,34 +1737,35 @@ function refusalClassOf(project: Project): { code: string; tail: string } | null
  * The class clause is ATOMIC — when the verbatim unmet list crowds it out the
  * unmet list is trimmed from its tail first so a recorded refusal code is
  * never silently mangled; the tail clause is sliced to whatever room remains.
+ *
+ * fixes/357: the clauses are located by their OWN prefixes, never by splitting
+ * the joined digest. The unmet criteria are VERBATIM free text and may contain
+ * the ` · ` separator themselves — a real P6 criterion does ("…required brief ·
+ * keyed synthesis was ATTEMPTED and REFUSED…"), and splitting let that
+ * criterion stand in for the class clause: the loop then "fitted" the
+ * criterion and broke, so the class segment never landed and the atomic
+ * guarantee above silently failed (lesson-writers.test.ts, the P6 long-unmet
+ * case).
  */
 function fitLessonEvidence(digest: string, budget = 240): string {
   const t = digest.replace(/\s+/g, " ").trim();
   if (t.length <= budget) return t;
-  const segs = t.split(" · ");
-  let out = segs[0] ?? "";
-  for (let i = 1; i < segs.length; i++) {
-    const seg = segs[i];
-    const cand = out.length + 3 + seg.length;
-    if (cand <= budget) {
-      out = `${out} · ${seg}`;
-      continue;
-    }
+  const classAt = t.indexOf(" · class: ");
+  const tailAt = t.indexOf(" · tail: ");
+  const head = classAt >= 0 ? t.slice(0, classAt) : tailAt >= 0 ? t.slice(0, tailAt) : t;
+  const classSeg = classAt >= 0 ? t.slice(classAt + 3, tailAt > classAt ? tailAt : t.length) : "";
+  const tailSeg = tailAt >= 0 ? t.slice(tailAt + 3) : "";
+  let out = head;
+  if (classSeg !== "") {
+    // Atomic: fit the clause exactly by trimming the unmet list's tail — the
+    // verbatim head alone may already overflow the budget, and a recorded
+    // refusal code is never silently mangled (fixes/300).
+    const keep = Math.max("unmet: ".length, budget - 3 - classSeg.length);
+    out = `${out.length > keep ? out.slice(0, keep) : out} · ${classSeg}`;
+  }
+  if (tailSeg !== "") {
     const room = budget - out.length - 3;
-    if (seg.startsWith("tail:")) {
-      if (room > 0) {
-        out = `${out} · ${seg.slice(0, room)}`;
-      }
-    } else if (out.startsWith("unmet: ")) {
-      // Atomic clause (e.g. class): fit it exactly by trimming the unmet list's
-      // tail — the verbatim head alone may already overflow the budget, and a
-      // recorded refusal code is never silently mangled (fixes/300).
-      const keep = Math.max("unmet: ".length, budget - 3 - seg.length);
-      out = `${out.slice(0, keep)} · ${seg}`;
-    } else if (room > 0) {
-      out = `${out} · ${seg.slice(0, room)}`;
-    }
-    break;
+    if (room > 0) out = `${out} · ${tailSeg.slice(0, room)}`;
   }
   return out.length <= budget ? out : out.slice(0, budget);
 }
@@ -1716,6 +1823,24 @@ export function p6JobsShortfallLog(project: Project): JsonLog | null {
   };
 }
 
+/** W62 · C1-07-class remediation — the lesson READ-BACK for a regenerating
+ *  phase. When the project's own memory carries user-correction lessons for
+ *  this phase (minted by `rejectHitl`), the next attempt's artifact carries
+ *  them, so a prior failure's lesson actually steers the next run. Deterministic
+ *  (reads project.memory only); no lesson rows ⇒ the legacy body bytes. */
+function lessonSteeringBlock(memory: readonly MemoryEntry[] | undefined, phase: PhaseId): string | null {
+  const rows = (Array.isArray(memory) ? memory : []).filter(
+    (m) => m && m.phase === phase && typeof m.id === "string" && m.id.startsWith("lesson-user-correction-"),
+  );
+  if (rows.length === 0) return null;
+  return [
+    ``,
+    `## Lessons carried from prior runs`,
+    `> Prior user corrections recorded for this phase (deterministic read-back; advisory, never overrides a gate):`,
+    ...rows.slice(-3).map((m) => `- ${String(m.text ?? "").slice(0, 220)}`),
+  ].join("\n");
+}
+
 export function applyPhaseResult(project: Project, phase: PhaseId): Project {
   // CORE-01 (defensive): refuse a truly invalid phase id before any array
   // indexing — a corrupt caller throws loudly, never crashes mid-graph.
@@ -1751,9 +1876,10 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
   const artifacts = [...result.artifacts];
   if (attempt >= 1 && note && phase !== 6 && artifacts.length > 0) {
     const last = artifacts[artifacts.length - 1];
+    const lessonBlock = lessonSteeringBlock(project.memory, phase);
     artifacts[artifacts.length - 1] = {
       ...last,
-      body: `${last.body}\n\n${rejectionResponseBlock(attempt, note)}`,
+      body: `${last.body}\n\n${rejectionResponseBlock(attempt, note)}${lessonBlock ?? ""}`,
     };
   }
   const needsHitl = Boolean(hitl);
@@ -1866,13 +1992,77 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
     ...merged,
     logs: sealLogs.length > 0 ? [...merged.logs, ...sealLogs].slice(-200) : merged.logs,
   });
+  // Item 2: a COMPLETE stage that produced nothing is a coded failure, never a
+  // silent pass. The pure stage-wiring census (phases.ts) runs over the
+  // just-applied record and its coded reason for THIS phase alone is written to
+  // the ledger (the flow-forward reason belongs to the previous phase). Inert
+  // on a healthy phase — every deterministic producer writes a non-empty
+  // deliverable of its declared kind — and stale-read guarded, so a re-apply
+  // never duplicates the row.
+  const wired = needsHitl
+    ? packed
+    : (() => {
+        const rows = stageWiringLogRows(packed, phase);
+        return rows.length > 0 ? { ...packed, logs: [...(packed.logs ?? []), ...rows].slice(-200) } : packed;
+      })();
   // fixes/144 (M2 lane B4): when this P6 apply carries a multi-file
   // generatedTree (keyed synthesis landed on an earlier attempt and a repair /
   // re-apply is re-running the phase), stamp the p6-arch reqTrace artifact +
   // log so the recorded gate and packet surface the capability→file mapping.
   // Tree-absent applies (deterministic/keyless floor, refused keyed synthesis)
   // are returned byte-identical — the p6-arch legacy note never touches them.
-  return sealPacketArtifact(phase === 6 ? stampP6ReqTrace(packed) : packed);
+  return sealPacketArtifact(phase === 6 ? stampP6ReqTrace(wired) : wired);
+}
+
+/**
+ * A4-E2(c) / A4-E3 (Decision D2(c)): the ONE honest terminal status. A record's
+ * `status` becomes `complete` as soon as P12 synthesizes — BEFORE its gate runs
+ * — so a red-gate seal otherwise reads as a clean completion. This derives the
+ * honest value from the recorded gates: `complete_with_failures` when the seal
+ * is dirty (`failedGates()` non-empty), the record's own status otherwise.
+ * Callers (headless `summary`, the run boundary) must render THIS, never a bare
+ * green chip.
+ */
+export function terminalStatusOf(project: Project): Project["status"] | "complete_with_failures" {
+  if (project.status !== "complete") return project.status;
+  return failedGates(project).length > 0 ? "complete_with_failures" : "complete";
+}
+
+/**
+ * A4-E9 (P2): mark ONE phase record as having DEGRADED to the deterministic
+ * floor — the live/keyed pass threw and the floor stood in for it. The coded
+ * `p<phase>.live.failed` / `p6.live.synthesis.failed` / `llm.degrade` row
+ * already names the failure; this stamps the PHASE RECORD so a reader can never
+ * mistake the resulting `complete` for a genuine keyed completion. Additive: the
+ * extra optional property is declared on `PhaseRecord` once the shared type
+ * carries it, and a legacy record without the marker reads byte-identically.
+ */
+export function markPhaseDegraded(project: Project, phase: PhaseId): Project {
+  const phases = project.phases.map((r) => (r.id === phase ? { ...r, degraded: true } : r));
+  return { ...project, phases };
+}
+
+/**
+ * Item 2: the coded ledger rows for one phase's stage-wiring failures — a
+ * COMPLETE phase with no deliverable, only empty-bodied deliverables, or no
+ * artifact of its declared kind (phases.ts `PHASE_DELIVERABLE_KINDS`). Pure,
+ * exported for a direct pin; `[]` when the phase is wired (or not complete), so
+ * a healthy apply's bytes are unchanged. Idempotent: a row whose event+detail
+ * is already on the record is not re-appended.
+ */
+export function stageWiringLogRows(project: Project, phase: PhaseId): JsonLog[] {
+  const row = stageWiringReading(project).rows.find((r) => r.phase === phase);
+  if (!row || row.reasons.length === 0) return [];
+  const logs = project.logs ?? [];
+  const out: JsonLog[] = [];
+  for (const r of row.reasons) {
+    const event = `p${phase}.stage.unwired`;
+    const detail = `${r.code} · ${r.reason}`;
+    if (logs.some((l) => l.event === event && l.detail === detail)) continue;
+    if (out.some((l) => l.event === event && l.detail === detail)) continue;
+    out.push({ ts: Date.now(), phase, level: "warn", event, detail });
+  }
+  return out;
 }
 
 /**
@@ -2177,6 +2367,15 @@ export function rejectHitl(
         // E-18: a human decision row, never an engine template row.
         source: "human",
       },
+      // W62 · C1-07-class remediation: wire the L5 correction builder — it had
+      // no production caller. A HUMAN reject records a content-addressed
+      // correction lesson that the next regeneration reads back
+      // (`lessonSteeringBlock`), so the learning loop can change the next run.
+      // A machine reject never mints here: `correctionLesson` stamps
+      // source:"human" by contract, and a machine may not claim a human seat.
+      ...(decision.decidedBy === "human" && lessonSurface
+        ? [lessonSurface.correctionLesson(project, decision)]
+        : []),
       ...project.memory,
     ]).slice(0, 80),
   };
@@ -3179,6 +3378,13 @@ const RESEARCH_DOMAIN_REGISTER: Readonly<Record<string, string>> = {
   "logistics": "logistics fleet shipment warehouse route tracking",
   "hospitality": "hospitality guest booking reservation housekeeping",
   "marketing": "marketing campaign lead analytics channel content",
+  // W61 C9: the web/retail/mobile registers the `inferDomain` taxonomy names.
+  // Keys are the NORMALIZED domain id (hyphens → spaces, see
+  // researchQueryQualifiers), so `web-marketing` looks up `web marketing` — the
+  // missing entry that left a bakery/website brief with no category fallback.
+  "web marketing": "website marketing landing brand content catalogue",
+  "retail": "retail storefront checkout basket order product",
+  "mobile": "mobile app ios android touchscreen navigation",
   "hr": "hr payroll employee hiring timesheet benefits",
   "travel": "travel trip booking itinerary destination pricing",
   "restaurant": "restaurant menu order kitchen delivery inventory",
@@ -3237,16 +3443,19 @@ function researchBriefNouns(
     .slice(0, cap);
 }
 
-/** W61 C9 (PR-17): at most this many domain qualifiers follow the intent. A bag
- *  of ~15 domain nouns used to LEAD the query, so the bakery/flower runs were
- *  grounded in property rental/lease documents (BL-001 recurrence). */
+/** W61 C9 (PR-17): at most this many ADDED qualifiers follow the phase intent
+ *  and the guaranteed business-name tokens. A bag of ~15 domain nouns used to
+ *  LEAD the query, so the bakery/flower runs were grounded in property
+ *  rental/lease documents (BL-001 recurrence). */
 export const RESEARCH_MAX_QUALIFIERS = 3;
 
-/** W61 C9: deterministic research qualifiers (≤ cap), most specific first. The
- *  brief's own frequency-ranked content nouns lead (product vocabulary), then
- *  the domain register/domain words guarantee a category signal when the brief
- *  yields none, then distinctive name fragments. Pure; collision-free by
- *  construction through the shared `seen` set. */
+/** W61 C9: deterministic research qualifiers. The project's business NAME is
+ *  always present (its distinctive tokens, or its raw tokens when they are all
+ *  brand/dictionary noise) — a query that does not name the product cannot
+ *  ground its research. Then up to `cap` ADDED qualifiers follow, most specific
+ *  first: the brief's frequency-ranked content nouns (product vocabulary), then
+ *  the domain register / domain words as the category fallback. Pure;
+ *  collision-free by construction through the shared `seen` set. */
 function researchQueryQualifiers(project: Project, cap: number): string[] {
   const name = (project.name ?? "").trim();
   const domain = (project.domain ?? "").trim();
@@ -3254,34 +3463,51 @@ function researchQueryQualifiers(project: Project, cap: number): string[] {
   const nameFragments = new Set(researchNameTokens(name));
   const out: string[] = [];
   const seen = new Set<string>();
-  const add = (w: string): void => {
+  const add = (w: string): boolean => {
     const t = w.trim().toLowerCase();
-    if (!t || seen.has(t) || RESEARCH_STOPWORDS.has(t)) return;
+    if (!t || seen.has(t) || RESEARCH_STOPWORDS.has(t)) return false;
     seen.add(t);
     out.push(t);
+    return true;
+  };
+  // 0) The business NAME — guaranteed. Distinctive fragments lead; when every
+  //    fragment is brand/dictionary noise (a compound like "Coffeehouse2Home")
+  //    the raw name tokens ride instead, so the query still names the product.
+  const named = researchNameTokens(name);
+  const distinctive = named.filter((t) => !RESEARCH_BRAND_NOISE.has(t));
+  const nameUnit = distinctive.length > 0 ? distinctive : named;
+  for (const w of nameUnit) add(w);
+  // The ADDED qualifiers honor `cap`; the business name is never capped away.
+  const capacity = out.length + cap;
+  const addWithin = (w: string): void => {
+    if (out.length < capacity) add(w);
   };
   // 1) The product's actual vocabulary (frequency-ranked) — the most on-intent
   //    qualifiers, and the ones the domain bag used to crowd out.
-  for (const w of researchBriefNouns(brief, cap, nameFragments)) add(w);
+  for (const w of researchBriefNouns(brief, cap + nameUnit.length, nameFragments)) addWithin(w);
   // 2) Domain register + domain words — the guaranteed category fallback.
   const domainKey = domain.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const register = RESEARCH_DOMAIN_REGISTER[domainKey];
   if (register) {
-    for (const w of register.split(" ")) add(w);
-    for (const w of domainKey.split(" ")) add(w);
+    for (const w of register.split(" ")) addWithin(w);
+    for (const w of domainKey.split(" ")) addWithin(w);
   } else {
     for (const w of researchNameTokens(domain)) {
-      if (!RESEARCH_BRAND_NOISE.has(w)) add(w);
+      if (!RESEARCH_BRAND_NOISE.has(w)) addWithin(w);
     }
   }
-  // 3) Distinctive name fragments only (brand/dictionary noise dropped).
-  for (const w of nameFragments) if (!RESEARCH_BRAND_NOISE.has(w)) add(w);
   if (out.length === 0) {
     // Last-resort floor — never empty, never fabricated.
-    for (const w of nameFragments) add(w);
+    if (nameUnit.length === 0 && name.length > 0) add(name);
     if (out.length === 0) add(domainKey || "product");
   }
-  return out.slice(0, cap);
+  // Guarantee: the business name is represented even when every one of its
+  // tokens was a stopword / noise fragment (a query must name the product).
+  const nameLower = name.toLowerCase();
+  if (nameLower.length > 0 && !nameUnit.some((t) => out.includes(t)) && !out.includes(nameLower)) {
+    out.push(nameLower);
+  }
+  return out;
 }
 
 /**
@@ -3355,18 +3581,133 @@ export function filterOffIntentResearch<T extends ResearchResultLike>(
   return { accepted, dropped };
 }
 
-/** Phase-topic tail per research phase (deterministic; only research phases carry a tail). */
-const RESEARCH_TOPIC_TAIL: Readonly<Partial<Record<PhaseId, string>>> = {
+// ---------------------------------------------------------------------------
+// W61 C9 (PR-17) — RELEVANCE-based research drop filter.
+//
+// The blocklist above catches ONE hardcoded vertical (rental/lease listings).
+// This filter generalises to whatever the project actually is: a result is
+// on-intent when it shares a content term with the phase intent, the project's
+// domain, or its deterministic query qualifiers (business name + brief content
+// nouns + domain register). A result with zero overlap is off-intent and is
+// dropped. Pure + deterministic (no LLM, no network); when there is no
+// vocabulary to judge against, the result is KEPT — the filter never drops what
+// it cannot judge.
+// ---------------------------------------------------------------------------
+
+/** Terms too generic to make a result "relevant" on their own. */
+const RESEARCH_RELEVANCE_STOP: ReadonlySet<string> = new Set([
+  "2024", "2025", "2026", "live", "tool", "tools", "best", "top", "guide",
+  "and", "the", "for", "with", "your", "you",
+]);
+
+/** Lowercase content tokens (len ≥ 3) of a string — the relevance unit. */
+function relevanceTokens(text: string): Set<string> {
+  return new Set(String(text ?? "").toLowerCase().match(/[a-z][a-z0-9]{2,}/g) ?? []);
+}
+
+/** The terms that make a research result on-intent for this project+phase: the
+ *  phase intent + the project's domain + its deterministic query qualifiers
+ *  (business name, brief content nouns, domain register). Pure. */
+export function researchRelevanceTerms(project: Project, phase: PhaseId): Set<string> {
+  const terms = new Set<string>();
+  const add = (s: string): void => {
+    for (const t of relevanceTokens(s)) {
+      if (!RESEARCH_STOPWORDS.has(t) && !RESEARCH_RELEVANCE_STOP.has(t)) terms.add(t);
+    }
+  };
+  add(RESEARCH_PHASE_INTENT[phase] ?? "");
+  add(project.domain ?? "");
+  for (const q of researchQueryQualifiers(project, 6)) terms.add(q);
+  return terms;
+}
+
+/** Is a result RELEVANT to the project+phase? A term in the TITLE/URL is a claim
+ *  about the page's subject and keeps it; a term that appears only in the body
+ *  is not enough on its own — it must also clear `RESEARCH_RELEVANCE_FLOOR` via
+ *  the SAME `relevanceScore` maths that ranked it. The old test accepted any
+ *  single body-token overlap with the term set, whose generic words (`software`,
+ *  `market`, `landscape`) let a Wikipedia "Pixar" page (matched on `software`)
+ *  and "Cities: Skylines" earn the corpus — both scored 0.042. Measured on the
+ *  ten rt10 briefs: every on-intent source scored ≥ 0.167. Empty vocabulary ⇒
+ *  keep (cannot judge). */
+function researchItemRelevant(
+  query: string,
+  terms: ReadonlySet<string>,
+  item: ResearchResultLike,
+): boolean {
+  if (terms.size === 0) return true;
+  const field = relevanceTokens(`${String(item?.title ?? "")} ${String(item?.url ?? "")}`);
+  for (const t of terms) if (field.has(t)) return true;
+  return relevanceScore(query, item) >= RESEARCH_RELEVANCE_FLOOR;
+}
+
+/**
+ * W61 C9 (PR-17): partition a phase's research results into accepted/dropped by
+ * RELEVANCE, not by one hardcoded vertical. A result is dropped when it is
+ * either (a) an off-intent business-domain category page for an engineering
+ * phase (`isOffIntentResearch` — the rental/lease listing class), or (b) shares
+ * no content term with this project+phase (`researchItemRelevant`). Pure,
+ * deterministic, keyless; preserves input order. Consumed by `fetchResearch`
+ * and exported for the headless/crew research overlays.
+ */
+export function filterRelevantResearch<T extends ResearchResultLike>(
+  project: Project,
+  phase: PhaseId,
+  items: readonly T[],
+): { accepted: T[]; dropped: T[] } {
+  const topic = researchPhaseTopic(project, phase);
+  const query = researchQueryFor(project, phase);
+  const terms = researchRelevanceTerms(project, phase);
+  const accepted: T[] = [];
+  const dropped: T[] = [];
+  for (const item of items) {
+    if (isOffIntentResearch(topic, item) || !researchItemRelevant(query, terms, item)) {
+      dropped.push(item);
+    } else {
+      accepted.push(item);
+    }
+  }
+  return { accepted, dropped };
+}
+
+/** Per-phase research INTENT (the subject of the query). */
+const RESEARCH_PHASE_INTENT: Readonly<Partial<Record<PhaseId, string>>> = {
   0: "architecture feasibility 2026",
   7: "competitors market landscape",
   11: "live tools and API augmentation",
 };
 
+/** Domain-aware research TOPIC descriptors: the query names the product's own
+ *  category, not a bare software phrase, so a bakery website researches
+ *  websites and a shop researches retail instead of "architecture feasibility"
+ *  for every project. A domain with no descriptor keeps the software intent
+ *  (legacy behaviour for unknown/custom-software domains). */
+const RESEARCH_DOMAIN_TOPIC: Readonly<Record<string, string>> = {
+  "web-marketing": "website",
+  retail: "retail store",
+  mobile: "mobile app",
+  marketplace: "marketplace",
+  "real-estate": "property",
+  construction: "construction",
+  "health-ops": "health clinic",
+  "finance-ops": "finance",
+  "revenue-ops": "sales",
+  "agent-platform": "ai agent",
+  logistics: "logistics",
+  operations: "inventory",
+  analytics: "analytics",
+};
+
+/** The phase's topic, qualified by the project's domain. Deterministic. */
+function researchPhaseTopic(project: Project, phase: PhaseId): string {
+  const intent = RESEARCH_PHASE_INTENT[phase] ?? "live tools and API augmentation";
+  const key = String(project.domain ?? "").trim().toLowerCase();
+  const descriptor = RESEARCH_DOMAIN_TOPIC[key];
+  return descriptor ? `${descriptor} ${intent}` : intent;
+}
+
 export function researchQueryFor(project: Project, phase: PhaseId): string {
-  return researchQueryText(
-    project,
-    RESEARCH_TOPIC_TAIL[phase] ?? "live tools and API augmentation",
-  );
+  return researchQueryText(project, researchPhaseTopic(project, phase));
 }
 
 function formatResearchFinding(item: ResearchFinding): string {
@@ -3380,6 +3721,132 @@ function formatResearchFinding(item: ResearchFinding): string {
 const NARRATIVE_GROUNDED_FOOTER = (n: number) => `\n\n> generated prose — grounded in ${n} fetched sources`;
 const NARRATIVE_UNGROUNDED_FOOTER =
   "\n\n> generated prose — not grounded in fetched sources; verify before relying on it";
+/** M-07 sibling for the keyed per-phase deliverable: grounded in the brief +
+ *  prior artifacts (no fetched sources), so it must not claim web grounding.
+ *  Item 4 (narrative/artifact split): it ALSO states that it governs over the
+ *  deterministic template beside it, so a phase never ships two rival
+ *  deliverables without saying which one the consumer should build on. */
+const GROUNDED_PHASE_FOOTER =
+  "\n\n> generated prose — grounded in the full brief and the prior phase artifacts; not fetched sources; verify before relying on it" +
+  "\n> authoritative for this phase: where the deterministic template beside it disagrees, build on THIS artifact; the template is a declared scaffold, not a second deliverable.";
+
+/** The phase's OWN artifact kind for the grounded LLM deliverable, so it is the
+ *  phase's artifact rather than a generic doc. */
+const PHASE_ARTIFACT_KIND: Readonly<Partial<Record<PhaseId, Artifact["kind"]>>> = {
+  1: "graph",
+  2: "memory",
+  3: "mcp",
+  4: "security",
+  5: "validation",
+  8: "ui",
+  9: "cicd",
+  10: "edge",
+  12: "docs",
+};
+
+/** Bounds for the prior-artifact context in the grounded prompt: the FULL brief
+ *  is always passed; each prior artifact contributes a bounded slice and the
+ *  most recent GROUNDED_PRIOR_ARTIFACTS_MAX are used. */
+const GROUNDED_PRIOR_ARTIFACTS_MAX = 12;
+const GROUNDED_PRIOR_ARTIFACT_CHARS = 1500;
+
+/**
+ * Context flow (item 1): the bounded prior-phase DELIVERABLE context a phase's
+ * model work builds on. Only artifacts from EARLIER phases ride (never the
+ * current phase's own output), the bookkeeping rows (kind "gate"/"packet") are
+ * excluded, the most recent `GROUNDED_PRIOR_ARTIFACTS_MAX` are kept, and each
+ * body is sliced to `GROUNDED_PRIOR_ARTIFACT_CHARS`. Pure; [] when no phase ran
+ * before — so a P0 call gets no fabricated context.
+ */
+export function priorArtifactContext(
+  project: Project,
+  phase: PhaseId,
+): Array<{ phase: number; title: string; body: string }> {
+  return (project.artifacts ?? [])
+    .filter((a) => a.phase < phase && a.kind !== "gate" && a.kind !== "packet")
+    .slice(-GROUNDED_PRIOR_ARTIFACTS_MAX)
+    .map((a) => ({ phase: a.phase, title: a.title, body: a.body.slice(0, GROUNDED_PRIOR_ARTIFACT_CHARS) }));
+}
+
+/**
+ * Keyed per-phase work (P1-P5, P8-P12): a model-written artifact for the phase's
+ * OWN deliverable, fed the FULL brief and the prior phase artifacts — not merely
+ * a narrative beside the deterministic template (P1-P5 used to do no model
+ * work). Honest envelope: keyless / a refusal / an empty reply returns a coded
+ * failure and the deterministic `applyPhaseResult` output stands unchanged.
+ */
+export async function phaseGroundedArtifact(
+  project: Project,
+  phase: PhaseId,
+  completer: Completer,
+): Promise<
+  { ok: true; text: string } | { ok: false; reason: string; error?: string; code?: ErrorCode }
+> {
+  const def = phaseDef(phase);
+  const priors = priorArtifactContext(project, phase);
+  const priorText =
+    priors.length > 0
+      ? priors
+          .map((a) => `### P${a.phase} — ${a.title}\n${a.body}`)
+          .join("\n\n")
+      : "(no prior phase artifact)";
+  // Item 4 (narrative/artifact split): this phase's OWN deterministic template
+  // is already in the record `done` passed in. The model must not silently
+  // contradict the document that ships beside it, so the template is rendered
+  // and the reconciliation rule is stated explicitly.
+  const templateArtifacts = (project.artifacts ?? []).filter(
+    (a) => a.phase === phase && a.kind !== "gate" && a.kind !== "packet",
+  );
+  const templateText =
+    templateArtifacts.length > 0
+      ? templateArtifacts
+          .slice(0, 4)
+          .map((a) => `### ${a.title}\n${a.body.slice(0, GROUNDED_PRIOR_ARTIFACT_CHARS)}`)
+          .join("\n\n")
+      : "(no deterministic template for this phase)";
+  const prompt = [
+    `Produce the REAL deliverable for phase ${def.code} "${def.title}" of a governed build of "${project.name}" (domain: ${project.domain}).`,
+    `Phase intent: ${def.summary}`,
+    ``,
+    `Write the phase's actual artifact for THIS product — concrete and specific, not a generic description. Ground every statement in the full brief and the prior phase artifacts below; never invent a requirement, price, actor or fact they do not state. Where the brief is silent, say what is unknown instead of guessing.`,
+    ``,
+    `# Full brief`,
+    project.brief,
+    ``,
+    `# Prior phase artifacts`,
+    priorText,
+    ``,
+    `# Deterministic template shipped beside your artifact`,
+    templateText,
+    ``,
+    `Where your deliverable disagrees with that template, do NOT silently contradict it: state the correction explicitly. Your artifact is the authoritative deliverable for this phase; the template is a declared scaffold.`,
+    ``,
+    `Return markdown only (a short heading, then the phase deliverable).`,
+  ].join("\n");
+  // OV-36 / fixes/156 E1 (item 1, measured live on the CLI path): with
+  // thinking ON and a bounded window the pro model spent the WHOLE 1400-token
+  // max_tokens on reasoning_content and returned content:"" — every grounded
+  // call degraded (`p<N>.live.artifact.failed: … model returned reasoning only
+  // (6236 chars of reasoning_content, content empty); stopped at max_tokens`).
+  // The deliverable is a bounded markdown artifact, not a reasoning task, so
+  // thinking is pinned OFF (the E1 rule: reasoning must not consume the window
+  // this structured call needs) with headroom for a heading + body.
+  const res = await completer(prompt, { model: "deepseek-v4-pro", maxTokens: 2000, thinking: false });
+  if (res && res.usage) recordSessionSpend(res.usage);
+  if (!res || res.ok !== true) {
+    return {
+      ok: false,
+      reason: res && res.reason ? res.reason : "error",
+      ...(res && res.ok === false && res.error ? { error: res.error } : {}),
+      ...(res && res.ok === false && res.code ? { code: res.code } : {}),
+    };
+  }
+  const text = res.text.trim();
+  if (!text) {
+    return { ok: false, reason: "error", error: "model returned an empty phase artifact", code: "RT_E_LLM_REJECTED" };
+  }
+  return { ok: true, text };
+}
 
 /**
  * Fetch real research for a research phase. Returns null when the phase is not a
@@ -3398,6 +3865,16 @@ async function fetchResearch(
   narrative: string | null;
   provider: string | null;
   unavailable: boolean;
+  /** W62 · C1-07-class remediation: how many fetched results the relevance /
+   *  off-intent filters DROPPED, so the drop is recorded (count + a bounded
+   *  reason) instead of being silently discarded. 0 on every keyless/failed
+   *  pass; keyed runs surface it as a `research.filtered` ledger row. */
+  dropped: number;
+  droppedNote: string | null;
+  /** OV-13/OV-29 (item 5): coded rows for the two failures this function used
+   *  to swallow to the floor with no trace — a thrown research call and a
+   *  failed narrative call. Appended by `liveLayer`; [] on a clean pass. */
+  degradeRows: JsonLog[];
 } | null> {
   if (!RESEARCH_PHASES.has(phase)) return null;
 
@@ -3405,13 +3882,28 @@ async function fetchResearch(
   let items: ResearchFinding[] = [];
   let provider: string | null = null;
   let unavailable = false;
+  let dropped = 0;
+  let droppedNote: string | null = null;
+  const degradeRows: JsonLog[] = [];
   try {
     const query = researchQueryFor(project, phase);
     const result = await research(query);
     if (result && result.ok === true && (result.items ?? []).length > 0) {
-      // W61 C9 (PR-17): drop off-intent category pages (rent/lease/tenant
-      // listings for an engineering phase) before they earn the corpus.
-      items = filterOffIntentResearch(query, result.items as ResearchFinding[]).accepted;
+      // W61 C9 (PR-17): drop off-intent results before they earn the corpus —
+      // relevance-based (clears RESEARCH_RELEVANCE_FLOOR) with the rental/lease
+      // category blocklist as the engineering-phase backstop.
+      const filtered = filterRelevantResearch(project, phase, result.items as ResearchFinding[]);
+      items = filtered.accepted;
+      dropped = filtered.dropped.length;
+      if (dropped > 0) {
+        const titles = filtered.dropped
+          .map((d) => String((d as ResearchResultLike).title ?? "").trim())
+          .filter((t) => t !== "")
+          .slice(0, 3);
+        droppedNote =
+          `${dropped} of ${result.items.length} fetched result(s) dropped as off-intent ` +
+          `(relevance + engineering blocklist)${titles.length > 0 ? `; e.g. ${titles.join(" | ").slice(0, 200)}` : ""}`;
+      }
       // M-01: remember which backend actually served the findings (for project.research).
       provider = result.provider ?? null;
     } else if (!result || result.ok !== true) {
@@ -3419,39 +3911,62 @@ async function fetchResearch(
       // not execute. (ok:true with zero items means it ran and found nothing —
       // unavailable stays false so the DoD corpus probe stays honestly unmet.)
       unavailable = true;
+      // On a bare-Node host the server-fn research seam cannot run at ALL, so
+      // its failure describes the host, not the backend: the CLI/headless
+      // overlay owns that path and records its own coded row. Everywhere else
+      // the failure is real and must be recorded, coded (item 5).
+      if (!isBareNodeHost()) {
+        degradeRows.push(
+          liveDegradeRow(phase, "research", result ?? new Error("research backend returned no result"), "RT_E_RESEARCH_UNAVAILABLE"),
+        );
+      }
     }
-  } catch {
+  } catch (err) {
     unavailable = true;
+    degradeRows.push(liveDegradeRow(phase, "research", err, "RT_E_RESEARCH_UNAVAILABLE"));
   }
 
   // 2) LLM phase narrative (DeepSeek) — fires whenever the LLM is configured,
   // independent of whether live research succeeded.
+  // 347/348 (R3): this used to be an inline `complete()` prompt that inlined
+  // title + 200-char snippets and never forbade invention — the exact site that
+  // turned five off-topic cake-architecture pages into a "luxury celebration
+  // cake" strategy. It now routes through llm-tasks' grounded summarizer, which
+  // threads the query + full source list, scores them, and injects a
+  // deterministic honesty clause when they are off-topic or insufficient.
   let narrative: string | null = null;
   try {
     if ((await llmStatus()).configured) {
-      const ground =
-        items.length > 0
-          ? `Grounded in these findings:\n${items
-              .slice(0, 5)
-              .map((it) => `- ${it.title}: ${(it.content ?? "").slice(0, 200)}`)
-              .join("\n")}`
-          : "(no live research available — reason from the brief and lattice only)";
-      const comp = await complete(
-        `Write a concise one-paragraph phase narrative for ${project.name} (${phaseDef(phase).code} ${phaseDef(phase).title}). ${ground}\n\nBrief: ${project.brief.slice(0, 400)}`,
+      const comp = await phaseNarrative(
+        {
+          name: project.name,
+          brief: project.brief,
+          domain: project.domain,
+          query: researchQueryFor(project, phase),
+          sources: items,
+          // Context flow (item 1): the research narrative builds on the prior
+          // phases' deliverables, not the brief alone.
+          priorArtifacts: priorArtifactContext(project, phase),
+        },
+        phaseDef(phase),
       );
       // CF-SE2-3b (312 · E2): the narrative call is metered into the process
       // session ledger — I2: EVERY response that reports usage, success or
       // refusal (a refusal that burned tokens still counts against the cap).
-      if (comp && comp.usage) recordSessionSpend(comp.usage);
+      if (comp && comp.ok === true && comp.usage) recordSessionSpend(comp.usage);
       if (comp && comp.ok === true && typeof comp.text === "string" && comp.text.trim()) {
         narrative = comp.text.trim();
+      } else if (comp && comp.ok !== true) {
+        // OV-29/OV-13 (item 5): a configured narrative refusal was silent here.
+        degradeRows.push(liveDegradeRow(phase, "narrative", comp, "RT_E_LLM_REJECTED"));
       }
     }
-  } catch {
+  } catch (err) {
     narrative = null;
+    degradeRows.push(liveDegradeRow(phase, "narrative", err, "RT_E_LLM_REJECTED"));
   }
 
-  return { items, narrative, provider, unavailable };
+  return { items, narrative, provider, unavailable, dropped, droppedNote, degradeRows };
 }
 
 /**
@@ -3584,10 +4099,62 @@ async function upgradeP6Keyed(floor: Project, deps?: LiveLayerDeps): Promise<Pro
       if (upgraded && typeof upgraded === "object" && upgraded !== p) return upgraded;
     }
     return p;
-  } catch {
-    /* keyed synthesis unavailable → deterministic floor stands */
-    return floor;
+  } catch (err) {
+    // W62 · C1-07-class remediation: this catch used to return the deterministic
+    // floor with NO coded row — the one keyed-P6 failure an operator could not
+    // reconstruct from the ledger. Record it, coded, without changing behavior.
+    // A4-E9: the phase record also carries the `degraded` marker.
+    return markPhaseDegraded(withLiveDegradeRows(floor, [p6SynthesisRow(err)]), 6);
   }
+}
+
+/** Coded degrade row for a keyed P6 synthesis failure (see `upgradeP6Keyed`). */
+function p6SynthesisRow(failure: unknown): JsonLog {
+  const code = liveDegradeCode(failure, "RT_E_LLM_REJECTED");
+  const message = liveDegradeMessage(failure).slice(0, LIVE_DEGRADE_MESSAGE_BUDGET);
+  return {
+    ts: Date.now(),
+    phase: 6,
+    level: "warn",
+    event: "p6.live.synthesis.failed",
+    detail: `${code} · keyed P6 synthesis unavailable: ${message} — deterministic floor used instead`,
+  };
+}
+
+/**
+ * Context flow (item 1): the host-aware completion seam for `liveLayer`'s
+ * per-phase model work.
+ *
+ * The TanStack server-fn `complete()` (llm.ts) cannot run outside a Start
+ * server context, so on the bare-Node host every CLI/harness driver runs
+ * `llmStatus()` ALWAYS reports unconfigured and `complete()` ALWAYS resolves
+ * `{ok:false}` (measured with the repo `.env` key present:
+ * `serverFn_llmStatus_configured:false` vs `direct_isDeepSeekConfigured:true`).
+ * The old gate `(await llmStatus()).configured` therefore made the grounded
+ * per-phase deliverable — the ONE producer that reads the prior phase
+ * artifacts — unreachable on the CLI path: P1–P5/P8–P12 generated from the
+ * brief alone (a keyed run's census shows them carrying only the deterministic
+ * template + gate, no grounded deliverable).
+ *
+ * On a bare-Node host with a key in THIS process we call the provider module
+ * directly (the same `isDeepSeekConfigured` probe `upgradeP6Keyed` uses, and the
+ * same trust gate); everywhere else the server-fn facade stands. Keyless /
+ * denied host ⇒ null, so the deterministic floor is byte-identical.
+ */
+async function hostCompleter(): Promise<Completer | null> {
+  if (isBareNodeHost() && keyedDeepSeekConfigured()) {
+    try {
+      const spec = clientSafeServerSpecifier("deepseek");
+      const ds = (await import(spec)) as { completeDeepSeek?: Completer };
+      const fn = ds.completeDeepSeek;
+      return typeof fn === "function" && isTrustedCallable(fn) ? fn : null;
+    } catch {
+      // Provider module unloadable → honest floor (no fabricated model text).
+      return null;
+    }
+  }
+  if ((await llmStatus()).configured) return complete;
+  return null;
 }
 
 export async function liveLayer(project: Project, phase: PhaseId, deps?: LiveLayerDeps): Promise<Project> {
@@ -3655,6 +4222,28 @@ export async function liveLayer(project: Project, phase: PhaseId, deps?: LiveLay
     };
   };
 
+  // W62 · C1-07-class remediation: the relevance/off-intent filter's DROPPED
+  // results used to vanish with no count or reason (engine.ts:3637-3639). The
+  // row below records the drop on the phase's ledger — evidence, never a
+  // behavior change (keyless / no-drop passes stay byte-identical).
+  const researchDropRow: JsonLog | null =
+    real !== null && real.dropped > 0
+      ? {
+          ts: Date.now(),
+          phase,
+          level: "info",
+          event: "research.filtered",
+          detail: `${real.droppedNote ?? `${real.dropped} result(s) dropped as off-intent`} · kept ${real.items.length}`,
+        }
+      : null;
+  // Item 5: `fetchResearch`'s previously-swallowed failures (a thrown research
+  // call, a failed narrative call) ride out as coded rows — never a silent
+  // degrade that reads like a clean keyless pass.
+  const researchDegradeRows: JsonLog[] = real?.degradeRows ?? [];
+  const researchRows: JsonLog[] = [...researchDegradeRows, ...(researchDropRow ? [researchDropRow] : [])];
+  const withResearchDrop = (proj: Project): Project =>
+    researchRows.length > 0 ? { ...proj, logs: [...(proj.logs ?? []), ...researchRows].slice(-200) } : proj;
+
   if (real) {
     // Research phase: real findings + narrative. Competitor rows are NEVER promoted
     // to source:"cited" (M-01) — template rows carry no per-row evidence; real
@@ -3688,24 +4277,66 @@ export async function liveLayer(project: Project, phase: PhaseId, deps?: LiveLay
       const already = (done.research ?? []).some(
         (e) => e.query === corpusEntry.query && urlsOf(e.items ?? []) === urlsOf(corpusEntry.items),
       );
-      return stamp(already
+      return withResearchDrop(stamp(already
         ? { ...done, artifacts: [...done.artifacts, ...researchArtifacts] }
         : {
             ...done,
             research: [...(done.research ?? []), corpusEntry],
             artifacts: [...done.artifacts, ...researchArtifacts],
-          });
+          }));
     }
-    if (researchArtifacts.length === 0) return stamp(done);
-    return stamp({ ...done, artifacts: [...done.artifacts, ...researchArtifacts] });
+    if (researchArtifacts.length === 0) return withResearchDrop(stamp(done));
+    return withResearchDrop(stamp({ ...done, artifacts: [...done.artifacts, ...researchArtifacts] }));
   }
 
-  if ((await llmStatus()).configured) {
+  // Context flow (item 1): the host-aware seam reaches the provider on the
+  // bare-Node host the CLI/harness drivers run (see `hostCompleter`), so the
+  // grounded per-phase deliverable — which reads the PRIOR phase artifacts —
+  // actually runs there instead of degrading to "brief alone".
+  const completer = await hostCompleter();
+  if (completer) {
     // Non-research phase: an LLM narrative for every phase, plus real constraint
     // extraction at P2 (Constraint Scheduler). All config-gated + try/caught.
+    // Keyed per-phase work: the phase's OWN deliverable, model-written from the
+    // FULL brief + prior artifacts, so the live layer is more than a narrative
+    // beside the deterministic template (P1-P5 previously did no model work).
+    // P6 is codegen's synthesis phase — its artifact is produced above.
+    if (phase !== 6) {
+      try {
+        const grounded = await phaseGroundedArtifact(done, phase, completer);
+        if (grounded.ok) {
+          llmRan = true;
+          extras.push(
+            art(
+              phase,
+              PHASE_ARTIFACT_KIND[phase] ?? "docs",
+              `Phase ${phaseDef(phase).code} deliverable (LLM, grounded)`,
+              `${grounded.text}${GROUNDED_PHASE_FOOTER}`,
+              "markdown",
+            ),
+          );
+        } else {
+          // OV-13 (fixes/252): a keyed degrade is recorded, coded — never silent.
+          degradeRows.push(liveDegradeRow(phase, "artifact", grounded, "RT_E_LLM_REJECTED"));
+        }
+      } catch (err) {
+        /* grounded artifact unavailable → deterministic result stands (recorded,
+           never silent — OV-13, fixes/252) */
+        degradeRows.push(liveDegradeRow(phase, "artifact", err, "RT_E_LLM_REJECTED"));
+      }
+    }
+    const tasks = createLlmTasks(completer);
     try {
-      const narrative = await phaseNarrative(
-        { name: project.name, brief: project.brief, domain: project.domain },
+      const narrative = await tasks.phaseNarrative(
+        {
+          name: project.name,
+          brief: project.brief,
+          domain: project.domain,
+          // Context flow (item 1): the narrative is fed the prior phases'
+          // deliverables, so it cannot be generated from the brief alone (and
+          // cannot contradict the grounded artifact beside it).
+          priorArtifacts: priorArtifactContext(project, phase),
+        },
         phaseDef(phase),
       );
       if (narrative.ok) {
@@ -3727,7 +4358,7 @@ export async function liveLayer(project: Project, phase: PhaseId, deps?: LiveLay
     }
     if (phase === 2) {
       try {
-        const cons = await extractConstraints(project.brief);
+        const cons = await tasks.extractConstraints(project.brief);
         if (cons.ok && cons.constraints.length > 0) {
           llmRan = true;
           extras.push(
@@ -3791,6 +4422,8 @@ export async function deepenResearch(
     narrative: string | null;
     provider: string | null;
     unavailable: boolean;
+    dropped?: number;
+    droppedNote?: string | null;
   } | null> = fetchResearch,
 ): Promise<Project> {
   if (!RESEARCH_PHASES.has(phase)) return project;
@@ -3803,6 +4436,18 @@ export async function deepenResearch(
   const query = researchQueryFor(project, phase);
   const now = Date.now();
   const logs: JsonLog[] = [...(project.logs ?? [])];
+  // W62 · C1-07-class remediation: record the relevance filter's dropped count
+  // here too (deepenResearch is the other live-research production path) —
+  // deep research used to silently discard off-intent results.
+  if ((res.dropped ?? 0) > 0) {
+    logs.push({
+      ts: now,
+      phase,
+      level: "info",
+      event: "research.filtered",
+      detail: `${res.droppedNote ?? `${res.dropped} result(s) dropped as off-intent`} · kept ${res.items.length}`,
+    });
+  }
   const research: ResearchCorpusEntry[] = [...(project.research ?? [])];
   let artifacts = [...(project.artifacts ?? [])];
   const seenArtifact = new Set(artifacts.map((a) => a.id));
@@ -4011,7 +4656,7 @@ export function liveLayerFailureRow(phase: PhaseId, thrown: unknown): JsonLog {
  * failure value (a throwing getter, an unprintable object) degrades to a bare
  * coded row — so recording a degrade can never break the run it observes.
  */
-export type LiveDegradeKind = "narrative" | "constraints" | "research";
+export type LiveDegradeKind = "narrative" | "constraints" | "research" | "artifact";
 
 /** Message budget: code + kind + message + statement stay ≤240 chars total. */
 const LIVE_DEGRADE_MESSAGE_BUDGET = 140;
@@ -4156,9 +4801,14 @@ export async function runPhaseAsync(project: Project, phase: PhaseId): Promise<P
     // Any unexpected error must never break a run — the deterministic path is the floor.
     // G2 (216y §2.3): the floor is the OUTCOME, never the whole story — log the failure
     // on the returned project so the degradation is visible in the record.
+    // A4-E9: the phase RECORD carries the `degraded` marker too, so "threw and
+    // ran the floor" is distinguishable from a genuine completion.
     const floor = applyPhaseResult(project, phase);
     return recordPhaseSpend(
-      { ...floor, logs: [...floor.logs, liveLayerFailureRow(phase, err)].slice(-200) },
+      markPhaseDegraded(
+        { ...floor, logs: [...floor.logs, liveLayerFailureRow(phase, err)].slice(-200) },
+        phase,
+      ),
       phase,
       spendBaseline,
     );
@@ -4345,6 +4995,20 @@ export type WildStepOptions = {
    *  like `expandBriefWithBackoff` (500 ⇒ 500/1000/2000…). Default
    *  `WILD_REVIEW_RETRY_BACKOFF_MS`; the test seam passes ~1 to keep pins fast. */
   retryBackoffMs?: number;
+  /**
+   * W62 · C1-07-class remediation — the DOCUMENTED, CODED, NON-HUMAN
+   * "accept risk under seal" policy path. A classifier REJECT normally mints a
+   * `forceHuman` gate the agent seal refuses, so a sealed run dead-ends until a
+   * human decides. When (and only when) the calling MACHINE declares a
+   * non-empty rule identifier here AND the run is under the seal, a persistent
+   * classifier reject is instead recorded as a MACHINE risk acceptance
+   * (`decidedBy:"autopilot"`, `[seat agent-seal]`, coded `wild.risk_accepted`)
+   * and the step continues — never a human seat, never a silent bypass (the
+   * gate's own DoD post-check still runs and can still block). Absent (the
+   * default) ⇒ every reject arm is byte-identical to the pre-fix engine, so a
+   * sealed run without a declared rule still parks honestly.
+   */
+  acceptRiskUnderSeal?: string;
   /** 346 P2-6 — per-step watchdog budget (ms) for the `boundedStepWatch` wrap
    *  of the phase-execution await. Default `WILD_STEP_BUDGET_MS` (the
    *  production tier-1 boundary, derived above the P6 phase max); the
@@ -4370,6 +5034,17 @@ export type WildStepOptions = {
    *  sequential driver runs, with the documented `meta.liveUnavailable`
    *  waiver when live cannot run; keyless ⇒ the byte-identical floor). */
   liveEdge?: (p: Project) => Promise<Project>;
+  /**
+   * 347 — the GENERAL keyed execution edge for every phase other than 6 and 7.
+   * Before this, `wildExecEdgeFor` wired keyed work ONLY at P6 (synthesis) and
+   * P7 (live research); every other phase executed the deterministic floor on
+   * every host, so a keyed Wild Mode run produced placeholder artifacts that
+   * the Auto-Review classifier then rejected (a measured console run stalled at
+   * P0). Present ⇒ those phases execute through THIS function in any key state;
+   * absent ⇒ the byte-identical floor (the keyless contract). The console
+   * driver injects the server-side live layer; keyless hosts inject nothing.
+   */
+  livePhaseEdge?: (phase: PhaseId, p: Project) => Promise<Project>;
   /** 313 D1 — seam for the ONE DoD-repair pass (also fired by the seal).
    *  Present ⇒ a hard-DoD red calls THIS instead of re-running the phase's own
    *  execution edge (test seam — 316 H3 made it CONSUMED; it was declared but
@@ -4549,6 +5224,22 @@ export function wildExecEdgeFor(
   return keyedDeepSeekConfigured() ? wildP6Edge : null;
 }
 
+/**
+ * 347 — the general keyed execution edge for phases OTHER than 6 and 7. Kept
+ * separate from {@link wildExecEdgeFor} so the P6/P7 selection pins stay
+ * byte-identical: this arm only answers for the phases that had NO keyed edge
+ * before, and only when a caller explicitly injected one.
+ */
+export function wildGeneralExecEdgeFor(
+  phase: PhaseId,
+  opts: WildStepOptions | undefined,
+): ((p: Project) => Promise<Project>) | null {
+  if (phase === 6 || phase === 7) return null;
+  const edge = opts?.livePhaseEdge;
+  if (typeof edge !== "function") return null;
+  return (p: Project) => edge(phase, p);
+}
+
 /** 313 D1: the seal's ONE DoD-repair pass (both call sites: wildApproveGate
  *  post-approval / wildLeavePhase advance). Re-runs the phase's NON-FLOOR
  *  execution edge exactly once so a spurious red that a fresh attempt clears
@@ -4567,7 +5258,7 @@ async function wildDodRepairOnce(
   const seam = typeof opts?.dodRepair === "function" ? opts.dodRepair : null;
   // 316 H3 fix-up: keep the picker's own 1-arg type (the union with the
   // 2-arg seam confused the call-site check) — narrowed below.
-  const edge = seam === null ? wildExecEdgeFor(phase, opts) : null;
+  const edge = seam === null ? (wildExecEdgeFor(phase, opts) ?? wildGeneralExecEdgeFor(phase, opts)) : null;
   if (seam === null && edge === null) {
     return { repaired: null, detail: `no non-floor repair edge for P${phase} — honest park` };
   }
@@ -4611,8 +5302,9 @@ function wildReviewCtx(
   project: Project,
   phase: PhaseId,
   reason: "advance" | "gate",
+  mode?: "phase" | "plan",
 ): WildReviewContext {
-  return { project, phase, reason, gate: wildGateInfo(project, phase) };
+  return { project, phase, reason, ...(mode ? { mode } : {}), gate: wildGateInfo(project, phase) };
 }
 
 /**
@@ -4640,10 +5332,12 @@ export const WILD_REVIEW_MAX_RETRIES = 2;
 export const WILD_REVIEW_RETRY_BACKOFF_MS = 500;
 
 /**
- * The honest reviewer for hosts that cannot load the Node-side classifier
- * (browser / worker without Node): not-configured maps to the engine's
- * existing deterministic paths — advance decisions use the DoD floor, an OPEN
- * GATE pauses with RT_E_LLM_NOT_CONFIGURED. Never fabricates a verdict.
+ * The honest reviewer used when no real classifier can be resolved (keyless
+ * host, or a denied host whose server reports no key / no transport): not-
+ * configured maps to the engine's existing deterministic paths — advance
+ * decisions use the DoD floor, an OPEN GATE pauses with
+ * RT_E_LLM_NOT_CONFIGURED. Never fabricates a verdict. (A keyed browser host
+ * resolves the server-side classifier via `createHostWildReviewer` instead.)
  */
 const unavailableWildReviewer: WildReviewer = async () => ({ ok: false, reason: "not-configured" });
 
@@ -4656,21 +5350,38 @@ const unavailableWildReviewer: WildReviewer = async () => ({ ok: false, reason: 
  *   - otherwise the default `wild-mode.server.ts` reviewer is imported ONLY on
  *     a bare-Node host. Elsewhere the specifier IS the import-protection mock,
  *     and an await on it starves the event loop forever (measured) — so the
- *     honest unavailable reviewer is used instead;
+ *     client-safe seam (`wild-review.ts` `createHostWildReviewer`) is used
+ *     instead: on a browser host it builds a REAL classifier over
+ *     `wild-bridge.ts`'s createServerFn (the server's keyed
+ *     `wildClassifierReview` on llm.ts's server-fn complete()/llmStatus()), and
+ *     returns null keyless / transport-less so the honest unavailable reviewer
+ *     still applies;
  *   - the resolved module export is trust-checked the same way before use.
  * Every branch returns a REAL callable; the caller can never receive a proxy.
  */
 async function resolveWildReviewer(provided?: WildReviewer): Promise<WildReviewer> {
   if (provided !== undefined && isTrustedCallable(provided)) return provided;
-  if (!isBareNodeHost()) return unavailableWildReviewer;
+  if (isBareNodeHost()) {
+    try {
+      const spec = clientSafeServerSpecifier("wild-mode");
+      const mod = (await import(spec)) as { wildClassifierReview?: unknown };
+      const candidate = mod?.wildClassifierReview;
+      return isTrustedCallable(candidate) ? (candidate as WildReviewer) : unavailableWildReviewer;
+    } catch {
+      // Missing provider module / load failure — the honest unavailable reviewer
+      // (not-configured), never a fabricated or proxy verdict.
+      return unavailableWildReviewer;
+    }
+  }
+  // 2026-10-05 (wild-console-classifier fix): a DENIED host (the browser) can
+  // still reach the server's keyed classifier through the client-safe seam —
+  // the mock proxy is never awaited. Keyless / transport-less ⇒ null ⇒ the
+  // honest unavailable reviewer, byte-for-byte the pre-fix not-configured path.
   try {
-    const spec = clientSafeServerSpecifier("wild-mode");
-    const mod = (await import(spec)) as { wildClassifierReview?: unknown };
-    const candidate = mod?.wildClassifierReview;
-    return isTrustedCallable(candidate) ? (candidate as WildReviewer) : unavailableWildReviewer;
+    const { createHostWildReviewer } = await import("./wild-review.ts");
+    const reviewer = await createHostWildReviewer();
+    return isTrustedCallable(reviewer) ? (reviewer as WildReviewer) : unavailableWildReviewer;
   } catch {
-    // Missing provider module / load failure — the honest unavailable reviewer
-    // (not-configured), never a fabricated or proxy verdict.
     return unavailableWildReviewer;
   }
 }
@@ -4697,8 +5408,9 @@ async function resolveWildReview(
   phase: PhaseId,
   reason: "advance" | "gate",
   timeoutMs: number = WILD_REVIEW_TIMEOUT_MS,
+  mode?: "phase" | "plan",
 ): Promise<WildReviewDecision> {
-  const ctx = wildReviewCtx(project, phase, reason);
+  const ctx = wildReviewCtx(project, phase, reason, mode);
   let called: PromiseLike<WildClassifierResult> | WildClassifierResult;
   try {
     called = reviewer(ctx);
@@ -4777,7 +5489,9 @@ export async function reviewWildPlan(
   reviewer: WildReviewer,
   timeoutMs: number = WILD_REVIEW_TIMEOUT_MS,
 ): Promise<WildPlanReview> {
-  const decision = await resolveWildReview(reviewer, project, project.currentPhase, "gate", timeoutMs);
+  // 347: a PLAN review is judged on the rows alone (mode "plan"), never against
+  // the pre-execution phase's empty artifact list / unmet DoD.
+  const decision = await resolveWildReview(reviewer, project, project.currentPhase, "gate", timeoutMs, "plan");
   if (decision.kind === "verdict") {
     return { ok: true, verdict: decision.verdict, feedback: decision.feedback };
   }
@@ -4805,18 +5519,60 @@ export async function reviewWildPlan(
  * `reviewer === null` (keyless host / browser) still parks with an honest
  * "not configured" review row — an unreviewed plan never executes.
  */
+/** The verdict recorded by the LAST `wild.plan_review` row, read from the
+ *  engine-owned row format `stageWildPlan` writes (see `headless.planReviewApproved`
+ *  for the driver-side reader). Null when no review row exists yet. */
+function planReviewVerdictOf(project: Project): "approve" | "reject" | "park" | null {
+  const rows = (project.logs ?? []).filter((r) => r?.event === "wild.plan_review");
+  const last = rows[rows.length - 1];
+  if (!last) return null;
+  const detail = typeof last.detail === "string" ? last.detail : "";
+  if (/review \(classifier\):\s*approve\b/.test(detail)) return "approve";
+  if (/review \(classifier\):\s*reject\b/.test(detail)) return "reject";
+  return "park";
+}
+
 export async function stageWildPlan(
   project: Project,
   reviewer: WildReviewer | null,
+  opts?: {
+    /**
+     * 347: under the AGENT SEAL a classifier-APPROVED plan is machine-consented
+     * consent, so the review park is not stamped and the run proceeds. This is
+     * the console Wild Mode contract (zero human approval); every other caller
+     * (absent/`false`) keeps the pre-347 park byte-identically, so the R13-f02
+     * pins are untouched. A reject / unconfigured / errored review ALWAYS parks
+     * — the seal never invents an approval.
+     */
+    agentSeal?: boolean;
+  },
 ): Promise<{ project: Project; staged: boolean }> {
   const plan = project.wildPlan;
   if (!plan || plan.source !== "planner" || !Array.isArray(plan.steps) || plan.steps.length === 0) {
     return { project, staged: false };
   }
-  const logs = Array.isArray(project.logs) ? project.logs : [];
-  if (logs.some((r) => r?.event === "wild.plan_review")) return { project, staged: false };
   const phase = project.currentPhase;
+  // Idempotence is keyed on the VERDICT, not the row's PRESENCE. A prior
+  // `wild.plan_review` row that is anything but an APPROVAL means the plan did
+  // not execute; a resume must re-park instead of executing the rejected plan
+  // (pre-fix: presence alone returned staged:false, so a resume after a REJECT
+  // executed the rejected plan without any review).
+  const priorVerdict = planReviewVerdictOf(project);
+  if (priorVerdict === "approve") return { project, staged: false };
+  if (priorVerdict !== null) {
+    const reparked = wildPause(
+      project,
+      phase,
+      "warn",
+      "wild.paused_plan",
+      `wild.plan (${plan.steps.length} row(s)) carries a prior review verdict "${priorVerdict}" — ` +
+        `an unapproved plan never executes on resume. Fix or replace the plan, then resume (R13-f02).`,
+      { code: "RT_E_GATE_PENDING", unlock: "human-gate" },
+    );
+    return { project: reparked, staged: true };
+  }
   let reviewed: Project;
+  let approved = false;
   if (reviewer === null) {
     reviewed = wildLog(
       project,
@@ -4827,6 +5583,7 @@ export async function stageWildPlan(
     );
   } else {
     const verdict = await reviewWildPlan(project, reviewer);
+    approved = verdict.ok && verdict.verdict === "approve";
     reviewed = verdict.ok
       ? wildLog(
           project,
@@ -4842,6 +5599,21 @@ export async function stageWildPlan(
           "wild.plan_review",
           `wild.plan (${plan.steps.length} row(s)) review failed (${verdict.reason}): ${verdict.error.slice(0, 300)} — parked for human review (R13-f02).`,
         );
+  }
+  // 347 (console zero-human Wild Mode): under the agent seal a classifier
+  // APPROVE is the consent of record — execute instead of parking. The row
+  // above is the evidence; only the park is withheld.
+  if (opts?.agentSeal === true && approved) {
+    return {
+      project: wildLog(
+        reviewed,
+        phase,
+        "info",
+        "wild.plan_approved",
+        `wild.plan (${plan.steps.length} row(s)) approved by the classifier under the agent seal — executing without a human gate (347).`,
+      ),
+      staged: false,
+    };
   }
   const parked = wildPause(
     reviewed,
@@ -5059,21 +5831,59 @@ async function wildApproveGate(
     return { project: paused, outcome: "paused", ran: true, error: decision.error, code: decision.code ?? "RT_E_LLM_REJECTED" };
   }
   const next = wildReviewLog(working, phase, decision.source, decision.feedback);
+  const acceptRiskRule =
+    seal && typeof opts?.acceptRiskUnderSeal === "string" && opts.acceptRiskUnderSeal.trim() !== ""
+      ? opts.acceptRiskUnderSeal.trim()
+      : null;
+  let approvalNote = decision.feedback.slice(0, 400);
+  let reviewBase = next;
   if (decision.verdict === "reject") {
-    // GAP-1 (fixes/320_g1b_review_park.md): this arm is definitionally a
-    // CLASSIFIER reject (the deterministic DoD floor never judges gates —
-    // resolveWildReview returns unconfigured-gate/error for the other
-    // classes), so the mint is unconditional here: the human decision gate
-    // the park's unlockText promises now exists.
-    const gated = mintReviewGatePark(next, phase, decision.feedback);
-    const paused = wildPause(
-      gated,
-      phase,
-      "warn",
-      "wild.reject",
-      `P${phase} review REJECTED: ${decision.feedback}`,
-    );
-    return { project: paused, outcome: "paused", ran: true, error: decision.feedback, code: "RT_E_GATE_PENDING" };
+    // W62 · C1-07-class remediation — the documented accept-risk-under-seal
+    // path (option a): a MACHINE-declared rule lets a persistent classifier
+    // reject be overridden by a recorded machine risk acceptance instead of the
+    // forceHuman dead-end. No human seat is ever minted; the DoD post-check
+    // below still runs and can still block. No rule ⇒ the pre-fix park.
+    if (acceptRiskRule !== null) {
+      reviewBase = wildLog(
+        next,
+        phase,
+        "warn",
+        "wild.risk_accepted",
+        `P${phase} classifier REJECT overridden by the sealed ACCEPT-RISK policy (rule: ${acceptRiskRule}) — ` +
+          `a MACHINE risk acceptance (decidedBy:autopilot); no human seat minted.`,
+      );
+      approvalNote = `ACCEPTED RISK under seal (rule: ${acceptRiskRule}). Classifier reject: ${decision.feedback}`.slice(0, 400);
+    } else {
+      // GAP-1 (fixes/320_g1b_review_park.md): this arm is definitionally a
+      // CLASSIFIER reject (the deterministic DoD floor never judges gates —
+      // resolveWildReview returns unconfigured-gate/error for the other
+      // classes), so the mint is unconditional here: the human decision gate
+      // the park's unlockText promises now exists.
+      const gated = mintReviewGatePark(next, phase, decision.feedback);
+      // A4-E10: the minted gate is `forceHuman`, so the AGENT SEAL can never
+      // clear it (R3/B-03) — for a sealed (zero-human) run the honest park names
+      // the repair-the-phase path. The minted gate itself is kept: the human
+      // approve/reject doors stay open, they are simply not what the seal needs.
+      const sealedMachineGate = seal;
+      const repaired = sealedMachineGate
+        ? wildLog(
+            gated,
+            phase,
+            "warn",
+            "wild.repair_required",
+            `P${phase} classifier REJECT — the seal cannot clear the minted forceHuman gate (R3/B-03); repair the phase (reject with a note to reopen the retry edge, or fix and re-run), then resume.`,
+          )
+        : gated;
+      const paused = wildPause(
+        repaired,
+        phase,
+        "warn",
+        "wild.reject",
+        `P${phase} review REJECTED: ${decision.feedback}`,
+        { code: "RT_E_GATE_PENDING", unlock: sealedMachineGate ? "human-retry" : "human-gate" },
+      );
+      return { project: paused, outcome: "paused", ran: true, error: decision.feedback, code: "RT_E_GATE_PENDING" };
+    }
   }
   // Self-approval. approveHitl completes the phase and moves the cursor; the
   // ledger decision row records the machine actor + the classifier feedback as
@@ -5084,9 +5894,9 @@ async function wildApproveGate(
   // `decidedBy` stays the truthful machine actor ("autopilot"); the seal can
   // never mint a human seat.
   const candidate = seal
-    ? approveHitl(next, {
+    ? approveHitl(reviewBase, {
         decidedBy: "autopilot",
-        note: `${decision.feedback.slice(0, 400)} [seat agent-seal]`,
+        note: `${approvalNote} [seat agent-seal]`,
         decidedVia: {
           action: "hitl.approve",
           resource: `gate:P${phase}`,
@@ -5095,9 +5905,9 @@ async function wildApproveGate(
           tokenPath: false,
         },
       })
-    : approveHitl(next, { decidedBy: "autopilot", note: decision.feedback.slice(0, 400) });
-  if (candidate === next) {
-    const paused = wildPause(next, phase, "error", "wild.error", `P${phase} approval did not apply — wild run paused.`);
+    : approveHitl(reviewBase, { decidedBy: "autopilot", note: decision.feedback.slice(0, 400) });
+  if (candidate === reviewBase) {
+    const paused = wildPause(reviewBase, phase, "error", "wild.error", `P${phase} approval did not apply — wild run paused.`);
     return { project: paused, outcome: "paused", ran: true, error: "Approval did not apply.", code: "RT_E_INTERNAL" };
   }
   // P10 hard-DoD post-check: the gate's own DoD only becomes evaluable AFTER
@@ -5172,19 +5982,82 @@ async function wildLeavePhase(
   }
   let cur = wildReviewLog(resolved.project, phase, decision.source, decision.feedback);
   if (decision.verdict === "reject") {
-    // GAP-1 (fixes/320_g1b_review_park.md): a CLASSIFIER reject mints the
-    // human decision gate the park's unlockText promises. The deterministic
-    // DoD-floor reject (source "dod") mints NOTHING — the keyless pure-floor
-    // honesty story stays byte-identical.
-    if (decision.source === "classifier") cur = mintReviewGatePark(cur, phase, decision.feedback);
-    const paused = wildPause(
-      cur,
-      phase,
-      "warn",
-      "wild.reject",
-      `P${phase} review REJECTED: ${decision.feedback}`,
-    );
-    return { project: paused, outcome: "paused", ran: true, error: decision.feedback, code: "RT_E_GATE_PENDING" };
+    // A4-E1 (P0): with NO classifier configured, `resolveWildReview` answers an
+    // ADVANCE decision with the deterministic DoD floor — `reject` iff the
+    // phase's exit gate is red (engine.ts resolveWildReview). On an ADVISORY run
+    // (`enforceDod !== true`) that floor is a machine review, not a gate: the
+    // sequential driver (`advanceOnce`, store/headless) advances with the red
+    // gate merely RECORDED. The wild loop must not turn the same state into a
+    // park. Log the review honestly, then fall through to the ordinary advance
+    // (the DoD leave check below is skipped because enforcement is off).
+    if (decision.source === "dod" && p.enforceDod !== true) {
+      cur = wildLog(
+        cur,
+        phase,
+        "warn",
+        "wild.review_advisory",
+        `P${phase} DoD review REJECTED (${decision.feedback}) — enforcement is off (advisory), so the red gate is RECORDED, not enforced; advancing exactly as advanceOnce does.`,
+      );
+    } else {
+      // W62 · C1-07-class remediation — accept-risk-under-seal (option a). Only a
+      // CLASSIFIER reject is in scope (a DoD-floor reject is deterministic, not a
+      // verdict a machine rule may override), and only with a declared rule.
+      const acceptRiskRule =
+        seal &&
+        decision.source === "classifier" &&
+        typeof opts?.acceptRiskUnderSeal === "string" &&
+        opts.acceptRiskUnderSeal.trim() !== ""
+          ? opts.acceptRiskUnderSeal.trim()
+          : null;
+      if (acceptRiskRule !== null) {
+        cur = wildLog(
+          cur,
+          phase,
+          "warn",
+          "wild.risk_accepted",
+          `P${phase} classifier REJECT overridden by the sealed ACCEPT-RISK policy (rule: ${acceptRiskRule}) — ` +
+            `a MACHINE risk acceptance (decidedBy:autopilot); no human seat minted.`,
+        );
+        // Fall through to the DoD leave check + advance: the phase still must
+        // pass its exit gate, so the override accepts the classifier's risk, not
+        // the gate.
+      } else {
+        // GAP-1 (fixes/320_g1b_review_park.md): a CLASSIFIER reject mints the
+        // human decision gate the park's unlockText promises. A4-E1: a
+        // DETERMINISTIC DoD-floor reject (source "dod", enforcement ON) mints
+        // NOTHING to decide — the honest door is "fix/regenerate/retry the
+        // phase", so the park names `human-retry` instead of promising an open
+        // gate the CLI would refuse (status stays "running", hitl stays null).
+        if (decision.source === "classifier") cur = mintReviewGatePark(cur, phase, decision.feedback);
+        // A4-E10: a machine-CREATED reject gate (mintReviewGatePark is
+        // forceHuman) can never be machine-cleared, so under the seal the park
+        // names the repair-the-phase path and a row names the door that works
+        // (reject-with-a-note reopens the retry edge). The minted gate itself is
+        // kept — the human approve/reject doors stay open, never removed.
+        const sealedMachineGate = seal && decision.source === "classifier";
+        if (sealedMachineGate) {
+          cur = wildLog(
+            cur,
+            phase,
+            "warn",
+            "wild.repair_required",
+            `P${phase} classifier REJECT — the seal cannot clear the minted forceHuman gate (R3/B-03); repair the phase (reject with a note to reopen the retry edge, or fix and re-run), then resume.`,
+          );
+        }
+        const paused = wildPause(
+          cur,
+          phase,
+          "warn",
+          "wild.reject",
+          `P${phase} review REJECTED: ${decision.feedback}`,
+          {
+            code: "RT_E_GATE_PENDING",
+            unlock: decision.source === "classifier" && !sealedMachineGate ? "human-gate" : "human-retry",
+          },
+        );
+        return { project: paused, outcome: "paused", ran: true, error: decision.feedback, code: "RT_E_GATE_PENDING" };
+      }
+    }
   }
   // P10 hard-DoD leave check: the phase being LEFT must pass its exit gate.
   // 313 D1: under the seal, ONE repair pass runs before the park is stamped —
@@ -5206,6 +6079,11 @@ async function wildLeavePhase(
           `P${phase} DoD unmet — hard gate blocks advance: ${g.unmet.map((x) => x.id).join(", ") || "n/a"}${
             repair !== null ? ` (${repair.detail})` : ""
           }`,
+          // A4-E1: this park leaves no open gate (status stays "running",
+          // hitl stays null), so the honest door is repair/retry — the CLI
+          // `approve`/`reject` doors refuse a project that is not
+          // `awaiting_hitl` with a pending gate.
+          { code: "RT_E_GATE_PENDING", unlock: "human-retry" },
         );
         return { project: paused, outcome: "paused", ran: true, error: hardDodMessage(phase, g), code: "RT_E_GATE_PENDING" };
       }
@@ -5259,10 +6137,14 @@ function wildFinalize(p: Project, phase: PhaseId): WildStepResult {
  * (`./head` + `less.ts`, the wildServerSpec precedent above): the TanStack
  * import-protection plugin statically denies direct `*.server.*`/headless
  * imports from the client bundle, so the specifier is computed at runtime.
- * Any load failure / missing export / seam throw falls back to the
- * deterministic floor with an honest warn row (a wild step must never die on
- * a seam-load failure, and the log must never claim the keyed edge ran when
- * it did not).
+ * A4-E4 (P1): a load failure / missing export / seam throw is NO LONGER
+ * converted into `applyPhaseResult(project, 6)`. That synthesis marked the
+ * phase COMPLETE and appended a warn row, so "the keyed edge blew up" and "the
+ * keyless floor ran" produced the SAME record — an error reading as a genuine
+ * completion. On failure the phase is left exactly as the caller handed it in
+ * (the execute site has already set it `running`) and a distinct coded
+ * `wild.p6.edge.failed` row is stamped; the execute site turns that into a
+ * coded park. No floor is synthesized.
  */
 async function wildP6Edge(project: Project): Promise<Project> {
   const headlessSpec = "./head" + "less.ts";
@@ -5273,11 +6155,11 @@ async function wildP6Edge(project: Project): Promise<Project> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return wildLog(
-      applyPhaseResult(project, 6),
+      project,
       6,
       "warn",
-      "wild.p6.edge_unavailable",
-      `P6 keyed edge unavailable (${msg.slice(0, 160)}) — deterministic floor used.`,
+      "wild.p6.edge.failed",
+      `${liveDegradeCode(err, "RT_E_LLM_REJECTED")} · P6 keyed edge FAILED (${msg.slice(0, 160)}) — the phase is left running and no deterministic floor was synthesized (a floor completion is indistinguishable from a real keyed one).`,
     );
   }
 }
@@ -5292,10 +6174,10 @@ async function wildP6Edge(project: Project): Promise<Project> {
  * run) through the same concatenated-specifier idiom as wildP6Edge. A keyed
  * enforceDod wild run therefore clears `p7-research` with a real corpus (or
  * the waiver) instead of hard-stopping on a floor that can never satisfy it.
- * Any load failure / missing export / seam throw falls back to the
- * deterministic floor with a coded warn row — the honest minimum when the
- * edge is absent: a refusal-NOTE on the record, never a silent skip and never
- * a fabricated live pass (a wild step must never die on a seam-load failure).
+ * Any load failure / missing export / seam throw leaves the phase running and
+ * stamps a coded `wild.p7.edge.failed` row (A4-E4) — a refusal-NOTE on the
+ * record, never a silent skip, never a synthesized floor pass, and never a
+ * fabricated live pass (a wild step must never die on a seam-load failure).
  */
 async function wildLiveEdge(project: Project): Promise<Project> {
   const headlessSpec = "./head" + "less.ts";
@@ -5308,11 +6190,11 @@ async function wildLiveEdge(project: Project): Promise<Project> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return wildLog(
-      applyPhaseResult(project, 7),
+      project,
       7,
       "warn",
-      "wild.p7.edge_unavailable",
-      `P7 live edge unavailable (${msg.slice(0, 160)}) — deterministic floor used.`,
+      "wild.p7.edge.failed",
+      `${liveDegradeCode(err, "RT_E_LLM_REJECTED")} · P7 live edge FAILED (${msg.slice(0, 160)}) — the phase is left running and no deterministic floor was synthesized (a floor completion is indistinguishable from a real live one).`,
     );
   }
 }
@@ -5654,7 +6536,7 @@ async function wildStepBody(
     // same live layer the sequential driver runs). Keyless hosts (and the
     // browser, where keyedDeepSeekConfigured() is false) keep the exact floor
     // bytes — the picker returns null.
-    const execEdge = wildExecEdgeFor(phase, opts);
+    const execEdge = wildExecEdgeFor(phase, opts) ?? wildGeneralExecEdgeFor(phase, opts);
     // 346 P2-6: the per-step watchdog — `boundedStepWatch`'s production
     // consumer. The phase execution is the freeze-prone await (a keyed P6
     // synthesis may run up to P6_PHASE_MAX_MS); the wrap observes it at the two
@@ -5707,17 +6589,58 @@ async function wildStepBody(
       },
     );
     const executed = watched.result;
-    const done = wildLog(
-      executed,
-      phase,
-      "info",
-      "wild.exec",
-      execEdge === null
-        ? `P${phase} executed (deterministic floor)`
+    // A4-E4 (P1): the keyed P6/P7 edges FAIL CLOSED — a NEW
+    // `wild.p{6,7}.edge.failed` row means the edge threw and deliberately did
+    // NOT synthesize the deterministic floor. Park coded on the still-running
+    // phase instead of marking the floor complete: a resume/repair (or a human)
+    // is the only advance, exactly like any other thrown step.
+    const countEvent = (p: Project, ev: string): number => (p.logs ?? []).filter((l) => l.event === ev).length;
+    const failedEvent =
+      phase === 6 ? "wild.p6.edge.failed" : phase === 7 ? "wild.p7.edge.failed" : null;
+    if (failedEvent !== null && countEvent(executed, failedEvent) > countEvent(running, failedEvent)) {
+      const detail =
+        `P${phase} keyed edge FAILED — the phase stays running and no deterministic floor was synthesized ` +
+        `(A4-E4); resume/repair is a human decision.`;
+      return finishStep(
+        {
+          project: wildPause(executed, phase, "error", failedEvent, detail, {
+            code: "RT_E_LLM_REJECTED",
+            unlock: "human-retry",
+          }),
+          outcome: "paused",
+          ran: true,
+          error: detail,
+          code: "RT_E_LLM_REJECTED",
+        },
+        "park",
+      );
+    }
+    // Tell the truth: `execEdge !== null` only proves an edge was SELECTED. An
+    // injected seam (or the console bridge) can still append the legacy
+    // `wild.p{6,7}.edge_unavailable` floor row, and the pre-fix row claimed
+    // "keyed synthesis edge" / "keyed live edge" anyway. A newly-appended
+    // fallback row for this phase means the floor actually ran.
+    const fallbackEvent =
+      phase === 6 ? "wild.p6.edge_unavailable" : phase === 7 ? "wild.p7.edge_unavailable" : null;
+    const edgeFellBack =
+      fallbackEvent !== null && countEvent(executed, fallbackEvent) > countEvent(running, fallbackEvent);
+    const edgeLabel =
+      execEdge === null || edgeFellBack
+        ? edgeFellBack
+          ? "deterministic floor — keyed edge unavailable"
+          : "deterministic floor"
         : phase === 7
-          ? `P7 executed (${typeof opts?.liveEdge === "function" ? "injected edge seam" : "keyed live edge"})`
-          : `P6 executed (${opts?.p6Edge ? "injected edge seam" : "keyed synthesis edge"})`,
-    );
+          ? typeof opts?.liveEdge === "function"
+            ? "injected edge seam"
+            : "keyed live edge"
+          : phase === 6
+            ? typeof opts?.p6Edge === "function"
+              ? "injected edge seam"
+              : "keyed synthesis edge"
+            : typeof opts?.livePhaseEdge === "function"
+              ? "injected phase edge"
+              : "deterministic floor";
+    const done = wildLog(executed, phase, "info", "wild.exec", `P${phase} executed (${edgeLabel})`);
     // 346 P2-6 pause-on-resolve (§5.2 tier 2): the timeout tier fired while the
     // step was still pending; now that it RESOLVED at ≥ 2× budget, the run must
     // not silently advance — park it coded (a human resumes to retry). This is

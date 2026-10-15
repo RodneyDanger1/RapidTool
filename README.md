@@ -35,7 +35,7 @@ pure engine with no browser and no server.
 7. [Current state — 2026-09-26 (works / shelled / blocked)](#current-state--2026-09-26-works--shelled--blocked)
 8. [Progress so far (the paper trail)](#progress-so-far-the-paper-trail)
 9. [Verification — how to check every claim above](#verification--how-to-check-every-claim-above)
-10. [**THE CATALOG — every tracked file**](#the-catalog--every-tracked-file-1391-today)
+10. [**THE CATALOG — every tracked file**](#the-catalog--every-tracked-file-2088-today)
 11. [Docs index](#docs-index)
 12. [License](#license)
 
@@ -49,6 +49,10 @@ the newest byte-read and the finding register's corrections win.
 
 1. **`README.md`** (this file) — what RapidTool is, the honest state, and **the catalog of every
    tracked file** (§10). Start here so you know what exists before you touch anything.
+1b. **`RUNBOOK.md`** — the operator runbook (added 2026-10-05): install, launch, the console
+   tour, how to run Wild Mode correctly (enable → run → what a park means → resume), how to
+   export/download the product, how to run the CLI verbs, and a plain-English "known limits"
+   section. Read it before promising anyone a running product.
 2. **`START-HERE.md`** (tracked; written as a working-tree file 2026-09-26) — the cold-start map: the 10-line
    tour, the read order, the run commands (each verified or explicitly marked why not), the
    never-do hard rules.
@@ -261,15 +265,35 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 9. **The keyed P6 productivity wall is unbroken (campaign #1, 2026-10-05).** A real keyed acceptance
    campaign over the seven briefs plus a held-out brief (615,533 tokens / ~US$0.38 label-only /
    1,505 s) scored **`workingApp` 0 of 8** trees against the plan's target of ≥5/8; **6 of 8 stall at
-   the P6 DoD gate** (`RT_E_GATE_PENDING`), and the synthesis gate refuses below-floor trees. The
+   the P6 DoD gate** (`RT_E_GATE_PENDING`), and the synthesis gate refuses below-floor trees **by
+   default** (`emit --red-tree banner` is the deliberate opt-in that ships the partial WITH a README
+   caution banner). The
    **delivery-truth** half DID pass: **0 empty-substance commits and 0 red-tree commits** (historical:
    6 empty + 5 red). Raw evidence: `testruns\_report\CAMPAIGN1.md`, `CAMPAIGN1.json`,
    `campaign1-score.json`. Do not read a green gate as a working app.
-10. **Known residuals.** `resumeAccepted` is plumbed through `headless.ts` but **not yet consumed by
-    codegen** (the accepted-chunk reuse is not yet effective); the gate reports **5 lint warnings**
-    (`lint.problems:5`, lint still `ok:true`); cross-family failover is genuinely unimplemented (the
-    un-armed switch was deleted; `RAPIDTOOL_FALLBACK_PROVIDERS` is inert); the console seat records
-    provenance but has no out-of-band delivery seam; prettier drift is measured, not gated.
+10. **Known residuals.** `resumeAccepted` **IS** now consumed by codegen (`codegen.server.ts`
+    `resumeByPath` / the `p6.synthesis.reused` event, with `headless.resumeAcceptedFromTree` /
+    `driveP6Journey` threading the previous cycle's accepted chunks — corrected 2026-10-05); the gate
+    reports **5 lint warnings** (`lint.problems:5`, lint still `ok:true`); cross-family failover is
+    genuinely unimplemented (the un-armed switch was deleted; `RAPIDTOOL_FALLBACK_PROVIDERS` is
+    inert); the console seat records provenance but has no out-of-band delivery seam; prettier drift
+    is measured, not gated.
+11. **The gates measure internal consistency, not product quality — so quality is now measured
+    separately (2026-10-05).** Verified this session: `p6-brief-fit` is a lexical identifier test
+    (`src/lib/dod.ts`); `p6-verified` only means the emitted tree's own tests went green
+    (`dod.ts:790`); and `p6-arch` **passes vacuously when no tree exists** — the code itself calls
+    that a SKIP, not product-complete (`archTrace`/`archProductComplete`). That vacuous pass is now
+    surfaced honestly: `runGate` returns an `advisories` list and the recorded gate artifact prints
+    *"Qualified passes (**NOT** product-complete): p6-arch: SKIP…"* — **no bar was lowered and no
+    criterion removed**. A NEW additive, byte-derived reading (`src/lib/product-quality.ts`,
+    surfaced as `doctor.productQuality` and `fleetAcceptance.productQuality`) reports a real web
+    entry, router + pages, styled layout, a working ordering flow for an ordering brief, real
+    (non-stub, non-reexport) modules, artifacts/phase, and the `--no-empty-tree` /
+    `--no-placeholder-only-tree` flags. Nothing is guessed: absent evidence is reported absent. On
+    a real keyed bakery run (`%TEMP%\bloedow-e2e\bloedow-bakery.json`, 9-file tree, 8 real modules)
+    it reads `quality:false` with five named reasons — no web entry, no router, 0 pages, no styled
+    layout, no wired form — the exact gap the internal gates miss. Operator steps and the full
+    limits: **`RUNBOOK.md`**.
 
 ### The autonomy contract (PR-33, 2026-10-05)
 
@@ -304,7 +328,7 @@ doctrine (an owner decision, not a code-lane change).
 | `repair --from-gate` | **off** | Re-opens a red RUNNING P6 first so the bounded repair targets the recorded unmet state instead of `RT_E_PHASE_ILLEGAL`. | Omit it (legacy repair path). |
 | `--token-ledger <file>` / `RAPIDTOOL_LEDGER_FILE` | **off** | Cross-process campaign ledger: preflight-load, refuse coded when `spent >= cap`, post-append measured spend. | Unset both (never read/written/surfaced; byte-identical). |
 | `RAPIDTOOL_CAMPAIGN_TOKEN_CAP` | **unset** | Integer campaign bound for the ledger above. | Unset (falls back to the file's `cap`). |
-| `resumeAccepted` | **absent** | A previous cycle's accepted chunks threaded for reuse. | Absent is the default and is byte-identical. |
+| `resumeAccepted` | **absent** | A previous cycle's accepted chunks threaded for reuse (now CONSUMED by codegen: `resumeByPath` / `p6.synthesis.reused`). | Absent is the default and is byte-identical. |
 
 The machine flag is separate from `autonomousSoftwareFactory`; no silent default flips; the human door
 is never removed.
@@ -427,9 +451,16 @@ this session.
   `gate.sh`'s own exit logic maps `ok:true` → exit 0. (A PowerShell wrapper may report exit 1 because
   bash's stderr progress lines trip PowerShell's `NativeCommandError`; that is a wrapper artifact, not
   the gate's code — the JSON verdict is authoritative.)
-- **Tracked counts (`git ls-files`):** total **2,014** · `src` 256 · `src/lib` 244 (129 non-test + 115
-  colocated test suites) · `scripts` 107 (33 `*.test.mjs`) · `fixes` 761 · `wave_plans` 139 ·
-  `research/multiagent` 103. The 1,951 / scripts 52 / fixes 759 values above are superseded.
+- **Tracked counts (`git ls-files`, re-derived 2026-10-15 at HEAD `30bce78` + the uncommitted
+  W356/W357 lanes):** total **2,088** · `src` 262 · `src/lib` 250 (132 non-test + 118 colocated test
+  suites) · `scripts` 152 (39 `*.test.mjs`) · `fixes` 783 · `wave_plans` 139 · root 42. The
+  2,014 / `src` 256 / `src/lib` 244 / `scripts` 107 / `fixes` 761 / root 41 values above (the
+  2026-10-05 snapshot at `2f0e3d7`) and the 1,951 values before them are superseded. Commands:
+  `(git ls-files).Count`, `(git ls-files src).Count`, `(git ls-files src/lib).Count`,
+  `(git ls-files "src/lib/*.test.ts").Count`, `(git ls-files scripts).Count`,
+  `(git ls-files "scripts/*.test.mjs").Count`, `(git ls-files fixes).Count`,
+  `(git ls-files wave_plans).Count`, `(git ls-files | Where-Object { $_ -notmatch '/' }).Count`.
+  (Host: `node -v` → v24.15.0; the `engines` contract is `>=22`.)
 - **Prevention harness (the keyless proof layer — the gate of record).**
   `node scripts/prevention/verify-prevention.mjs --all --selftest` → `ok:true`, `guards:20`,
   `countFloor:20`, both signals clean (`fixtureIntegrity.missed:[]`, `fixPresence.pending:[]`),
@@ -445,9 +476,9 @@ this session.
   `testruns\_report\CAMPAIGN1.md` / `CAMPAIGN1.json` / `campaign1-score.json`.
 - **Honest limits that remain:** the keyed P6 productivity wall (above); no OS isolation beyond the
   runtime Permission Model bound (`isolation.sandbox:false`); the reserved human acceptance door;
-  `resumeAccepted` plumbed but not consumed by codegen; 5 lint warnings; cross-family failover
-  unimplemented; the console seat-delivery seam open; P7 `p7-research` offline; prettier drift measured,
-  not gated.
+  `resumeAccepted` now consumed by codegen (accepted-chunk reuse is effective — corrected
+  2026-10-05); 5 lint warnings; cross-family failover unimplemented; the console seat-delivery seam
+  open; P7 `p7-research` offline; prettier drift measured, not gated.
 
 **Corrections in force — appended 2026-10-05 (346 wave batch 15 / X5 acceptance lane).** This block
 supersedes the product-position, proof-layer-count and P6-resample claims above. Every number below was
@@ -580,11 +611,12 @@ re-run. Where reality is behind, the docs say so, the packets say so, and `docto
 
 ---
 
-# THE CATALOG — every tracked file (2,014 today)
+# THE CATALOG — every tracked file (2,088 today)
 
 **What this is:** the literal catalog of the repository's tracked universe. Counts re-derived
-2026-10-05 (346 wave batch 10; HEAD `2f0e3d7`) by the docs-truth re-derivation: `git ls-files | wc -l` =
-**2,014** (the prior 2026-10-04 value, 1,951, the 2026-10-03 value, 1,933, and the earlier 1,908/2,096
+2026-10-15 (W357 · `fix-preview` docs-truth; HEAD `30bce78` + the uncommitted lanes): `git ls-files` =
+**2,088** (the prior 2026-10-05 value, 2,014, the 2026-10-04 value, 1,951, the 2026-10-03 value, 1,933,
+and the earlier 1,908/2,096
 values are superseded — `.t4scratch/` is no longer tracked). Every **root file, every script, every route,
 every migration, every config** is named below; mass-produced classes (tests, wave plans, fix
 logs, vault notes, eval trees, vault/E2E outputs) are described **by convention with their full
@@ -596,19 +628,19 @@ staged changes (re-derived 2026-09-30 by the W44 wave — the W44 commit moved `
 `wave_plans/`, `scripts/` and root + Total together: 7 lane logs, 5 probe relocations, and the
 eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth).
 
-## 10.1 Census (tracked, re-derived 2026-10-05 at `2f0e3d7` by the docs-truth re-derivation)
+## 10.1 Census (tracked, re-derived 2026-10-15 at HEAD `30bce78` + the uncommitted lanes)
 
 | Area | Files | What it is |
 |---|---:|---|
 | `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 23 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 761 | Append-only per-lane landing logs (§10.9) |
-| `src/` | 256 | The product: engine + UI (§10.6) |
+| `fixes/` | 783 | Append-only per-lane landing logs (§10.9) |
+| `src/` | 262 | The product: engine + UI (§10.6) |
 | `wave_plans/` | 139 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 · W42 · W43 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
 | `builds/` | 50 | Legacy sample build outputs (vault export + sample project) (§10.11) |
 | `vault-e2e/` | 47 | Vault export of the HVAC Dispatch E2E project (§10.11) |
-| `scripts/` | 107 | CLI + gates + guards + the keyless prevention/replay corpus + their tests (§10.7) |
-| root | 41 | Every root file named in §10.2 |
+| `scripts/` | 152 | CLI + gates + guards + the keyless prevention/replay corpus + their tests (§10.7) |
+| root | 42 | Every root file named in §10.2 |
 | `screenshots/` | 16 | QA/app screenshots (§10.11) |
 | `public/` | 10 | Static assets served as-is (§10.4) |
 | `audit-bugs/` | 5 | Bug-audit reports (§10.12) |
@@ -618,9 +650,9 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 | `.github/` | 1 | CI workflow (§10.3) |
 | `attachments/` · `artifacts/` · `.audit-g2/` | 1 + 1 + 1 | Historical artifact + stored image + G2 probe (§10.12) |
 | `.t4scratch/` | 0 | Untracked/removed (was 192 tracked at `ac6b151`; stripped in the 342 wave, `73f660a`) |
-| **Total** | **2,014** | `git ls-files \| wc -l` |
+| **Total** | **2,088** | `git ls-files \| wc -l` (per-area rows sum to the total) |
 
-## 10.2 Root files (all 41 tracked — named)
+## 10.2 Root files (all 42 tracked — named)
 
 | File | Purpose (evidence: head/comments read 2026-09-26/27) |
 |---|---|
@@ -628,6 +660,7 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 | `AGENTS.md` | Repo-level agent working contract: layout, commands, honesty contract, ownership rules. |
 | `AGENT_GUIDE.md` | Product-level guide: how an AI agent consumes a RapidTool project + the honesty contract in full. |
 | `START-HERE.md` | The cold-start map (10-line tour, read order, verified commands, hard rules). |
+| `LAUNCH.md` | Plain-English "how to start/use/close the app" guide (the Desktop shortcut + `scripts/launch-rapidtool.cmd`). Added after the 2026-09-26 catalog pass — the 42nd root file. |
 | `RESUME.md` | Session handoff: gate contract, hard rules, settled decisions (written 2026-09-16). |
 | `taskuniverselog.md` | Live task-status board: every dossier task, status, next wave. |
 | `remainingwaves.md` | The execution catalogue: every remaining wave with tasks/files/estimates/tests. |
@@ -703,7 +736,7 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 - `src/routes/` (3): `__root.tsx` (root layout + auth provider), `index.tsx` (HomeScreen from
   `console.tsx`), `run.$id.tsx` (RunScreen from `console.tsx`).
 
-## 10.6 `src/lib/` — the engine (244 files = 129 non-test + 115 colocated tests; re-derived 2026-10-05)
+## 10.6 `src/lib/` — the engine (250 files = 132 non-test + 118 colocated tests; re-derived 2026-10-15)
 
 **90 direct `.ts` modules** (one line each; the module's comments read 2026-09-26/27; re-counted 2026-10-03):
 
@@ -1010,6 +1043,62 @@ now). Gitignored and never printed: `.env` (secrets), `.env.bak-*`, `_*.log` scr
 | `packet-e2e.md` · `design-e2e.html` · `*-e2e.svg` | Sample outputs (packet / design system / diagrams). |
 | `fixes/` | Append-only landing logs (newest number = current wave). |
 | `wave_plans/` | Per-lane dispatch plans (convention in `wave_plans/README.md`). |
+
+## Corrections in force — appended 2026-10-05 (quality-system lane: gate honesty + evidence class + determinism)
+
+This block supersedes every earlier claim in this file that disagrees with the bytes below. All
+values were re-derived this session; where a doc and the bytes disagree, the bytes win.
+
+- **The gate accepts skips no longer silently, and is no longer blind to untested modules.**
+  `scripts/gate.sh` gained an ADDITIVE `moduleCoverage` stage (`node scripts/check-module-coverage.mjs
+  --json`) folded into the verdict — an unallowlisted `src/lib` gap or a stale allowlist entry is a
+  hard failure — and a **skipped-test registry**: every TAP `# SKIP` leaf name must be an explicitly
+  reviewed, justified entry in the NEW `scripts/skip-registry.json`, or the gate fails; a `# skipped
+  N` summary with no parsed `# SKIP` line fails closed. The two registered skips today are the
+  opt-in `RT_VERIFYKIND_INSTALL=1` real-npm leg and the keyed-host `promptExpand not-configured` path.
+- **`gate.sh --double` now folds run 2's exit.** A run-1-green / run-2 runner-crash (non-zero exit,
+  no TAP failure lines) is a hard failure, not `ok:true`; both test legs' run-2 exit codes are
+  consulted (fixes the `testsScripts2.exit`-written-but-never-read hole; self-check pins in
+  `scripts/gate-verdict.test.mjs`).
+- **The prevention count floor is now immutable and reviewed.** It lives in the NEW
+  `scripts/prevention/cassettes/guard-floor.json` (34 pinned guard ids), NOT in the mutable
+  `scripts/guards/guard-registry.json`; `verify-prevention.mjs` asserts the pinned floor and the
+  pinned guard-id set independently, so deleting a guard AND lowering the registry `countFloor` in
+  one edit still fails. The registry `countFloor` may only RAISE the effective floor.
+- **A green gate records the EVIDENCE CLASS it accepted.** `runGate(...).evidenceClass` names what
+  each PASS verified and sets `productBuildVerified:false` for P6 — `p6-verified` accepts executed
+  tree-run spec tests (NOT the emitted `package.json`'s declared `typecheck`/`build`), so a green
+  gate can no longer be read as "the emitted product builds". It is rendered into the recorded gate
+  artifact; `pass`/`unmet`/`advisories`/`evidenceHash` are unchanged.
+- **Determinism is now measured, additively.** `product-quality.ts` gained a `determinism` reading
+  (`determinismReading` / `acceptance.determinismOfProject`): which fields are reproducible from the
+  brief alone, which are not, and their sources (`id` ← `crypto.randomUUID()`;
+  `createdAt`/`logs[].ts`/`traces[].ranAt` ← `Date.now()`; `lastTest.evidenceHash` ← `fnv1a` over
+  timestamped rows; the emitted `package.json`/`README.md` UUID + ISO stamp). Emitted bytes are not
+  changed (codegen is another owner's surface), and the `quality` verdict is unaffected.
+- **Docs corrected to the bytes:** `RUNBOOK.md` §6a/§9.7 (a below-floor run now DOES produce a ZIP,
+  with the RED TREE banner on the README) and §9.9 (`resumeAccepted` IS consumed by codegen);
+  `research/multiagent/wildmode-diagnosis.md` gained a corrections block for its stale park semantics
+  and scaffold/dod line references.
+
+## Corrections in force — appended 2026-10-06 (354 wave · B2 docs-truth)
+
+This block supersedes the campaign claims above — the limits-list **item 9** and the summary
+blockquote line that cite campaign #1's `workingApp` **0/8** as the current product limit. Values
+re-derived from the named artifacts; where a doc and the bytes disagree, the bytes win.
+
+- **Latest measured `workingApp` is 4 of 8 (campaign #3), not 0 of 8.** Campaign #1 scored **0/8**
+  (`testruns\_report\CAMPAIGN1.md`), campaign #2 **2/8** (`CAMPAIGN2.md` §5), campaign #3 **4/8**
+  (`CAMPAIGN3.md` §3.3). Delivery truth held across all three: **0 empty-substance commits ·
+  0 red-tree commits**. The binding wall in every campaign is the P6 DoD gate (`RT_E_GATE_PENDING`).
+- **No campaign has scored the current tree.** Every scored tree predates HEAD `30bce78`:
+  campaign #3 ran at `841383d`, which is **20 commits behind** HEAD (`git rev-list --count
+  841383d..30bce78` → 20); campaigns #1/#2 are older still. The evidence supports "4/8 on a
+  20-commits-older tree" — it does **not** support any number for the current tree. Do not cite
+  4/8 as the current product's score.
+- **The campaign evidence lives outside the repo.** `C:\Users\mnril\Desktop\testruns\_report\` is a
+  sibling of the repo, not tracked (`git ls-files testruns` → 0), so those numbers reproduce only on
+  this host.
 
 ## License
 

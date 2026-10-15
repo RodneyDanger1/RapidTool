@@ -13,7 +13,9 @@ import {
   fnv1a,
   fusionRank,
   intentLattice,
+  LEX,
   librariesFor,
+  planSpecGraph,
   routeCrew,
   runAlgorithms,
   scheduleConstraints,
@@ -21,6 +23,11 @@ import {
   synthesizeContracts,
   tokenizeWords,
 } from "./algorithms.ts";
+// 353 register-drift audit: the two sibling registers are READ ONLY here (the
+// canonical direction is asserted in the test below; the additions sandbox.ts
+// needs are reported, never edited into it).
+import { DOMAIN_TERMS } from "./engine.ts";
+import { BRIEF_CORE_REGISTER, BRIEF_STOPWORDS } from "./sandbox.ts";
 import type { CrewRole, CrewSeat, IntentLattice, MemoryEntry } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -144,7 +151,7 @@ describe("intentLattice word-boundary matching", () => {
   });
 
   it("DOES match the vocab term scan from scanning (plural via stem)", () => {
-    const lat = intentLattice("scanning barcode", "custom-software");
+    const lat = intentLattice("scanning please", "custom-software");
     assert.ok(lat.jobs.includes("scan"), "`scanning` must surface the job `scan`");
     assert.deepEqual(lat.entities, ["operator", "record"], "entities fallback kept for A5/A6/A7");
   });
@@ -222,6 +229,54 @@ describe("intentLattice vague flag", () => {
   it("keeps vague false when jobs came from vocabulary even if entities fell back", () => {
     const lat = intentLattice("scanning barcode", "custom-software");
     assert.equal(lat.vague, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W62 C9(b) — brief-derived product nouns (the ADDITIVE `briefNouns` fold).
+// The LEX bank has no bakery/retail vocabulary, so P1-P5 used to print the same
+// generic nouns for every brief. intentLattice now folds the brief's own
+// repeated content nouns into `briefNouns` — WITHOUT touching entities/jobs/
+// nodes/complexity/vague, so no existing lattice consumer changes.
+// ---------------------------------------------------------------------------
+describe("intentLattice — brief-derived product nouns (briefNouns)", () => {
+  const BAKERY =
+    "# Bloedow Bakery\n\nA bakery website. The menu lists donut, bread and cake. Order a donut or a cake. Pickup or delivery: order a donut, a cake and bread. The menu shows donut, cake and bread; delivery is local, pickup is in store.";
+
+  it("folds the brief's repeated content nouns, never generic words", () => {
+    const lat = intentLattice(BAKERY, "web-marketing");
+    const nouns = lat.briefNouns ?? [];
+    for (const want of ["donut", "cake", "bread", "order"]) {
+      assert.ok(nouns.includes(want), `${want} must fold (got: ${nouns.join(",")})`);
+    }
+    assert.ok(!nouns.includes("website"), "generic words stay out");
+    assert.ok(!nouns.includes("build"), "verbs stay out");
+  });
+
+  it("folds the brief's repeated content nouns into entities, after the LEX bank", () => {
+    const lat = intentLattice(BAKERY, "web-marketing");
+    for (const want of ["donut", "cake", "bread"]) {
+      assert.ok(
+        lat.entities.includes(want),
+        `353: the brief's own nouns now fold into entities (got: ${lat.entities.join(",")})`,
+      );
+    }
+    assert.ok(!lat.jobs.includes("order"), "jobs stay LEX-only (the fold is nouns, not verbs)");
+  });
+
+  it("a vocabulary-free brief stays vague with no briefNouns (deterministic floor)", () => {
+    const lat = intentLattice("build a tool for my team please", "custom-software");
+    assert.equal(lat.vague, true);
+    assert.equal(lat.briefNouns, undefined);
+    assert.deepEqual(lat.entities, ["operator", "record"]);
+  });
+
+  it("is deterministic and stem-deduped for identical input", () => {
+    const a = intentLattice(BAKERY, "web-marketing").briefNouns;
+    const b = intentLattice(BAKERY, "web-marketing").briefNouns;
+    assert.deepEqual(a, b);
+    const stems = (a ?? []).map((n) => canonicalStem(n));
+    assert.equal(new Set(stems).size, stems.length, "no two entries share a stem");
   });
 });
 
@@ -1048,10 +1103,13 @@ describe("deriveTypeSignatures — capability scope drives signature count (fixe
     assert.equal(dupes.length, 4, "duplicate + unparseable labels must not fork signatures");
     for (const s of dupes) assert.match(s, /^(?:run|list)[A-Za-z][A-Za-z0-9]*\(/, `signature must parse a function name: ${s}`);
     // Entity rotation stays deterministic and an entity-free lattice still
-    // yields the neutral `record` pair, never a crash or a shared reference.
+    // yields the neutral pair, never a crash or a shared reference. 353: the
+    // neutral entity is `RecordEntry` (a bare `Record` is not a valid type
+    // reference), so the floor never demands an unparseable name.
     const noEntities = deriveTypeSignatures(lattice({ jobs: ["flip", "show"], entities: [] }));
-    assert.ok(noEntities[0]!.includes("Record"), `entity-free pair falls back to Record — got ${noEntities[0]}`);
-    assert.ok(noEntities[1]!.includes("FlipRun[]"), `second signature carries the job's Run row — got ${noEntities[1]}`);
+    assert.ok(noEntities[0]!.includes("Promise<RecordEntry>"), `neutral return — got ${noEntities[0]}`);
+    assert.ok(noEntities[1]!.startsWith("listFlipRuns("), `second signature names the job's read function — got ${noEntities[1]}`);
+    assert.ok(noEntities[1]!.includes("Promise<FlipRun[]>"), `read signature carries the job's Run row — got ${noEntities[1]}`);
   });
 });
 
@@ -1084,5 +1142,295 @@ describe("326 L4 — multi-word register terms weight by phrase mentions", () =>
     const thrice = weightOf("work order work order work order", "work-order", "construction");
     assert.equal(once, expectWeight(1, false));
     assert.ok((thrice ?? 0) > (once ?? 0), `repeated phrase mentions must raise the weight (${thrice} vs ${once})`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 353 — lattice coverage: the ten measured real briefs (Temp/rt10) must name
+// their OWN concepts. Each excerpt below is the brief line that must produce
+// the node; before this lane the lattice could only emit the curated LEX bank,
+// so a game/dashboard/booking/webhook/PWA brief shipped generic or wrong
+// entities (a dashboard surfaced `[viewer, table, chart]` and only job `test`).
+// ---------------------------------------------------------------------------
+describe("353 — intentLattice names the six measured real-brief classes", () => {
+  const cases: {
+    name: string;
+    domain: string;
+    brief: string;
+    entities: string[];
+    jobs: string[];
+  }[] = [
+    {
+      name: "bakery marketing website",
+      domain: "web-marketing",
+      brief:
+        "# Bloedow Bakery — Marketing Website\nPages: Home; Menu (breads, rolls, buns and sweet treats with photos); About; Contact; and an Order page.\n" +
+        "Ordering: pickup or local delivery inside Winona city limits; a cart; and checkout.\nInclude an admin order queue with status transitions and a daily production summary.",
+      entities: ["menu", "cart", "checkout", "delivery", "pickup", "summary", "order"],
+      jobs: [],
+    },
+    {
+      name: "pet-supply online storefront",
+      domain: "retail",
+      brief:
+        "Build an e-commerce storefront. Shop with category filters (dog, cat, fish) and sorting by price and name; Cart; Checkout; and Order confirmation.\n" +
+        "Requirements: cart persists across reloads, stock decrements on order, and checkout validates name/email/address.",
+      entities: ["cart", "checkout", "category", "order", "stock"],
+      jobs: ["filter", "sort", "validate", "persist"],
+    },
+    {
+      name: "2D browser arcade game",
+      domain: "custom-software",
+      brief:
+        "Build a 2D browser arcade game called Sky Hopper. A player character auto-runs to the right across procedurally generated platforms; the player jumps (and double-jumps) to collect coins. Falling ends the run.\n" +
+        "Requirements: canvas rendering at a fixed timestep; a HUD with score, coins and best score.",
+      entities: ["game", "coin", "score", "hud", "player"],
+      jobs: ["jump"],
+    },
+    {
+      name: "grid puzzle game",
+      domain: "custom-software",
+      brief:
+        "Build a browser puzzle game called Tile Cascade: an 8x8 grid of coloured tiles. Swapping two adjacent tiles that form a line of three or more clears them. Chain reactions score multiplicatively.\n" +
+        "Requirements: a hint button; an undo of the last move; a persistent best score; a solver-free shuffle button.",
+      entities: ["puzzle", "grid", "tile", "score"],
+      jobs: ["swap", "shuffle", "undo"],
+    },
+    {
+      name: "CLI log analyzer",
+      domain: "custom-software",
+      brief:
+        "Build a command-line tool that reads NDJSON or plain-text log files and reports what is wrong with a service.\n" +
+        "Commands: `summary <file>` (counts by level, first/last timestamp, top 5 messages); `errors <file>` (grouped error fingerprints with counts and a sample line); `slow <file> --p95 <ms>` (requests over a latency budget, with the offending endpoints); and `watch <file>` (tail and highlight errors).\n" +
+        "Requirements: streaming reads (must handle a 1 GB file without loading it); a real argument parser with helpful errors and exit codes; grouped fingerprints normalize ids, uuids and quoted strings. Ship tests with fixture logs proving each command.",
+      entities: ["log", "file", "summary", "fingerprint", "timestamp", "endpoint"],
+      jobs: ["watch", "stream", "parse", "test"],
+    },
+    {
+      name: "sales dashboard",
+      domain: "custom-software",
+      brief:
+        "Build an analytics dashboard for Northwind Traders. Views: Overview (revenue, orders, average order value and a 12-month trend line); Products (top sellers, revenue by category); Customers (churn risk); Regions (revenue by territory).\n" +
+        "Data: compute the metrics client-side. Include CSV export per view. Filters on every view.",
+      entities: ["revenue", "dashboard", "category", "region", "metric", "churn", "trend"],
+      jobs: ["compute", "filter", "export"],
+    },
+    {
+      name: "clinic appointment booking",
+      domain: "health-ops",
+      brief:
+        "Build an appointment booking service for Cedar Clinic, a three-provider family practice.\n" +
+        "Customer flow: choose a service, choose a provider, see real availability for the next 30 days (30-minute slots, no double-booking), pick a slot, enter patient details, and get a confirmation with a booking reference.\n" +
+        "Manage flow: look up a booking by reference, reschedule, or cancel with a reason (cancellations inside 24 hours are flagged).",
+      entities: ["appointment", "provider", "availability", "slot", "confirmation", "cancellation", "booking"],
+      jobs: ["book", "cancel", "reschedule"],
+    },
+    {
+      name: "warehouse inventory with offline scan",
+      domain: "operations",
+      brief:
+        "Build an inventory app for a small warehouse. Flow: scan or type a SKU, see the item with its bin location, on-hand quantity and reorder point, then adjust quantity with a reason (receive, pick, damage, cycle count). A receiving screen accepts a supplier order.\n" +
+        "Requirements: offline-first with a local queue that syncs when a connection returns and reconciles conflicts by keeping both deltas; barcode-scanner-friendly input; per-item movement history.",
+      entities: ["sku", "bin", "quantity", "reorder", "movement", "supplier", "barcode"],
+      jobs: ["scan", "receive", "sync", "reconcile"],
+    },
+    {
+      name: "webhook delivery library",
+      domain: "custom-software",
+      brief:
+        "Build a webhook delivery service delivered as a TypeScript library with a small HTTP API.\n" +
+        "Library surface: `subscribe(url, events, secret)`, `unsubscribe(id)`, `publish(event, payload)`, `deliveries(filter)`, `retry(id)`, and `verifySignature(rawBody, header, secret)`. Deliveries are signed with HMAC-SHA256; a signature older than five minutes is rejected.\n" +
+        "Delivery is at-least-once with exponential backoff (max 6 attempts), a dead letter, and per-endpoint circuit breaking.\n" +
+        "HTTP API: POST /subscriptions, DELETE /subscriptions/:id, POST /events, GET /deliveries, POST /deliveries/:id/retry.",
+      entities: ["webhook", "subscription", "delivery", "signature", "backoff", "payload", "endpoint"],
+      jobs: ["subscribe", "unsubscribe", "retry", "deliver", "publish", "filter"],
+    },
+    {
+      name: "local-first notes PWA",
+      domain: "custom-software",
+      brief:
+        "Build a local-first notes app that installs as a PWA and works with no network.\n" +
+        "Features: create, edit, delete and search notes with markdown rendering; tags with a tag filter; pin and archive; a full-text search; autosave with an undo of the last edit; and an offline cache so the app opens with no network. Notes sync between tabs in the same browser and export/import as a single JSON file.\n" +
+        "Requirements: installable (manifest + service worker), keyboard shortcuts, and export/import as a single JSON file.",
+      entities: ["note", "tag", "archive", "markdown", "manifest", "shortcut"],
+      jobs: ["search", "install", "export", "import", "sync"],
+    },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name} surfaces its own entities and jobs`, () => {
+      const lat = intentLattice(c.brief, c.domain);
+      assert.equal(lat.vague, false, `${c.name}: a real brief must not be vague`);
+      for (const e of c.entities) {
+        assert.ok(lat.entities.includes(e), `${c.name}: missing entity \`${e}\` (got ${lat.entities.join(",")})`);
+      }
+      for (const j of c.jobs) {
+        assert.ok(lat.jobs.includes(j), `${c.name}: missing job \`${j}\` (got ${lat.jobs.join(",")})`);
+      }
+    });
+  }
+
+  it("collapses the LEX actor+object duplicate for one word (no `patient, patient`)", () => {
+    const lat = intentLattice("choose a provider, enter patient details, and get a confirmation", "health-ops");
+    const patients = lat.entities.filter((e) => e === "patient");
+    assert.equal(patients.length, 1, `one patient entry, got [${lat.entities.join(",")}]`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 353 — register drift. The three hand-maintained registers are related by ONE
+// canonical direction: BRIEF_CORE_REGISTER (sandbox.ts) is the canonical UNION
+// of brief product vocabulary; DOMAIN_TERMS (engine.ts) and LEX (algorithms.ts)
+// are typed SOURCES that must feed it. The test reads the two sibling registers
+// (never edits them): DOMAIN_TERMS is asserted strictly; the LEX product-noun
+// gap is frozen to the exact list sandbox.ts must add, so a NEW term drifting
+// out fails the test while the already-reported gaps are documented in place.
+// ---------------------------------------------------------------------------
+describe("353 — register drift (LEX vs DOMAIN_TERMS vs BRIEF_CORE_REGISTER)", () => {
+  it("DOMAIN_TERMS (engine.ts) is a subset of BRIEF_CORE_REGISTER (sandbox.ts)", () => {
+    const live = [...new Set(Object.values(DOMAIN_TERMS).flat())];
+    const missing = live.filter((t) => !BRIEF_CORE_REGISTER.has(t));
+    assert.deepEqual(missing, [], `sandbox.ts BRIEF_CORE_REGISTER must add: ${missing.join(", ")}`);
+  });
+
+  // The exact LEX product nouns (object kind, non-stopword, ≥3 chars) sandbox.ts
+  // BRIEF_CORE_REGISTER does not yet carry. Report + freeze; the assertion is a
+  // subset check so the list may only SHRINK as sandbox.ts lands the additions.
+  const LEX_CORE_REGISTER_GAPS: ReadonlySet<string> = new Set(
+    (
+      "account archive asset audio availability backoff barcode bin budget cache cancellation card category chart churn code coin column command " +
+      "comparable config confirmation database dataset directory document endpoint estimate event file fingerprint folder graph grid home hud image " +
+      "index job-cost link log manifest markdown media metric movement note notification option parts path payload payroll pickup policy portfolio " +
+      "profile provider punch-list puzzle quantity queue region reorder repo repository revenue rule schema score shortcut signature slot sprite " +
+      "statistic stream subscription summary supplier supply table tag task text ticket tile timesheet timestamp title token trend url vendor video work-order"
+    ).split(" "),
+  );
+
+  it("every LEX product noun is in BRIEF_CORE_REGISTER or the frozen reported-gap list", () => {
+    const productNouns = LEX.object.filter(
+      (t) => !BRIEF_CORE_REGISTER.has(t) && !BRIEF_STOPWORDS.has(t) && t.length >= 3,
+    );
+    const drifted = productNouns.filter((t) => !LEX_CORE_REGISTER_GAPS.has(t)).sort();
+    assert.deepEqual(
+      drifted,
+      [],
+      `new LEX product nouns missing from BRIEF_CORE_REGISTER (add them to sandbox.ts and this frozen list): ${drifted.join(", ")}`,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 353 — planSpecGraph node kinds. Every id the planner emits must name a real
+// emitter in scaffold.ts's tree materializer: `schema`→emitSchema,
+// `api`→emitApi/emitTreeApi, `store`→emitStore, `ui`→emitUi,
+// `tests`→tests/oracle.spec.ts, `job-N`→emitJobModule/emitJobStub (or a
+// counted unmaterialised job, never a silent stub). No other id may appear —
+// an id the materializer does not know falls through to a job stub.
+// ---------------------------------------------------------------------------
+describe("353 — planSpecGraph emits only node kinds a real emitter produces", () => {
+  const STRUCTURAL = ["schema", "api", "store", "ui", "tests"];
+
+  it("every node id is a known structural kind or a job-N", () => {
+    const sg = planSpecGraph(intentLattice("scan inventory and sync the queue", "operations"), "operations");
+    for (const n of sg.nodes) {
+      const ok = STRUCTURAL.includes(n.id) || /^job-\d+$/.test(n.id);
+      assert.ok(ok, `unemitable spec-graph node kind \`${n.id}\` (file ${n.file})`);
+    }
+  });
+
+  it("emits exactly the five structural kinds once, plus one job per sliced capability", () => {
+    const lat = intentLattice("scan inventory, sync the queue, reconcile stock, alert on low stock", "operations");
+    const sg = planSpecGraph(lat, "operations");
+    for (const id of STRUCTURAL) {
+      assert.equal(sg.nodes.filter((n) => n.id === id).length, 1, `exactly one \`${id}\` node`);
+    }
+    const jobIds = sg.nodes.filter((n) => n.id.startsWith("job-")).map((n) => n.id);
+    assert.deepEqual(jobIds, lat.jobs.slice(0, 5).map((_, i) => `job-${i}`), "job ids are contiguous in order");
+  });
+
+  it("an empty-capability lattice still emits only the structural nodes", () => {
+    const vague = intentLattice("build a tool for my team please", "custom-software");
+    const sg = planSpecGraph(vague, "custom-software");
+    assert.deepEqual(
+      sg.nodes.map((n) => n.id),
+      [...STRUCTURAL.slice(0, 3), ...["job-0"], "ui", "tests"],
+      "the deliver-core-workflow fallback job still maps to a real job node",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 353 — determinism. The lattice, the spec graph and the derived signatures
+// must be a pure function of the brief: two calls on identical bytes produce
+// byte-identical JSON (no dates, no randomness, no shared mutable state).
+// ---------------------------------------------------------------------------
+describe("353 — determinism: lattice/spec graph/signatures are a pure function of the brief", () => {
+  const BRIEFS = [
+    "Build a 2D browser arcade game: jump across platforms, collect coins, a HUD with score.",
+    "Build an appointment booking service: choose a provider, pick a slot, cancel with a reason.",
+    "Build a webhook library: subscribe, publish, retry deliveries, verify the signature.",
+  ];
+
+  it("double-runs produce identical lattice, spec graph and signatures", () => {
+    for (const brief of BRIEFS) {
+      const a = intentLattice(brief, "custom-software");
+      const b = intentLattice(brief, "custom-software");
+      assert.equal(JSON.stringify(a), JSON.stringify(b), `lattice deterministic for: ${brief}`);
+      assert.equal(JSON.stringify(planSpecGraph(a, "custom-software")), JSON.stringify(planSpecGraph(b, "custom-software")));
+      assert.equal(JSON.stringify(deriveTypeSignatures(a)), JSON.stringify(deriveTypeSignatures(b)));
+    }
+  });
+
+  it("runAlgorithms is deterministic apart from its per-call traces", () => {
+    const run = () =>
+      runAlgorithms({ brief: BRIEFS[1]!, domain: "custom-software", memory: [], currentPhase: 0 });
+    const a = run();
+    const b = run();
+    assert.deepEqual(a.lattice, b.lattice);
+    assert.deepEqual(a.specGraph, b.specGraph);
+    assert.deepEqual(a.contracts, b.contracts);
+    assert.deepEqual(a.oracle, b.oracle);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 353 — deriveTypeSignatures is CONSERVATIVE and SELF-DESCRIBING: it emits one
+// uniform, sound shape (`<Job>Command` param, `<Job>Run[]` read row, entity
+// return) and guards every emitted type name so it is a declarable identifier —
+// never a bare TS utility global (a standalone `Promise<Record>` is not a valid
+// type) and never a non-identifier character. codegen (fixes/349) declares each
+// referenced name in the chunk prompt, so the floor is satisfiable, and the
+// capability is carried by the function NAME that binds it to its job node.
+// ---------------------------------------------------------------------------
+describe("353 — deriveTypeSignatures conservative + self-describing", () => {
+  const SIG_SHAPE = /^(?:run|list)[A-Za-z_$][A-Za-z0-9_$]*\(.*\): Promise<[A-Za-z_$][A-Za-z0-9_$<>[\]]*>$/;
+  // A bare TS utility global is not a valid type reference: `command: Record`
+  // (no type argument) or `Promise<Record>` both fail the emitted tree's `tsc`.
+  const BARE_TS_GLOBAL = /:\s*(?:Record|Array|Readonly|Partial|Omit|Pick|Required|Exclude|Extract|NonNullable|Map|Set|Function|Object|String|Number|Boolean|Date|Error)\b|Promise<(?:Record|Array|Readonly|Partial|Omit|Pick|Function|Object)>/;
+
+  it("emits only sound, parseable, declarable signatures", () => {
+    const lat = intentLattice(
+      "flip houses, track ARV, run comps, show listings, publish rentals, book showings",
+      "real-estate",
+    );
+    const sigs = deriveTypeSignatures(lat);
+    assert.ok(sigs.length > 0, "a capability lattice derives signatures");
+    for (const s of sigs) {
+      assert.match(s, SIG_SHAPE, `signature \`${s}\` must parse`);
+      assert.ok(!BARE_TS_GLOBAL.test(s), `signature \`${s}\` references a bare TS utility global`);
+    }
+  });
+
+  it("never emits the invalid bare `Promise<Record>` (neutral entity guarded)", () => {
+    const sigs = deriveTypeSignatures(lattice({ jobs: ["flip"], entities: ["record"] }));
+    assert.ok(sigs[0]!.includes("Promise<RecordEntry>"), `guarded neutral entity — got ${sigs[0]}`);
+    assert.ok(!/Promise<Record>/.test(sigs.join("\n")), "bare Record is never a return type");
+  });
+
+  it("is deterministic and keeps the capability function names stable", () => {
+    const lat = lattice({ jobs: ["track", "flip"], entities: ["property"] });
+    assert.deepEqual(deriveTypeSignatures(lat), deriveTypeSignatures(lat));
+    assert.ok(deriveTypeSignatures(lat).some((s) => s.startsWith("runTrack(")));
+    assert.ok(deriveTypeSignatures(lat).some((s) => s.startsWith("listTrackRuns(")));
   });
 });

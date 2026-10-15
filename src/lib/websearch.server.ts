@@ -8,9 +8,12 @@
  *
  * Every provider fetch is retried (2 attempts, `400ms·2ⁿ` backoff) on transient
  * failures (network/timeout/429/5xx); non-transient HTTP statuses surface
- * immediately. Results are deduped by normalized URL, and the top Wikipedia
- * hits are enriched with their real intro paragraph via
- * `action=query&prop=extracts&exintro&explaintext`.
+ * immediately. Scraped HTML is entity-decoded and snippets are extracted from
+ * the DDG result rows. A wider candidate pool is fetched, then EVERY provider's
+ * results are deduped, ranked by query relevance and domain diversity, and
+ * scored (`rankResearchItems`) so off-topic vendor-order hits are not shipped as
+ * "research". The top Wikipedia hits are enriched with their real intro
+ * paragraph via `action=query&prop=extracts&exintro&explaintext`.
  *
  * Honesty caveat: these are free, keyless, best-effort sources with lower
  * fidelity than a paid provider (Tavily is preferred when `TAVILY_API_KEY` is
@@ -23,7 +26,10 @@
  * be fetched the result is an honest `{ ok: false, code }` object.
  */
 
-import type { ResearchResult } from "./research.ts";
+// fixes/347 R1: retrieval ranks + dedupes + scores every provider's results
+// through the shared pure helpers in research.ts, so the keyless path no longer
+// ships raw vendor order (the off-topic-research defect).
+import { rankResearchItems, type ResearchResult } from "./research.ts";
 // W40·N4: the shared knob sanitizer (this file used to carry its own copy).
 import { boundedInt } from "./bounded-int.ts";
 // 327 (L2): the fetch transport is node:https/http with a one-shot (non-pooled)
@@ -65,19 +71,9 @@ const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RapidTool/1.0 (keyless-research)";
 
 // Transient statuses get a bounded exponential-backoff retry; anything else
-// (e.g. 404) surfaces immediately and lets the next provider take over.
-const RETRYABLE_STATUS = new Set([429, 500, 503]);
-// Tracking/click params that never identify distinct content — dropped during
-// URL normalization so the same page isn't listed twice.
-const TRACKING_PARAMS = new Set([
-  "utm_source",
-  "utm_medium",
-  "utm_campaign",
-  "utm_term",
-  "utm_content",
-  "fbclid",
-  "gclid",
-]);
+// (e.g. 404) surfaces immediately and lets the next provider take over. The
+// gateway statuses 502/504 are transient by nature and join the retry set.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
 type FreeItem = { title: string; url: string; content: string };
 
@@ -276,8 +272,10 @@ async function duckDuckGoLite(
 ): Promise<FreeItem[]> {
   const html = await fetchText(`${DDG_LITE}?q=${encodeURIComponent(query)}`, opts);
   const links: { url: string; title: string }[] = [];
+  // Tolerate protocol-relative (`//duckduckgo.com/…`) and absolute
+  // (`https://duckduckgo.com/…`) redirector hrefs, and either quote style.
   const linkRe =
-    /<a[^>]*href="\/\/duckduckgo\.com\/l\/\?uddg=([^&"]+)[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+    /<a[^>]*href=["'](?:https?:)?\/\/duckduckgo\.com\/l\/\?uddg=([^&"']+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = linkRe.exec(html)) && links.length < maxResults) {
     let url = "";
@@ -289,11 +287,16 @@ async function duckDuckGoLite(
     if (!/^https?:\/\//.test(url)) continue;
     links.push({ url, title: stripHtml(m[2]) });
   }
+  // DDG Lite renders each snippet in its own result row; the row order matches
+  // the link order, so index pairing is correct. Accept single- or double-quoted
+  // `result-snippet` cells (and the rare `<a>`/`<div>` variant) so a markup
+  // tweak upstream does not silently drop every snippet.
   const snippets: string[] = [];
-  const snipRe = /<td class='result-snippet'>([\s\S]*?)<\/td>/gi;
+  const snipRe =
+    /<(td|a|div)[^>]*class=["']?result-snippet["']?[^>]*>([\s\S]*?)<\/\1>/gi;
   let s: RegExpExecArray | null;
   while ((s = snipRe.exec(html)) && snippets.length < maxResults) {
-    snippets.push(stripHtml(s[1]));
+    snippets.push(stripHtml(s[2]));
   }
   return links.slice(0, maxResults).map((l, i) => ({
     title: l.title,
@@ -373,38 +376,6 @@ async function wikipediaSearch(
         content: typeof r.snippet === "string" ? stripHtml(r.snippet) : "",
       };
     });
-}
-
-/**
- * Normalize a URL for dedupe: lowercase host, strip `www.`, strip fragment,
- * strip trailing slash, and drop pure tracking params.
- */
-function normalizeUrl(url: string): string {
-  let u: URL;
-  try {
-    u = new URL(url);
-  } catch {
-    return url.trim().toLowerCase();
-  }
-  u.hostname = u.hostname.toLowerCase().replace(/^www\./, "");
-  u.hash = "";
-  if (u.pathname.length > 1) u.pathname = u.pathname.replace(/\/+$/, "");
-  for (const key of [...u.searchParams.keys()]) {
-    if (TRACKING_PARAMS.has(key)) u.searchParams.delete(key);
-  }
-  return u.toString();
-}
-
-function dedupeByUrl(items: FreeItem[]): FreeItem[] {
-  const seen = new Set<string>();
-  const out: FreeItem[] = [];
-  for (const item of items) {
-    const key = normalizeUrl(item.url);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-  return out;
 }
 
 function wikipediaTitleFromUrl(url: string): string | null {
@@ -490,12 +461,27 @@ export async function freeWebSearch(
   // a non-positive timeoutMs aborted on the first tick, a NaN maxResults made
   // every provider loop match zero entries, and a huge srlimit 400s MediaWiki.
   const maxResults = boundedInt(opts.maxResults, 5, 1, MAX_RESULTS_CEILING);
+  // Fetch a wider candidate pool than the caller asked for so the ranker can
+  // SELECT the best `maxResults` sources rather than only reorder the top few.
+  const pool = Math.min(maxResults * 3, MAX_RESULTS_CEILING);
   const fetchOpts: FetchOptions = {
     timeoutMs: boundedInt(opts.timeoutMs, TIMEOUT_MS, 1, MAX_TIMER_MS),
     attempts: boundedInt(opts.attempts, MAX_ATTEMPTS, 1, 5),
     backoffMs: boundedInt(opts.backoffMs, BASE_BACKOFF_MS, 0, 10_000),
     fetchImpl: opts.fetchImpl ?? nodeFetch,
   };
+  // ONE finish path: enrich (Wikipedia extracts, best-effort), then rank +
+  // dedupe + score against the query. Used by every provider so the shape and
+  // the relevance contract cannot drift between them.
+  const finish = async (
+    raw: FreeItem[],
+    provider: "duckduckgo" | "searxng" | "wikipedia",
+  ): Promise<ResearchResult> => ({
+    ok: true,
+    query: q,
+    items: rankResearchItems(q, await enrichWikipediaExtracts(raw, fetchOpts), maxResults),
+    provider,
+  });
 
   // Root cause of the most recent provider failure, surfaced verbatim in the
   // final honest failure so an agent sees WHY research is unavailable instead
@@ -507,41 +493,20 @@ export async function freeWebSearch(
   };
 
   try {
-    const items = dedupeByUrl(await duckDuckGoLite(q, maxResults, fetchOpts));
-    if (items.length > 0) {
-      return {
-        ok: true,
-        query: q,
-        items: await enrichWikipediaExtracts(items, fetchOpts),
-        provider: "duckduckgo",
-      };
-    }
+    const raw = await duckDuckGoLite(q, pool, fetchOpts);
+    if (raw.length > 0) return await finish(raw, "duckduckgo");
   } catch (err) {
     noteFailure(err); // DuckDuckGo unavailable → fall through to SearXNG
   }
   try {
-    const items = dedupeByUrl(await searxngSearch(q, maxResults, fetchOpts));
-    if (items.length > 0) {
-      return {
-        ok: true,
-        query: q,
-        items: await enrichWikipediaExtracts(items, fetchOpts),
-        provider: "searxng",
-      };
-    }
+    const raw = await searxngSearch(q, pool, fetchOpts);
+    if (raw.length > 0) return await finish(raw, "searxng");
   } catch (err) {
     noteFailure(err); // SearXNG unavailable → fall through to Wikipedia
   }
   try {
-    const items = dedupeByUrl(await wikipediaSearch(q, maxResults, fetchOpts));
-    if (items.length > 0) {
-      return {
-        ok: true,
-        query: q,
-        items: await enrichWikipediaExtracts(items, fetchOpts),
-        provider: "wikipedia",
-      };
-    }
+    const raw = await wikipediaSearch(q, pool, fetchOpts);
+    if (raw.length > 0) return await finish(raw, "wikipedia");
   } catch (err) {
     noteFailure(err); // Wikipedia unavailable → honest failure below
   }

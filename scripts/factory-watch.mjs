@@ -82,7 +82,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // W42 L4-G5: the shared realpath-based main-module check (a symlinked or
 // case-differing launch path still runs the CLI) — also keeps this module
@@ -516,11 +516,53 @@ function persistRunTrace(work, slug, trace) {
  * concurrent tick's newer record is never clobbered by our stale startup snapshot
  * — and a blind whole-object overwrite can never drop it either.
  */
+/** True when a pid is alive (EPERM counts — the process exists). */
+function statePidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === "EPERM";
+  }
+}
+
+/**
+ * Reclaim pid-named temp files a crashed earlier tick left beside `statePath`.
+ * commitState writes `<statePath>.tmp-<pid>` then renames; a SIGKILL between
+ * the two leaves that temp forever (the next tick uses a new pid, so the old
+ * name never recurs). Sweep only pids that are no longer alive — a live
+ * sibling's temp is never touched. Returns the swept names.
+ */
+export function sweepStaleStateTemps(statePath, { isAlive = statePidAlive } = {}) {
+  const dir = dirname(statePath);
+  const prefix = `${basename(statePath)}.tmp-`;
+  const swept = [];
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return swept;
+  }
+  for (const name of entries) {
+    if (!name.startsWith(prefix)) continue;
+    const pid = Number.parseInt(name.slice(prefix.length), 10);
+    if (!Number.isInteger(pid) || pid === process.pid || isAlive(pid)) continue;
+    try {
+      rmSync(join(dir, name), { force: true });
+      swept.push(name);
+    } catch {
+      /* best-effort reclaim — a locked temp must never fail the tick */
+    }
+  }
+  return swept;
+}
+
 function commitState(statePath, state, dirtySlugs) {
   const lockPath = `${statePath}.lock`;
   mkdirSync(dirname(statePath), { recursive: true });
   acquireStateLock(lockPath);
   try {
+    sweepStaleStateTemps(statePath);
     state.updatedAt = new Date().toISOString();
     let projects = state.projects;
     if (existsSync(statePath)) {

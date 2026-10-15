@@ -6,6 +6,8 @@ import {
   emptyProject,
   hydrateProject,
   inferName,
+  // A4-E9: the additive `degraded` phase marker for a thrown async synthesis.
+  markPhaseDegraded,
   readWildPlan,
   rejectHitl,
   runP6Real,
@@ -40,9 +42,14 @@ import { WILD_STEP_BUDGET_MS } from "./rt-events.ts";
 // human stamp. `seatLabel`/`seatTokenPath` are that seam's single-source
 // provenance vocabulary (`[seat console]` tag + `decidedVia.tokenPath`).
 import { evaluatePolicy, seatLabel, seatTokenPath } from "./policy.ts";
-// R14-f01 (W33 lane F1): the Node-side Auto-Review supervisor binding — null
-// on every host/key state that must keep the engine's existing default.
-import { createNodeWildReviewer } from "./wild-review.ts";
+// R14-f01 (W33 lane F1) + 2026-10-05 wild-console-classifier fix: the
+// host-aware Auto-Review supervisor binding — bare Node uses the provider
+// completer directly; the browser console reaches the SAME production
+// classifier through the server-fn bridge (null on every host/key state that
+// must keep the engine's honest not-configured default).
+import { createHostWildReviewer } from "./wild-review.ts";
+import { generateWildPlanBridge, wildEdgeBridge, wildPhaseEdge } from "./wild-bridge.ts";
+import { llmStatus as probeLlmStatus } from "./llm.ts";
 import type {
   Artifact,
   ChatLogRow,
@@ -598,6 +605,15 @@ function recordGate(project: Project, phase: PhaseId): Project {
     pass: r.pass,
     unmet,
     evidenceHash: r.evidenceHash,
+    // 348: carry the gate's qualified-pass advisories (e.g. p6-arch's no-tree
+    // SKIP) into the recorded artifact, so the console shows the same honest
+    // "NOT product-complete" note the CLI records.
+    ...(Array.isArray(r.advisories) && r.advisories.length > 0 ? { advisories: r.advisories } : {}),
+    // 2026-10-05: the same parity for the evidence-CLASS reading (what a PASS
+    // actually verified). `dod.recordGateInto` (the CLI/headless recorder)
+    // renders it; without this the console's recorded gate artifact dropped the
+    // honest "executed tree-run tests, NOT a built product" note the CLI keeps.
+    evidenceClass: r.evidenceClass,
   });
   return {
     ...project,
@@ -698,11 +714,14 @@ function advanceOnce(
   // A20/A1-16: index by record id, not array position — a partial, unsorted,
   // or sparse phase array must never mis-seal the graph (phases.ts law).
   const rec = project.phases.find((p) => p.id === phase);
-  if (!rec) return { project, error: "Unknown phase." };
+  // A4-E17: every other early return here is a STOP; these two omitted
+  // `stopped:true`, so a caller looping on `advanceOnce` could not tell a
+  // missing phase record or a locked edge from real progress.
+  if (!rec) return { project, error: "Unknown phase.", stopped: true };
   if (project.status === "blocked" && rec.status === "rejected") {
     return { project, error: "Phase rejected — retry with the note applied.", stopped: true };
   }
-  if (rec.status === "locked") return { project, error: "Phase is locked." };
+  if (rec.status === "locked") return { project, error: "Phase is locked.", stopped: true };
   if (rec.status === "awaiting_hitl") {
     if (canAutopilot(project, autopilot)) {
       // T2: autopilot approvals land in the decision journal with their actor.
@@ -736,7 +755,9 @@ function advanceOnce(
       const r = runGate(project, phase);
       if (!r.pass) {
         return {
-          project: hardDodBlockInto(project, phase, r),
+          // A4-E2(b): stamp the packet on the stop too — the pre-block packet
+          // described the pre-block record.
+          project: stampPacket(hardDodBlockInto(project, phase, r)),
           error: hardDodMessage(phase, r),
           stopped: true,
           dodBlocked: true,
@@ -801,7 +822,8 @@ function finishPhase(
       const r = runGate(updated, phase);
       if (!r.pass) {
         return {
-          project: hardDodBlockInto(updated, phase, r),
+          // A4-E2(b): packet-on-stop (see the sync twin above).
+          project: stampPacket(hardDodBlockInto(updated, phase, r)),
           stopped: true,
           error: hardDodMessage(phase, r),
           dodBlocked: true,
@@ -857,20 +879,24 @@ async function synthesizeAsync(
       // runPhaseAsync is not expected — keep the deterministic fallback but
       // stamp a coded warn row so the audit trail distinguishes a keyless run
       // from a broken keyed one (the engine's liveDegrade discipline).
+      // A4-E9: the phase RECORD also carries the `degraded` marker.
       const fallback = applyPhaseResult(project, phase);
-      return {
-        ...fallback,
-        logs: [
-          ...(fallback.logs ?? []),
-          {
-            ts: Date.now(),
-            phase,
-            level: "warn" as const,
-            event: "llm.degrade",
-            detail: `runPhaseAsync failed (${classifyError(err)}) — deterministic floor used.`,
-          },
-        ].slice(-200),
-      };
+      return markPhaseDegraded(
+        {
+          ...fallback,
+          logs: [
+            ...(fallback.logs ?? []),
+            {
+              ts: Date.now(),
+              phase,
+              level: "warn" as const,
+              event: "llm.degrade",
+              detail: `runPhaseAsync failed (${classifyError(err)}) — deterministic floor used.`,
+            },
+          ].slice(-200),
+        },
+        phase,
+      );
     }
   }
   return applyPhaseResult(project, phase);
@@ -906,11 +932,13 @@ async function advanceOnceAsync(
   const phase = project.currentPhase;
   // A20/A1-16: id-match (async mirror of advanceOnce's guard).
   const rec = project.phases.find((p) => p.id === phase);
-  if (!rec) return { project, error: "Unknown phase." };
+  // A4-E17: mirror the sync advanceOnce's stop flags — a missing record or a
+  // locked edge is a STOP, not progress.
+  if (!rec) return { project, error: "Unknown phase.", stopped: true };
   if (project.status === "blocked" && rec.status === "rejected") {
     return { project, error: "Phase rejected — retry with the note applied.", stopped: true };
   }
-  if (rec.status === "locked") return { project, error: "Phase is locked." };
+  if (rec.status === "locked") return { project, error: "Phase is locked.", stopped: true };
   if (rec.status === "awaiting_hitl") {
     if (canAutopilot(project, autopilot)) {
       // T2: autopilot approvals land in the decision journal with their actor.
@@ -937,7 +965,9 @@ async function advanceOnceAsync(
       const r = runGate(project, phase);
       if (!r.pass) {
         return {
-          project: hardDodBlockInto(project, phase, r),
+          // A4-E2(b): stamp the packet on the stop too — the pre-block packet
+          // described the pre-block record.
+          project: stampPacket(hardDodBlockInto(project, phase, r)),
           error: hardDodMessage(phase, r),
           stopped: true,
           dodBlocked: true,
@@ -1809,41 +1839,57 @@ export const useRapid = create<RapidState>()(
           // Bounded driver loop (engine documents the loop as the caller's
           // job): step until the run parks (pause/error) or completes. Cap =
           // 20 steps so a stuck project can never spin the caller.
-          // R14-f01 (W33 lane F1): bind the Node-side Auto-Review classifier at
-          // the driver's real call site. Bare Node + key ⇒ the classifier can
-          // actually verdict (engine logs `wild.review (classifier)`); browser /
-          // keyless ⇒ null ⇒ wildStep's existing default path, byte-identical.
-          const reviewer = await createNodeWildReviewer();
+          // R14-f01 / 2026-10-05: host-aware Auto-Review binding at the
+          // driver's real call site. Bare Node + key ⇒ the provider classifier
+          // (engine logs `wild.review (classifier)`); the browser ⇒ the SAME
+          // production classifier through the server-fn bridge whenever the
+          // server reports the key (gates self-clear, no human click); keyless
+          // on either host ⇒ null ⇒ wildStep's honest not-configured default.
+          const reviewer = await createHostWildReviewer();
           let cur = withStartLog;
+          // 347 (console zero-human Wild Mode): ONE live server probe — a
+          // browser host has no env key of its own, so the cached surface is
+          // never trusted here. `true` means the SERVER can run keyed work:
+          // the planner plan, the Auto-Review classifier, AND the phase
+          // execution edges (P6 chunked synthesis / P7 live research) below.
+          const keyed = await probeLlmStatus()
+            .then((s) => s.configured === true)
+            .catch(() => false);
+          // The engine's `wildExecEdgeFor` picks the deterministic floor on a
+          // browser host (`keyedDeepSeekConfigured()` reads process.env, absent
+          // there). An injected edge wins in ANY key state, so the console
+          // driver threads the server-side production edges instead — the real
+          // DeepSeek P6 synthesis, P7 live research, AND (347) the live layer
+          // for every other phase, so the run calls the model at each step
+          // instead of emitting placeholder artifacts the classifier rejects.
+          // Keyless ⇒ no injection ⇒ the byte-identical floor.
+          const keyedEdges = keyed
+            ? {
+                p6Edge: wildEdgeBridge(6),
+                liveEdge: wildEdgeBridge(7),
+                livePhaseEdge: (phase: PhaseId, p: Project) => wildPhaseEdge(phase, p),
+              }
+            : {};
           // 344 A1-06 / 345 F2: the console driver owns the SAME attach step
           // the headless driver performs (headless.attachWildPlan). Without it
           // the loop executed with NO plan review at all — R13-f02's pin was
-          // silently vacuous on this path. Attach via the exported
-          // headless.generateWildPlan when the server reports a key; otherwise
+          // silently vacuous on this path. Reach the EXISTING server-side
+          // planner (`headless.generateWildPlan`) through the server-fn bridge
+          // (`wild-bridge.ts`) when the server reports the key; otherwise
           // record the absence loudly (a console run is then honestly the
           // deterministic floor, never presented as plan-reviewed).
           if (cur.wildPlan?.source !== "planner") {
             let attached: Project | null = null;
-            if (get().llmStatus.configured) {
-              try {
-                const headlessSpec = clientSafeServerSpecifier("headless", "ts");
-                const hl = (await import(headlessSpec)) as {
-                  generateWildPlan?: (p: Project) => Promise<WildPlan>;
-                };
-                if (typeof hl.generateWildPlan === "function") {
-                  const plan = await hl.generateWildPlan(cur);
-                  if (plan.source === "planner" && plan.steps.length > 0) {
-                    attached = wildLog(
-                      { ...cur, wildPlan: plan },
-                      cur.currentPhase,
-                      "info",
-                      "wild.plan",
-                      `wild.plan (planner): ${plan.steps.length} step(s) — attached by the console driver (R13-f02)`,
-                    );
-                  }
-                }
-              } catch {
-                /* browser / server module unavailable — the honest absent path below */
+            if (keyed) {
+              const plan = await generateWildPlanBridge(cur);
+              if (plan && plan.source === "planner" && plan.steps.length > 0) {
+                attached = wildLog(
+                  { ...cur, wildPlan: plan },
+                  cur.currentPhase,
+                  "info",
+                  "wild.plan",
+                  `wild.plan (planner): ${plan.steps.length} step(s) — attached by the console driver (R13-f02)`,
+                );
               }
             }
             const planHandled =
@@ -1865,10 +1911,23 @@ export const useRapid = create<RapidState>()(
           // R13-f02 (341-6): the console driver stages the plan review too —
           // a stored planner plan is judged (reviewer) and the run parks
           // BEFORE the first mutation, exactly as headless's wild drivers do.
-          const staged = await stageWildPlan(cur, reviewer);
+          // 347: under the console's Wild Mode consent (agentSeal) a classifier
+          // APPROVE is the consent of record and the driver executes instead of
+          // parking — zero human clicks. A reject / unconfigured / errored
+          // review still parks exactly as before.
+          const staged = await stageWildPlan(cur, reviewer, { agentSeal: true });
           if (staged.staged) {
             commitWild(staged.project, null);
             return { ok: true, ran: 0, stoppedReason: "paused", note: "RT_E_GATE_PENDING" };
+          }
+          // 347: on the approved/absent path `stageWildPlan` returns the project
+          // CARRYING its `wild.plan_review` (+ `wild.plan_approved`) rows — the
+          // evidence must be committed, not dropped, so the ledger shows the
+          // review and the idempotence guard can never re-review (and re-spend)
+          // on a resume.
+          if (staged.project !== cur) {
+            commitWild(staged.project, cur);
+            cur = staged.project;
           }
           for (let step = 0; step < 20; step++) {
             const prev = cur; // the generation this step is computed from
@@ -1882,6 +1941,11 @@ export const useRapid = create<RapidState>()(
             let stepSpend: SpendSlice | null = null;
             const res = await wildStep(cur, {
               ...(reviewer ? { reviewer } : {}),
+              // 347: the console's Wild Mode toggle IS the sealed-run consent —
+              // machine-consented gates (never a human seat) so a keyed run
+              // completes with zero human approval.
+              agentSeal: true,
+              ...keyedEdges,
               onEvent: (seed) => reportRt(seed),
               onUsage: (usage) => {
                 stepSpend = stepSpend === null ? usage : accumulateSpend(stepSpend, usage);

@@ -104,7 +104,16 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
 3. **Declare-or-strike (P0-04).** Any user-visible claim must match real behavior on disk;
    strike the claim if it doesn't.
 4. **RT_E codes.** Every surfaced failure carries a code from `src/lib/errors.ts`
-   (`ERROR_CODE_DOC` is the canonical registry).
+   (`ERROR_CODE_DOC` is the canonical registry — 56 codes at the 2026-10-15 re-derivation).
+   *(Measured 2026-10-15 by diffing `ERROR_CODES` against every `RT_E_*` string literal in the
+   non-test `src/**` + `scripts/**` files: **12** codes are raised live but are **not yet in**
+   `ERROR_CODE_DOC` — `RT_E_CASSETTE_MISS` (`src/lib/cassette.ts`); `RT_E_SELFMOD_CAP_EXCEEDED` /
+   `_PROTECTED` / `_UNGOVERNED` / `_VERIFY_FAILED` (`src/lib/selfmod.ts`); `RT_E_RUNLOCK_BAD_MTIME` /
+   `_BAD_START` / `_MISSING` / `_NO_INPUT` (`scripts/guards/runlock-preflight.mjs`);
+   `RT_E_PARITY_STALE_ALLOWLIST` / `RT_E_README_PARITY_UNREADABLE` (`scripts/guards/readme-parity.mjs`);
+   `RT_E_SRC_DIRTY` (`scripts/factory-watch.mjs`). The registry migration is owed to a wave that owns
+   `errors.ts`; until it lands, "every surfaced failure carries a registry code" holds for CLI
+   envelopes, not for these script-seam refusals.)*
 5. **DoD gates record exit criteria; enforcement follows the key.** Keyless runs are
    advisory — gates never silently block. Keyed runs default **enforce-DoD ON** (the engine
    defaults `enforceDod` to the keyed state; `create --advisory` or the console toggle
@@ -343,8 +352,11 @@ No silent default flips. The human door is never removed.
   and no Docker/bwrap/AppContainer/Windows-Job-Object boundary is claimed.
 - **The human acceptance door is reserved, unchanged.** `autonomousSoftwareFactory` still requires a
   human-approved fixture row (`decidedBy:"human"`, out-of-band); `doctor` prints it `false` by design.
-- **Known residuals.** `resumeAccepted` is plumbed through `headless.ts` but **not yet consumed by
-  codegen** (`grep resumeAccepted src/lib/codegen.server.ts` = 0); **5 lint warnings** are reported by the
+- **Known residuals.** `resumeAccepted` **IS consumed by codegen** (corrected 2026-10-15 — this line
+  previously claimed "not yet consumed"; re-derived: `grep resumeAccepted src/lib/codegen.server.ts`
+  = **7** hits, incl. the `resumeByPath` reuse arm at `:7607-7641` and the deps type at `:6041`, so a
+  resumed path is reused with zero synthesis prompts — the same correction `RUNBOOK.md` §9 carries);
+  **5 lint warnings** are reported by the
   gate (`lint.problems:5`) with lint `ok:true`; cross-family failover is genuinely unimplemented
   (the un-armed switch was deleted; `RAPIDTOOL_FALLBACK_PROVIDERS` is inert); the console seat records
   provenance but has no out-of-band delivery seam; prettier drift is measured, not gated.
@@ -465,3 +477,61 @@ between samples, so no single run is the product. Full tables: `testruns\_report
 - Eleven guard `expectedCode` values are registered, with a test that every registry `RT_E_*` resolves
   in `ERROR_CODE_DOC`.
 - The last lint error was fixed (a regex literal-space nit); `lint.problems` is `null` again.
+
+## Corrections in force — appended 2026-10-06 (354 wave · B2 UI/docs-truth)
+
+This block supersedes the port-contract, Node-pin, `emit --git` and tab-count claims above. Values
+re-derived from the file/command named beside each; where a doc and the bytes disagree, the bytes win.
+
+- **Port contract — the defaults are fixed, AND there is a documented `PORT` override.** The
+  Reality-check line "Port 8080 + `strictPort` stay fixed contracts" is amended: `8080` (dev) /
+  `8081` (preview) with `strictPort: true` remain the **defaults** and `strictPort` is kept, but
+  `vite.config.ts:184` `resolvePort(process.env.PORT, …)` (F-15, `fixes/344`) is a real escape hatch
+  for concurrent lanes. A non-integer / out-of-range `PORT` is ignored, never bound. Caveat
+  (unchanged): `src/lib/auth/server.ts` pins its dev trusted origins to `:8080`, so a dev server on a
+  non-default `PORT` serves the app but cross-origin auth callbacks will not match — use the override
+  for non-auth lanes.
+- **Node pin.** The `engines` contract is `>=22` (`package.json:8`). `22.23.2` (the 345-F1 block's
+  value) is the Hermes-bundled runtime, not this dev host — `node -v` here is **v24.15.0**. Both
+  satisfy the contract.
+- **Bare `emit --git` re-verifies and withholds on a non-green tree.** The 346-wave block's
+  "`emit --git` WITHOUT `--run` still commits — it has no verdict to consult (by design)" is struck:
+  W352/R-19 (`fixes/352_cli_drivers.md` §3 item 19 / §4) makes `headless.landEmittedTree` re-run
+  `treeRun` immediately before landing, so a non-green tree refuses with `RT_E_TREE_RUN_FAILED`
+  (`reason:"tree-run-red"`) and creates no `.git`.
+- **Run-console tab count is TWELVE, not eleven** (`src/components/console.tsx` `RUN_TABS`:
+  artifacts, preview, packet, chat, spec, crew, oracle, vault, design, diagram, runtime, fixtures);
+  the in-file comments at `:183/:187/:3774` are corrected in the same 354-wave edit.
+- **Auth is real when enabled (Decision D3).** With `VITE_AUTH_ENABLED` on, `src/routes/__root.tsx`
+  mounts `SignInGate`, `src/routes/login.tsx` is the real sign-in route (`SIGN_IN_PATH = "/login"`,
+  registered in `routeTree.gen.ts`), and `src/lib/auth/account.ts` `fetchVerifiedAccount` is one real
+  per-user server function guarded by `authMiddleware`/`requireUserId`. The shipped
+  `VITE_AUTH_ENABLED=false` default renders `<Outlet />` byte-identically — no login is demanded.
+
+## Corrections in force — appended 2026-10-15 (W357 · `fix-preview` docs-truth)
+
+This block supersedes the count claims in every dated block above (the 2026-10-05 batch-10
+"total **2,014**" block is the newest of them and is the stale one) and the `resumeAccepted` residual.
+Every number was re-derived from the command named beside it; where this file and the bytes disagree,
+the bytes win.
+
+- **Tracked counts (`git ls-files`, 2026-10-15 at HEAD `30bce78` + the uncommitted W356/W357 lanes;
+  untracked in-flight lane files are not counted):** total **2,088** · `src` 262 · `src/lib` 250
+  (**132** non-test + **118** colocated `*.test.ts` suites) · `scripts` 152 (**39** `*.test.mjs`
+  suites) · `fixes` 783 · `wave_plans` 139 · `research` 476 (`multiagent` 103 · `eval-corpus` 23 ·
+  `eval-out` 345) · root (top-level) **42**.
+  Commands: `(git ls-files).Count` · `(git ls-files src).Count` · `(git ls-files src/lib).Count` ·
+  `(git ls-files "src/lib/*.test.ts").Count` · `(git ls-files scripts).Count` ·
+  `(git ls-files "scripts/*.test.mjs").Count` · `(git ls-files fixes).Count` ·
+  `(git ls-files wave_plans).Count` · `(git ls-files research).Count` ·
+  `(git ls-files | Where-Object { $_ -notmatch '/' }).Count`.
+  Superseded: 2,014 / `src` 256 / `src/lib` 244 / `scripts` 107 / `fixes` 761 / root 41.
+
+- **Root files are 42, not 41**, and `LAUNCH.md` is tracked at the root (it is the only root file the
+  `README.md` §10 catalog does not name). Re-derive with
+  `git ls-files | Where-Object { $_ -notmatch '/' }`.
+
+- **The `RT_E_*` registry is 56 codes** (`ERROR_CODE_DOC`), and **21 of them had no row** in
+  `scripts/README-cli.md`'s registry table, which claimed to be "the full registry, one row per code" —
+  that table now carries all 56 (W357 · `fix-preview`). 12 further codes are raised live but are not in
+  the registry at all (see the honesty-contract note above).

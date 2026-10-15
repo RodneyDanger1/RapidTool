@@ -17,10 +17,19 @@
 // this guard keeps the class from drifting back — it was RED before the fix,
 // it pins the fix now.
 //
-// Legs 1–4 are source-text only — the CLI is never imported, the bytes are
-// the artifact a reviewer diffs. Leg 5 (309/A1) is BEHAVIORAL by design: it
-// spawns the CLI as a child process (still never imported) to pin the wild-arm
-// fuzz shape from 308 M3:
+// Legs 1–4 are STATIC declarations about this file's own contract (the exit
+// class of every `errCode` site, the doc sentence, the seat discipline, registry
+// membership) — the CLI is never imported, so the bytes are the artifact a
+// reviewer diffs. B1-F10 closes the "static legs cannot catch a disabled
+// feature" gap by pairing each static claim with a BEHAVIOURAL one that spawns
+// the real CLI: the exit classes are observed at exit 1/2/3/4/5 by the spawn
+// legs below (5, 6-8, 9-16, and the B1-F2 per-verb refusal legs), the seat
+// discipline by the approve/reject spawns (12-14), and the RT_E_* registry
+// membership by the runtime envelope assertions (a refusal's code is re-read
+// from the live envelope, not from the source text).
+//
+// Leg 5 (309/A1) is BEHAVIORAL by design: it spawns the CLI as a child process
+// (still never imported) to pin the wild-arm fuzz shape from 308 M3:
 //   1. exit taxonomy BY CODE CLASS: every `errCode(err, "<CODE>")` site must
 //      exit the class's documented `typical exit_code` from README-cli.md's
 //      error table — RT_E_INTERNAL → 4, usage-class codes → 1. An unmapped
@@ -112,12 +121,148 @@ const readmeText = readFileSync(README_PATH, "utf8");
  * that actually appear in an `errCode(err, "<CODE>")` call belong here; a NEW
  * code at such a site must be added WITH its documented exit, never guessed.
  */
+/**
+ * B1-F3: the WHOLE README error table, not just the four codes that happen to
+ * appear at an `errCode(...)` site today. A number is the table's `typical
+ * exit_code`; an ARRAY is the table's documented range ("1–4", "1 or 4"); NULL
+ * is a code the table documents as never failing the CLI (a diagnostic, or no
+ * live emitter) — so an `errCode(...)` site carrying it is itself the drift.
+ * `README_TABLE_EXITS` below is the parsed table; the two are asserted equal, so
+ * a code that enters or leaves the table fails HERE instead of silently
+ * shrinking the mapping (the pre-fix 4-code map let every other code through
+ * unmapped-but-tolerated).
+ */
 const EXIT_BY_CODE = {
-  RT_E_INTERNAL: 4, // README-cli.md error table: "Unexpected internal failure … | 4"
-  RT_E_VALIDATION: 1, // "Input or model output failed validation … | 1"
-  RT_E_PROJECT_MISSING: 1, // "The referenced project … does not exist … | 1"
-  RT_E_REPORT_INVALID: 1, // "An ingested agent report failed shape validation … | 1"
+  RT_E_UNKNOWN: [1, 2, 3, 4], // "1–4 (fallback)"
+  RT_E_PROJECT_MISSING: 1,
+  RT_E_PHASE_ILLEGAL: [1, 4], // "1 or 4 (engine-thrown via run/gate)"
+  RT_E_GATE_PENDING: 1,
+  RT_E_REPORT_INVALID: 1,
+  RT_E_REPORT_PHASE_MISMATCH: 1,
+  RT_E_RUNNER_UNAVAILABLE: 3,
+  RT_E_RUNNER_FAILED: 4,
+  RT_E_CHECK_FAILED: 1,
+  RT_E_LLM_NOT_CONFIGURED: 3,
+  RT_E_LLM_TIMEOUT: 4,
+  RT_E_LLM_REJECTED: 4,
+  RT_E_LLM_NO_BALANCE: 4,
+  RT_E_LLM_KEY_REJECTED: 4,
+  RT_E_LLM_KEY_SHADOWED: null, // "- (diagnostic; never fails the run)"
+  RT_E_RESEARCH_UNAVAILABLE: 3,
+  RT_E_VALIDATION: 1,
+  RT_E_INTERNAL: 4,
+  RT_E_GATES_FAILED: 1,
+  RT_E_TREE_RUN_FAILED: 1,
+  RT_E_REPAIR_FAILED: 1,
+  RT_E_VERIFY_KIND_FAILED: 1,
+  // B1-F3: the table said 4 while the CLI emits 1 (the campaign-ledger
+  // preflight, `rapidtool-cli.mjs`); the doc was corrected to the code and the
+  // mapping now pins it.
+  RT_E_BUDGET_EXHAUSTED: 1,
+  RT_E_ABORTED: 1,
+  RT_E_BUSY: 1,
+  RT_E_FOREIGN_FILES: 1,
+  RT_E_PERMISSION_DENIED: [1, 2, 3, 4], // "1–4 (classified in place)"
+  RT_E_DISK_FULL: [1, 2, 3, 4],
+  RT_E_PORT_IN_USE: [1, 2, 3, 4],
+  RT_E_NETWORK_UNREACHABLE: [1, 2, 3, 4],
+  RT_E_GIT_UNAVAILABLE: 1,
+  RT_E_CHECKPOINT_MISSING: 1,
+  RT_E_NOT_IMPLEMENTED: null, // "— (no live emitter today)"
+  RT_E_AUTH_SCHEMA_MISSING: 1,
+  RT_E_MCP_DISABLED: 1,
+  // W358 · lane `close-taxonomy` (fixes/358_close_taxonomy.md): the 21 registry rows
+  // `fix-preview` added to README-cli.md's table were unmapped here (R-9). A code with no
+  // CLI arm has NO exit class, so it maps to an explicit `null` — the README cell must
+  // likewise assert none (`—`/`-`), and a number creep back into either side fails the
+  // derivation assertion below. The four codes that DO reach a CLI envelope carry the exit
+  // the `emit`/`run`/`tree-run` arms already document (the table's own words, not invented):
+  RT_E_PATH_KIND_MISMATCH: [1, 2, 3, 4], // "1–4 (classified in place — EISDIR/ENOTDIR)"
+  RT_E_SUBSTANCE_EMPTY: 1, // "1 (`emit --run --git` substance hold, `substance-empty`)"
+  RT_E_PLAN_UNDERPRODUCED: 1, // "1 (emit: the below-floor refusal before any write / the floor seal)"
+  RT_E_SRC_EDITED_DURING_RUN: 1, // "1 (run/gate/tree-run RUNLOCK refusal)"
+  // The remaining 17 are no-CLI-arm codes (guard `expectedCode`, engine/dod domain,
+  // tree-run legs) — the table asserts no exit for them and neither does this map.
+  RT_E_IMPORT_TOO_LARGE: null, // "— (engine domain, `src/lib/io.ts`; …)"
+  RT_E_DUPLICATE_EXPORT: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_USE_BEFORE_DECL: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_MONEY_SEMANTICS: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_README_PARITY: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_UI_UNWIRED: null, // "— (engine/dod domain; surfaces in `src/lib` results / the console)"
+  RT_E_SPEC_SKIP_VACUOUS: null, // "— (engine tree-run leg — reddens as RT_E_TREE_RUN_FAILED)"
+  RT_E_SPEC_VACUOUS: null, // "— (engine tree-run leg — reddens as RT_E_TREE_RUN_FAILED)"
+  RT_E_CLAIM_UNVERIFIED: null, // "— (engine delivery-gate domain, `src/lib/dod.ts` / `packet.ts`)"
+  RT_E_GIT_CODE_INCONSISTENT: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_SYNTH_DEFAULT_DISARMED: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_SYNTH_RESAMPLE_UNBOUNDED: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_REFUSAL_COVERAGE_LOST: null, // "— (guard `expectedCode`; `scripts/guards/*` + cassette)"
+  RT_E_SYNTH_RESUME_NOT_REUSED: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_JSX_IN_TS: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_VERIFIED_PRODUCT_UNEVIDENCED: null, // "— (guard `expectedCode`; `scripts/guards/*`)"
+  RT_E_DEFAULT_CHECK_BASELINE_LOST: null, // "— (guard `expectedCode`; `scripts/guards/*` + cassette)"
+  // W358: the one registry line this wave landed (the ratchet's own cause). The ratchet is
+  // not a CLI verb and never rides a CLI envelope, so its row asserts no exit class either.
+  RT_E_RATCHET_METRIC_UNAVAILABLE: null, // "— (measurement domain, `scripts/quality-ratchet.mjs`; no CLI arm)"
 };
+
+/** Every code named in README-cli.md's error table (`| \`RT_E_…\` | …`), sorted. */
+function readmeTableCodes() {
+  return [...new Set([...readmeText.matchAll(/^\| `(RT_E_[A-Z0-9_]+)` \|/gm)].map((m) => m[1]))].sort();
+}
+
+/**
+ * The README error table's rows, each with its LAST cell — the documented
+ * `typical exit_code`. Taking the last cell (never a fixed index) keeps the parse
+ * correct if a `meaning`/`agentAction` cell ever contains a pipe, and the exit cell
+ * itself cannot contain one (it is last).
+ */
+function readmeTableRows() {
+  return [...readmeText.matchAll(/^\| `(RT_E_[A-Z0-9_]+)` \|(.*)\|\s*$/gm)].map((m) => {
+    const cells = m[2].split("|");
+    return { code: m[1], exitCell: (cells[cells.length - 1] ?? "").trim() };
+  });
+}
+
+/**
+ * W358 · `close-taxonomy` — THE CONTRACT (R-9). A code's exit class comes from the
+ * README's own `typical exit_code` cell, and the TWO classes are distinguishable:
+ *
+ *   · a NUMERIC cell ("1", a range "1–4", an alternation "1 or 4") asserts that the
+ *     code reaches a CLI envelope and exits that class → `EXIT_BY_CODE` must carry
+ *     exactly that class (a range/alternation as the array of exits it allows);
+ *   · a cell that asserts NONE (`—` / `-`, e.g. "— (guard `expectedCode`; …)" or
+ *     "- (diagnostic; never fails the run)") is the **NO CLI ARM** class: the code is
+ *     produced inside `src/lib`/`scripts` and never rides a CLI envelope, so no exit
+ *     may be claimed for it → `EXIT_BY_CODE` must carry `null` for it.
+ *
+ * `undefined` means the cell is unreadable — a new spelling that must be declared
+ * here rather than silently tolerated (an unreadable cell is not a class).
+ */
+function exitClassOfCell(cell) {
+  const range = cell.match(/^(\d+)\s*[–—-]\s*(\d+)\b/);
+  if (range) {
+    const out = [];
+    for (let i = Number(range[1]); i <= Number(range[2]); i++) out.push(i);
+    return out;
+  }
+  const alternation = cell.match(/^(\d+)\s+or\s+(\d+)\b/);
+  if (alternation) return [Number(alternation[1]), Number(alternation[2])];
+  const single = cell.match(/^(\d+)\b/);
+  if (single) return Number(single[1]);
+  if (/^[—-]/.test(cell)) return null; // the documented "no CLI arm / never fails the CLI" class
+  return undefined;
+}
+
+/** The mapping DERIVED from the README table's own cells — never guessed. */
+function documentedExitByCode() {
+  /** @type {Record<string, number | number[] | null>} */
+  const out = {};
+  for (const { code, exitCell } of readmeTableRows()) {
+    const cls = exitClassOfCell(exitCell);
+    if (cls !== undefined) out[code] = cls;
+  }
+  return out;
+}
 
 /** 1-based line number of a character index. */
 function lineOf(text, index) {
@@ -175,7 +320,9 @@ test("exit taxonomy — every errCode(err, <code>) site exits its documented cla
     .filter((s) => {
       const want = EXIT_BY_CODE[s.code];
       if (want === undefined) return true; // unmapped code class — must be declared
-      return s.exit !== want;
+      if (want === null) return true; // documented as never failing the CLI — a site is drift
+      const allowed = Array.isArray(want) ? want : [want];
+      return !allowed.includes(s.exit ?? NaN);
     })
     .map((s) => {
       const want = EXIT_BY_CODE[s.code];
@@ -183,7 +330,9 @@ test("exit taxonomy — every errCode(err, <code>) site exits its documented cla
       const why =
         want === undefined
           ? `unmapped code class — add it to EXIT_BY_CODE with its documented exit from README-cli.md's error table`
-          : `exits ${got}, documented class exits ${want}`;
+          : want === null
+            ? `the table documents this code as NEVER failing the CLI, yet it is used at an errCode(...) site`
+            : `exits ${got}, documented class exits ${JSON.stringify(want)}`;
       return `${CLI_PATH.split(/[\\/]/).pop()}:${s.line} (${s.code}) — ${why}`;
     });
   assert.deepEqual(
@@ -191,6 +340,217 @@ test("exit taxonomy — every errCode(err, <code>) site exits its documented cla
     [],
     `exit-taxonomy offenders (README-cli.md §Agent contract + error table own the mapping):\n  ${offenders.join("\n  ")}`,
   );
+});
+
+// B1-F3: the mapping is only as good as its coverage — pin it to the WHOLE
+// documented table, both ways, so a code cannot leave the table (or enter the
+// map) without this failing. Without this leg the pre-fix map silently tolerated
+// every code it did not name.
+//
+// W358 · `close-taxonomy` (R-9): the parity is now DERIVED FROM THE DOC, not hand-kept
+// beside it. `fix-preview` grew the table 35 → 56 rows to mirror `ERROR_CODE_DOC` (the
+// table WAS genuinely incomplete) and this leg went red because 21 of those codes had no
+// `EXIT_BY_CODE` arm. The honest resolution is NOT an invented exit code and NOT a deleted
+// row: it is that **a code with no CLI arm has no exit class**, so this leg now reads the
+// table's own `typical exit_code` cell, requires it to be a readable class, and pins the
+// map to exactly that class — numbers where the doc asserts an exit, an explicit `null`
+// where the doc asserts none. A numeric cell and a `null` map entry are therefore
+// mutually exclusive in BOTH directions.
+test("exit taxonomy — EXIT_BY_CODE is exactly the README error table (both directions)", () => {
+  const rows = readmeTableRows();
+  const table = readmeTableCodes();
+  // Vacuity floor: 35 table rows at the B1-F3 write, 57 at the W358 re-derivation.
+  assert.ok(
+    table.length >= 30,
+    `README-cli.md's error table parsed to only ${table.length} code(s) — the table's shape moved; re-derive this guard.`,
+  );
+  assert.equal(table.length, rows.length, `the table carries a DUPLICATE code row (${rows.length} rows, ${table.length} codes)`);
+  const mapped = Object.keys(EXIT_BY_CODE).sort();
+  assert.deepEqual(
+    mapped.filter((c) => !table.includes(c)),
+    [],
+    "EXIT_BY_CODE names code(s) that are NOT in README-cli.md's error table — declare them in the table or drop the mapping",
+  );
+  assert.deepEqual(
+    table.filter((c) => !mapped.includes(c)),
+    [],
+    "README-cli.md's error table names code(s) with no EXIT_BY_CODE mapping — the exit class is unpinned for them " +
+      "(map the code to its documented class, or to `null` if the table documents no CLI arm)",
+  );
+  // The documented class IS the map: an unreadable cell, an asserted exit the map does not
+  // carry, or a `null` where the doc asserts an exit are all drift.
+  const unreadableCells = rows
+    .filter((r) => exitClassOfCell(r.exitCell) === undefined)
+    .map((r) => `${r.code}: ${JSON.stringify(r.exitCell)}`);
+  assert.deepEqual(
+    unreadableCells,
+    [],
+    `these table rows carry an unreadable \`typical exit_code\` cell — declare the class ("1"/"1–4"/"1 or 4") ` +
+      `or the explicit no-CLI-arm class ("—"/"-") instead of a new spelling:\n  ${unreadableCells.join("\n  ")}`,
+  );
+  const documented = documentedExitByCode();
+  const classDrift = mapped
+    .filter((c) => JSON.stringify(EXIT_BY_CODE[c] ?? null) !== JSON.stringify(documented[c] ?? null))
+    .map(
+      (c) =>
+        `${c}: README-cli.md documents ${JSON.stringify(documented[c] ?? null)}, EXIT_BY_CODE says ` +
+        `${JSON.stringify(EXIT_BY_CODE[c] ?? null)} — \`null\` is the "no CLI arm" class and a number is an asserted ` +
+        `exit class; the two must not disagree`,
+    );
+  assert.deepEqual(
+    classDrift,
+    [],
+    `the exit class drifted from the doc's own \`typical exit_code\` cell:\n  ${classDrift.join("\n  ")}`,
+  );
+  // The one direction the derivation cannot state by itself: the table mirrors the
+  // CANONICAL registry (`ERROR_CODE_DOC`) — the claim its own paragraph makes ("the full
+  // registry, one row per code"). Without this, a registered code can be silently
+  // un-documented (the R-9 table was 35 rows against a 56-code registry).
+  const docBlock = readFileSync(ERRORS_PATH, "utf8").match(/export const ERROR_CODE_DOC[^=]*=\s*\{([\s\S]*?)\n\};/);
+  assert.ok(docBlock, "ERROR_CODE_DOC block not found in src/lib/errors.ts — re-derive this guard");
+  const docCodes = [...new Set([...docBlock[1].matchAll(/^\s*(RT_E_[A-Z0-9_]+):/gm)].map((m) => m[1]))].sort();
+  assert.ok(docCodes.length >= 30, `ERROR_CODE_DOC parsed to only ${docCodes.length} code(s) — the block's shape moved`);
+  assert.deepEqual(
+    table.filter((c) => !docCodes.includes(c)),
+    [],
+    "README-cli.md's error table names code(s) absent from ERROR_CODE_DOC — the registry is canonical; drop the row or register the code",
+  );
+  assert.deepEqual(
+    docCodes.filter((c) => !table.includes(c)),
+    [],
+    "ERROR_CODE_DOC registers code(s) with NO row in README-cli.md's error table — the table claims one row per code; add the row",
+  );
+  // The one row B1-F3 corrected: the CLI emits this code at exit 1 (the
+  // campaign-ledger preflight), and the table must say 1, not 4.
+  assert.ok(
+    /\| `RT_E_BUDGET_EXHAUSTED` \|[^|]*\|[^|]*\| 1 /.test(readmeText),
+    "the RT_E_BUDGET_EXHAUSTED row must document exit 1 (rapidtool-cli.mjs emits it at exit 1, not 4)",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// B1-F2 (P1) — the per-verb flag SCOPE, BEHAVIOURAL. `KNOWN_FLAGS` is ONE global
+// set, so a documented flag on the wrong verb used to be silently accepted (the
+// live repro: `doctor --start` → ok:true; `mine --dir . --git --limit 1` →
+// ok:true), contradicting the documented contract that `--help <verb>` lists the
+// flags that verb accepts. The accepted set is derived from the verb's own help
+// line, so this leg first asks the CLI for its synopsis (`--help`, exit 0 — a
+// SUCCESS envelope) and then proves, for EVERY verb, that a flag belonging to a
+// different verb is refused PRE-DISPATCH at exit 1 + RT_E_VALIDATION naming it.
+// ---------------------------------------------------------------------------
+const FOREIGN_FLAG_UNIVERSAL = new Set(["help", "token-ledger"]);
+
+/** The flags each verb's own synopsis line documents, straight from `--help`. */
+function verbFlagMapFromHelp() {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-verbflags-"));
+  try {
+    const env = { ...process.env };
+    for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+    const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "--help"], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    assert.equal(res.status, 0, `\`--help\` must be a SUCCESS envelope.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+    const json = JSON.parse(res.stdout);
+    assert.equal(json.ok, true, "`--help` is ok:true (a help request is not a coded failure)");
+    const commands = json.usage && json.usage.commands;
+    assert.ok(commands && typeof commands === "object", "`--help` must carry usage.commands (the verb synopses)");
+    const map = new Map();
+    for (const [verb, line] of Object.entries(commands)) {
+      map.set(verb, new Set([...String(line).matchAll(/--([a-z][a-z0-9-]+)/g)].map((m) => m[1])));
+    }
+    return map;
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+test("B1-F2 — every verb refuses a flag that belongs to a DIFFERENT verb (exit 1, RT_E_VALIDATION)", () => {
+  const verbs = verbFlagMapFromHelp();
+  assert.ok(verbs.size >= 30, `the synopsis must name every verb (got ${verbs.size})`);
+  const allFlags = new Set();
+  for (const own of verbs.values()) for (const f of own) allFlags.add(f);
+  const foreignFor = (own) =>
+    [...allFlags].filter((f) => !own.has(f) && !FOREIGN_FLAG_UNIVERSAL.has(f)).sort()[0];
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-foreign-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  const failures = [];
+  try {
+    for (const [verb, own] of verbs) {
+      const foreign = foreignFor(own);
+      if (!foreign) continue;
+      const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, verb, `--${foreign}`], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      let json = null;
+      try {
+        json = JSON.parse(res.stdout);
+      } catch {
+        /* named below */
+      }
+      const ok =
+        res.status === 1 &&
+        json &&
+        json.ok === false &&
+        json.code === "RT_E_VALIDATION" &&
+        typeof json.error === "string" &&
+        json.error.includes(`--${foreign}`);
+      if (!ok) {
+        failures.push(
+          `${verb} --${foreign}: exit ${res.status}, code ${json ? json.code : "<no JSON>"}, error ${JSON.stringify(json && json.error)}`,
+        );
+      }
+    }
+    assert.deepEqual(
+      failures,
+      [],
+      `verb(s) silently absorbed a flag documented on another verb (each must refuse pre-dispatch at exit 1 + RT_E_VALIDATION naming the flag):\n  ${failures.join("\n  ")}`,
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("B1-F2 — the two live repros refuse coded (doctor --start; mine --dir . --git --limit 1)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-repro-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  const run = (argv) => {
+    const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    let json = null;
+    try {
+      json = JSON.parse(res.stdout);
+    } catch {
+      /* surfaced by the assertions */
+    }
+    return { status: res.status, json, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+  };
+  try {
+    const a = run(["doctor", "--start"]);
+    assert.equal(a.status, 1, `\`doctor --start\` must refuse.\nstdout: ${a.stdout}\nstderr: ${a.stderr}`);
+    assert.equal(a.json?.ok, false, "a foreign flag is never a success envelope");
+    assert.equal(a.json?.code, "RT_E_VALIDATION", "the refusal carries the usage code");
+    assert.match(String(a.json?.error), /--start.*not a flag `doctor` accepts/s, "the refusal names the flag and the verb");
+
+    const b = run(["mine", "--dir", ".", "--git", "--limit", "1"]);
+    assert.equal(b.status, 1, `\`mine --dir . --git --limit 1\` must refuse.\nstdout: ${b.stdout}\nstderr: ${b.stderr}`);
+    assert.equal(b.json?.ok, false, "a foreign flag is never a success envelope");
+    assert.equal(b.json?.code, "RT_E_VALIDATION", "the refusal carries the usage code");
+    assert.match(String(b.json?.error), /--git.*not a flag `mine` accepts/s, "the refusal names the misplaced flag");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("exit taxonomy — README-cli.md keeps the documented Exit-4 sentence", () => {
@@ -595,6 +955,83 @@ test("312 B-02 — the wild verb's onEvent hop lands wild.step_* rows in the NDJ
       stepRows.every((r) => r.host === "cli" && r.scope === "wild-step"),
       "every wild.step_* row must be a CLI-stamped wild-step row (makeCliRow)",
     );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-05 wild-lifecycle coherence (BEHAVIORAL spawn). Two contracts:
+//   1. `--agent-seal` is refused CODED on the lifecycle-only controls
+//      (`--pause`/`--stop`) — they never drive the classifier loop, so the
+//      governance flag would be silently absorbed (330 Switchboard doctrine).
+//   2. `wild --resume` CONTINUES a paused run — one bounded loop step, the
+//      console `startWildRun` PA-01 parity — instead of merely unpausing, so a
+//      non-expert sees the run progress rather than a no-op.
+// ---------------------------------------------------------------------------
+test("wild lifecycle — --agent-seal refused on --pause/--stop; --resume continues a paused run", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-wildlife-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "TAVILY_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  const runCli = (argv) =>
+    spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+  try {
+    const proj = join(cwd, "wild.json");
+    const created = runCli([
+      "create",
+      "--brief",
+      "Build a field-service dispatch board for HVAC: jobs, techs, parts, same-day reroutes.",
+      "--name",
+      "WildLife",
+      "--out",
+      proj,
+    ]);
+    assert.equal(created.status, 0, `create must exit 0.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+
+    // 1. The seal on a lifecycle-only control is refused coded, before any run.
+    for (const action of ["--pause", "--stop"]) {
+      const res = runCli(["wild", "--project", proj, action, "--agent-seal"]);
+      assert.equal(res.status, 1, `${action} --agent-seal → exit 1.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+      assert.ok(!/(^|\n)\s+at\s/.test(res.stderr ?? ""), `${action} --agent-seal must not STACK`);
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.ok, false);
+      assert.equal(json.code, "RT_E_VALIDATION", `${action} --agent-seal must be a coded usage refusal`);
+      assert.ok(
+        String(json.error).includes(`does not apply to --${action.slice(2)}`),
+        `the refusal must name --${action.slice(2)}: ${json.error}`,
+      );
+      assert.ok(String(json.remedy).includes("wild --resume --agent-seal"), `${action}: the remedy names a door that carries the seal`);
+    }
+
+    // 2. Start (active), pause, then resume: resume must CONTINUE (steps > 0).
+    const started = runCli(["wild", "--project", proj, "--start", "--steps", "2"]);
+    assert.equal(started.status, 0, `wild --start must exit 0.\nstdout: ${started.stdout}\nstderr: ${started.stderr}`);
+    assert.equal(JSON.parse(started.stdout).ok, true);
+
+    const paused = runCli(["wild", "--project", proj, "--pause"]);
+    assert.equal(paused.status, 0, `wild --pause must exit 0.\nstdout: ${paused.stdout}\nstderr: ${paused.stderr}`);
+    const pauseJson = JSON.parse(paused.stdout);
+    assert.equal(pauseJson.ok, true);
+    assert.equal(pauseJson.changed, true, "a live run must actually pause");
+
+    const resumed = runCli(["wild", "--project", proj, "--resume", "--steps", "1"]);
+    assert.equal(resumed.status, 0, `wild --resume must exit 0.\nstdout: ${resumed.stdout}\nstderr: ${resumed.stderr}`);
+    const resumeJson = JSON.parse(resumed.stdout);
+    assert.equal(resumeJson.ok, true);
+    assert.equal(resumeJson.action, "resume");
+    assert.equal(resumeJson.changed, true);
+    assert.ok(
+      typeof resumeJson.steps === "number" && resumeJson.steps >= 1,
+      `--resume must CONTINUE the run (steps >= 1), got ${resumeJson.steps} — an unpause-only resume is the pre-fix no-op`,
+    );
+    assert.ok(!("error" in resumeJson), "a success envelope never carries error (185-H1)");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -2235,6 +2672,43 @@ test("W45 331-1 — the CLI resolves .env, carries the provider's credential cod
   assert.match(cliText, /KEY_SOURCE\.tail/, "the remedy must be tail-only");
   assert.match(cliText, /usage: crewUsage/, "the crew envelope must report measured provider usage");
   assert.ok(!/KEY_SOURCE\.value/.test(cliText), "the secret value must never be read for a remedy");
+  // 2026-10-05: the SAME loader must install the research key, or a configured
+  // `.env` TAVILY_API_KEY never reached the research layer.
+  assert.match(cliText, /name: "TAVILY_API_KEY"/, "the .env loader must resolve TAVILY_API_KEY too");
+  assert.match(cliText, /process\.env\.TAVILY_API_KEY = tavily\.effective\.value/, "the resolved research key must be installed into the process env");
+  assert.match(cliText, /warnConflict\("TAVILY_API_KEY", tavily\.conflict\)/, "a conflicting research key must use the loud, tail-only warning");
+});
+
+test("2026-10-05 — the CLI .env loader installs TAVILY_API_KEY for the research layer (same precedence)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-tavily-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "TAVILY_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  try {
+    // A blank DEEPSEEK (keyless floor) + a real-shaped Tavily key in the cwd's
+    // .env. If the loader installs Tavily, doctor's research branch flips to the
+    // Tavily label regardless of network reachability (a probe failure is still
+    // the Tavily branch); if it does NOT, the label stays the free-search one.
+    writeFileSync(join(cwd, ".env"), "DEEPSEEK_API_KEY=\nTAVILY_API_KEY=tvly-test-0123456789abcdef\n", "utf8");
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "doctor"],
+      { cwd, env, encoding: "utf8", timeout: 60_000 },
+    );
+    assert.equal(res.error, undefined, `spawn failed: ${String(res.error)}`);
+    assert.equal(res.status, 0, `doctor must exit 0.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+    const json = JSON.parse(res.stdout);
+    assert.equal(json.cmd, "doctor");
+    assert.ok(
+      typeof json.research?.label === "string" && json.research.label.startsWith("tavily"),
+      `a .env TAVILY_API_KEY must reach the research layer (label should be tavily-*, got "${json.research?.label}") — the pre-fix loader installed DEEPSEEK only`,
+    );
+    assert.ok(!res.stdout.includes("tvly-test-0123456789abcdef"), "the key value must never appear in the envelope");
+    assert.ok(!(res.stderr ?? "").includes("tvly-test-0123456789abcdef"), "the key value must never appear on stderr");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("W45 331-1 — README documents the precedence and the loud coded conflict", () => {
@@ -2715,7 +3189,14 @@ test("341-6 - a SINGLE keyless `unattended` clears the stock gates via the machi
     );
     assert.ok(!/(^|\n)\s+at\s/.test(res.stderr ?? ""), `unattended must never print a Node stack:\n${res.stderr}`);
     const json = JSON.parse(res.stdout);
-    assert.equal(json.summary.status, "complete", "ONE unattended invocation drives to P12 complete");
+    // A4-E2(c)/A4-E3 (headless.ts:2288-2291 `terminalStatusOf`): a DIRTY seal must not render as a
+    // bare `complete` on the summary chip — the honest terminal value here is `complete_with_failures`
+    // (the keyless advisory floor leaves the P6 gate red, which the exit-1 assertions below confirm).
+    assert.equal(
+      json.summary.status,
+      "complete_with_failures",
+      "ONE unattended invocation drives to P12; a red-gate seal renders the honest terminal status, never a clean `complete`",
+    );
     assert.equal(json.summary.currentPhase, 12);
     assert.equal(json.steps, 13, "P0-P12 all moved in the single invocation");
     assert.equal(res.status, 1, "keyless advisory floor leaves P6 red -> documented complete-with-failed-gates exit 1");
@@ -2723,6 +3204,7 @@ test("341-6 - a SINGLE keyless `unattended` clears the stock gates via the machi
     assert.equal(json.sealedWithFailures, true);
 
     const saved = JSON.parse(readFileSync(proj, "utf8"));
+    assert.equal(saved.status, "complete", "the RECORD's own status is complete — the summary renders the honest terminal value derived from the failed gates");
     const stock = saved.decisions.filter((d) => [4, 5, 8, 9].includes(d.phase));
     assert.equal(stock.length, 4, "every stock HITL gate was cleared");
     for (const d of stock) {
@@ -2927,7 +3409,7 @@ test("343-3 — `emit --git` is wired to the delivery seam (source pin)", () => 
 const GIT_AVAILABLE = spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
 
 test(
-  "346 P0-3 — `emit --run --git` withholds a commit on a RED run verdict; `--git` alone and a GREEN verdict are unchanged",
+  "346 P0-3 + W352 R-19 — `emit --run --git` withholds a commit on a RED run verdict; bare `--git` re-verifies and a GREEN verdict is unchanged",
   { skip: GIT_AVAILABLE ? false : "git is not available on this box (the delivery lane needs a real git)", timeout: 600_000 },
   () => {
     const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-emitgit-"));
@@ -2995,18 +3477,21 @@ test(
         "the emitted tree is still written to disk (delivery withheld, the build is kept)",
       );
 
-      // (2) RED + `--git` alone: UNCHANGED — it cannot consult a verdict it never computed.
+      // (2) RED + `--git` alone: W352 R-19 — the landing RE-VERIFIES the tree
+      // before committing, so a red tree withholds the commit even with no
+      // judging leg requested in this invocation.
       const redGitDir = join(cwd, "red-git-only");
       const redGit = runEmit(["--project", redProj, "--out", redGitDir, "--git"]);
       assert.equal(
         redGit.status,
-        0,
-        `emit --git WITHOUT --run must stay a clean commit.\nstdout: ${redGit.stdout}\nstderr: ${redGit.stderr}`,
+        1,
+        `emit --git re-verifies before committing; a red tree must withhold.\nstdout: ${redGit.stdout}\nstderr: ${redGit.stderr}`,
       );
       const rgj = JSON.parse(redGit.stdout);
-      assert.equal(rgj.ok, true);
-      assert.equal(rgj.git?.committed, true, "`--git` alone is unchanged: no verdict was computed to consult");
-      assert.equal(existsSync(join(redGitDir, ".git")), true, "`--git` alone still lands the commit");
+      assert.equal(rgj.ok, false);
+      assert.equal(rgj.git?.committed, false, "a commit is evidence of a verified tree (W352 R-19)");
+      assert.equal(rgj.git?.reason, "tree-run-red", "the refusal names the re-verification class");
+      assert.equal(existsSync(join(redGitDir, ".git")), false, "no .git over a red tree");
 
       // (3) GREEN + `--run --git`: the guard must not touch a green verdict.
       const greenProj = join(cwd, "green.json");
@@ -3041,7 +3526,7 @@ test(
 // no verdict to consult). Real keyless emits + REAL git, no mocks.
 // ---------------------------------------------------------------------------
 test(
-  "346 L4 — `emit --check --git` withholds a red-check commit; `--git` alone and a green `--check --git` are unchanged",
+  "346 L4 + W352 R-19 — `emit --check --git` withholds a red-check commit; bare `--git` re-verifies and a green `--check --git` is unchanged",
   { skip: GIT_AVAILABLE ? false : "git is not available on this box (the delivery lane needs a real git)", timeout: 300_000 },
   () => {
     const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-checkgit-"));
@@ -3084,16 +3569,17 @@ test(
       assert.equal(existsSync(join(redDir, ".git")), false, "a red --check --git must leave NO .git on disk");
       assert.equal(existsSync(join(redDir, "src", "jobs", "track.ts")), true, "the emitted tree is still written");
 
-      // (2) `--git` ALONE on the SAME red fixture: UNCHANGED — no verdict to consult.
+      // (2) `--git` ALONE on the SAME red fixture: W352 R-19 — the landing
+      // re-verifies, so a red tree withholds even with no judging leg.
       const redGitDir = join(cwd, "red-git-only");
       const redGit = runNode(["emit", "--project", redProj, "--out", redGitDir, "--git"]);
       assert.equal(
         redGit.status,
-        0,
-        `emit --git WITHOUT a judging leg must stay a clean commit.\nstdout: ${redGit.stdout}\nstderr: ${redGit.stderr}`,
+        1,
+        `emit --git re-verifies before committing; a red tree must withhold.\nstdout: ${redGit.stdout}\nstderr: ${redGit.stderr}`,
       );
-      assert.equal(JSON.parse(redGit.stdout).git?.committed, true, "`--git` alone is unchanged");
-      assert.equal(existsSync(join(redGitDir, ".git")), true, "`--git` alone still lands the commit");
+      assert.equal(JSON.parse(redGit.stdout).git?.committed, false, "a commit is evidence of a verified tree (W352 R-19)");
+      assert.equal(existsSync(join(redGitDir, ".git")), false, "no .git over a red tree");
 
       // (3) GREEN + `--check --git`: a clean tree still commits.
       const greenProj = join(cwd, "green.json");
@@ -3167,16 +3653,13 @@ test(
       assert.equal(ejr.git?.committed, false, "no commit over an empty-substance tree");
       assert.equal(ejr.git?.reason, "substance-empty", "the withheld reason names the substance class");
       // C1-08 (campaign #1): the withheld sub-envelope's own code must name the
-      // DECIDING reason, not a leg's earlier code. Reproduced on this fixture
-      // (the run leg is itself red, so payload.code already read
-      // RT_E_TREE_RUN_FAILED before the substance branch) and on the campaign
+      // DECIDING reason, not a leg's earlier code. Reproduced on the campaign
       // artifact office-invoice-tracker/emit-banner.json, whose `git` block
       // carried reason:"substance-empty" beside code:"RT_E_TREE_RUN_FAILED".
-      assert.equal(
-        ejr.treeRun?.ok,
-        false,
-        "precondition: this fixture's run leg is red, so the pre-fix git.code would have been RT_E_TREE_RUN_FAILED",
-      );
+      // The substance branch is checked BEFORE the run-red branch, so the
+      // substance class wins whenever it fires (this keyless fixture's own run
+      // leg is green, which is why the branch ORDER is what is pinned here).
+      assert.equal(typeof ejr.treeRun?.ok, "boolean", "precondition: the --run leg computed a boolean verdict");
       assert.equal(
         ejr.git?.code,
         "RT_E_SUBSTANCE_EMPTY",
@@ -3482,7 +3965,11 @@ test("C1-10 — the cross-process campaign ledger bounds a campaign, refuses pas
 test("W346 R2-01 - a below-floor emit seals RT_E_PLAN_UNDERPRODUCED (not a silent partial)", () => {
   const campaign2 = fileURLToPath(new URL("../../testruns/campaign2", import.meta.url));
   const below = join(campaign2, "bakery-website", "build.json");
-  if (!existsSync(below)) return; // artifacts live outside the repo; skip when absent
+  // B1-F10 (fail closed): this leg used to `return` (a vacuous PASS) when the
+  // fixture was absent. The below-floor campaign artifact is TRACKED in the
+  // repo's `testruns/` subset now, so its absence is a real regression — not a
+  // reason to report green.
+  assert.ok(existsSync(below), `the below-floor fixture must exist: ${below} (tracked testruns/campaign2 subset)`);
   const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-floor-seal-"));
   const env = { ...process.env };
   for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR", "RAPIDTOOL_LEDGER_FILE", "RAPIDTOOL_CAMPAIGN_TOKEN_CAP"]) {
@@ -3549,7 +4036,7 @@ test("W346 R2-01 - a below-floor emit seals RT_E_PLAN_UNDERPRODUCED (not a silen
 test("W346 D-2 - a below-floor default emit decides on the journal's RT_E_PLAN_UNDERPRODUCED, not the red-trail code", () => {
   const campaign2 = fileURLToPath(new URL("../../testruns/campaign2", import.meta.url));
   const below = join(campaign2, "office-stock-tracker", "build.json");
-  if (!existsSync(below)) return; // artifacts live outside the repo; skip when absent
+  assert.ok(existsSync(below), `the below-floor fixture must exist: ${below} (tracked testruns/campaign2 subset)`);
   const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-floor-decides-"));
   const env = { ...process.env };
   for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR", "RAPIDTOOL_LEDGER_FILE", "RAPIDTOOL_CAMPAIGN_TOKEN_CAP"]) {

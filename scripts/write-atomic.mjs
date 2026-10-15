@@ -12,7 +12,7 @@
  * copying would have to land its temp in the target's directory, which is the
  * one thing a staged path is not allowed to do.
  */
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // R11-f07: the shared physical-containment helper (one implementation, three
@@ -64,18 +64,42 @@ export function stagingError({ staged, target, publicDir }) {
  * `rename` is injectable because EXDEV — the refusal the "stage under
  * /workspace/.grok/" contract rests on — cannot be provoked portably.
  */
-export function handOver(staged, target, { rename = renameSync } = {}) {
+export function handOver(staged, target, { rename = renameSync, mkdir = mkdirSync, rmdir = rmdirSync } = {}) {
   if (!existsSync(staged)) {
     throw Object.assign(new Error(`staged file is missing: ${staged}`), { code: "ENOENT" });
   }
   // W42 L4-G3 (q2 A-100): the mkdir sits INSIDE the try with the rename — it
   // is part of the hand-over's single mutation step, so a rename failure
   // re-throws through the one catch below (raw error, or the EXDEV advice)
-  // instead of failing across two independent failure paths.
+  // instead of failing across two independent failure paths. W352: a failed
+  // rename must also RECLAIM the parent directories this call created — the old
+  // path left `src/lib/og/` behind for a target it never wrote.
+  const parent = dirname(target);
+  const created = [];
   try {
-    mkdirSync(dirname(target), { recursive: true });
+    // Record the exact missing ancestors so cleanup removes only what we made.
+    const missing = [];
+    for (let cur = parent; cur && !existsSync(cur); ) {
+      missing.push(cur);
+      const up = dirname(cur);
+      if (up === cur) break;
+      cur = up;
+    }
+    for (const dir of missing.reverse()) {
+      mkdir(dir);
+      created.push(dir);
+    }
     rename(staged, target);
   } catch (err) {
+    // Remove shallow→deep ordering is reversed: deepest first (created is
+    // root-first, so reverse it), and only ever an EMPTY dir we just made.
+    for (const dir of [...created].reverse()) {
+      try {
+        rmdir(dir);
+      } catch {
+        /* not empty (a concurrent writer landed a file) or already gone */
+      }
+    }
     if (err?.code === "EXDEV") {
       throw new Error(
         `${staged} is on another filesystem than ${target}, so the hand-over cannot be a `

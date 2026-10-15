@@ -14,6 +14,7 @@ import {
   HITL_PHASES,
   PHASES,
   PHASE_BY_ID,
+  PHASE_DELIVERABLE_KINDS,
   PHASE_DESCRIPTIONS,
   PHASE_LAST,
   PHASE_TAIL_START,
@@ -24,6 +25,7 @@ import {
   phaseDef,
   phaseDescription,
   priorsSealed,
+  stageWiringReading,
 } from "./phases.ts";
 import { approve, createProject, runUntilGate } from "./headless.ts";
 import { runGate } from "./dod.ts";
@@ -518,5 +520,155 @@ describe("W60/346-6 — tail reachability claim matches the bytes", () => {
       "struck: canEnter is gate-blind, so a red P6 does not make the tail unreachable",
     );
     assert.ok(src.includes("gate-blind"), "the corrected claim states canEnter is gate-blind");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A3-E16 (2026-10-06) — an ingested external agent report (report-intake.ts)
+// lands as a `docs` artifact marked by its `report-` id / "[agent report] "
+// title. For P12 the declared deliverable kind IS `docs`, so a report row used
+// to satisfy the deliverable census and could hide a phase that produced
+// nothing. The census now excludes agent-origin report rows.
+// ---------------------------------------------------------------------------
+describe("A3-E16 — an ingested agent report is not a phase deliverable", () => {
+  const report = {
+    id: "report-12-0-abcd1234",
+    phase: 12,
+    kind: "docs",
+    title: "[agent report] audit summary",
+    body: "external agent output",
+  };
+
+  it("a P12 `docs` row that is an agent report does not satisfy the deliverable census", () => {
+    const phases = [{ id: 12, status: "complete" }];
+    const cov = phaseCoverage(phases, [report]);
+    assert.deepEqual(cov.emptyPhases, [12], "the report is agent-origin input, not a P12 deliverable");
+    assert.equal(cov.tailArtifacts, 0);
+
+    // A REAL docs row beside the report still counts.
+    const cov2 = phaseCoverage(phases, [
+      report,
+      { id: "p12-adr", phase: 12, kind: "docs", title: "ADR", body: "real" },
+    ]);
+    assert.deepEqual(cov2.emptyPhases, []);
+    assert.equal(cov2.tailArtifacts, 1);
+  });
+
+  it("stageWiringReading fails a complete phase whose only docs row is an agent report", () => {
+    const reading = stageWiringReading({ phases: [{ id: 12, status: "complete" }], artifacts: [report] });
+    const p12 = reading.rows.find((r) => r.phase === 12)!;
+    assert.equal(p12.present, false, "the report is not a deliverable");
+    assert.ok(
+      reading.failures.some((f) => f.phase === 12 && f.code === "RT_E_PLAN_UNDERPRODUCED"),
+      "P12 completed with no real docs deliverable — a coded failure",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-06 — stage wiring (item 4). Every phase's claimed deliverable is
+// asserted present AND non-empty, and a completed stage that produced nothing
+// is a CODED failure — never a silent skip. Pure reading over the record.
+// ---------------------------------------------------------------------------
+describe("2026-10-06 — stageWiringReading asserts every phase produced + flowed", () => {
+  const row = (id: number, status: string) => ({ id, status });
+  const art = (phase: number, kind: string, body: string) => ({ phase, kind, body });
+
+  /** A fully wired record: every phase complete with its declared kind. */
+  const wired = () => ({
+    phases: PHASES.map((d) => row(d.id, "complete")),
+    artifacts: PHASES.map((d) => art(d.id, PHASE_DELIVERABLE_KINDS[d.id][0], "x".repeat(20))),
+  });
+
+  it("a fully wired graph is ok with no failures", () => {
+    const r = stageWiringReading(wired());
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.failures, []);
+    assert.equal(r.rows.length, 13);
+    assert.ok(r.rows.every((x) => x.present && x.nonEmpty && x.kindPresent));
+  });
+
+  it("a COMPLETE phase that produced nothing is a coded failure, never a silent skip", () => {
+    const r = stageWiringReading({
+      phases: [row(0, "complete"), row(1, "complete")],
+      artifacts: [art(0, "scorecard", "scorecard body"), art(1, "gate", "gate body")],
+    });
+    const fail = r.failures.find((f) => f.phase === 1);
+    assert.ok(fail, "P1 completed with only its bookkeeping gate row");
+    assert.equal(fail!.code, "RT_E_PLAN_UNDERPRODUCED");
+    assert.match(fail!.reason, /silent no-op/);
+  });
+
+  it("empty-bodied deliverables are named with RT_E_SUBSTANCE_EMPTY", () => {
+    const r = stageWiringReading({
+      phases: [row(1, "complete")],
+      artifacts: [art(1, "graph", "")],
+    });
+    const fail = r.failures.find((f) => f.phase === 1);
+    assert.equal(fail?.code, "RT_E_SUBSTANCE_EMPTY");
+  });
+
+  it("a phase missing its declared kind is a coded failure naming what it produced", () => {
+    const r = stageWiringReading({
+      phases: [row(4, "complete")],
+      artifacts: [art(4, "docs", "wrong kind")],
+    });
+    const fail = r.failures.find((f) => f.phase === 4);
+    assert.equal(fail?.code, "RT_E_PLAN_UNDERPRODUCED");
+    assert.match(fail!.reason, /no security artifact/);
+  });
+
+  it("a broken forward flow is named: the next stage completed with no deliverable", () => {
+    const r = stageWiringReading({
+      phases: [row(0, "complete"), row(1, "complete")],
+      artifacts: [art(0, "scorecard", "ok")],
+    });
+    const p0 = r.rows[0];
+    assert.equal(p0.flowsForward, false, "P0's output did not flow into a completed P1");
+    assert.ok(p0.reasons.some((x) => /outputs did not flow/.test(x.reason)));
+  });
+
+  it("a legitimately stopped run (P0–P6 complete, tail locked) is ok — a null flow is not a failure", () => {
+    const r = stageWiringReading({
+      phases: [0, 1, 2, 3, 4, 5, 6].map((id) => row(id, "complete")),
+      artifacts: [0, 1, 2, 3, 4, 5, 6].map((id) => art(id, PHASE_DELIVERABLE_KINDS[id as PhaseId][0], "body")),
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.rows[6].flowsForward, null, "P7 was never reached — a legitimate stop");
+  });
+
+  it("reads an unknown/garbled record defensively (no throw, zeroed census)", () => {
+    const r = stageWiringReading(null);
+    assert.equal(r.rows.length, 13);
+    assert.equal(r.ok, true, "no complete phase ⇒ no wiring failure");
+    assert.match(r.note, /0 of 13/);
+  });
+});
+
+describe("2026-10-06 — stage wiring: an empty DECLARED deliverable cannot hide behind another kind", () => {
+  it("a non-empty non-expected kind does not mask an empty expected kind (coded failure)", () => {
+    const r = stageWiringReading({
+      phases: [{ id: 4, status: "complete" }],
+      artifacts: [
+        { phase: 4, kind: "security", body: "" },
+        { phase: 4, kind: "docs", body: "plenty of bytes from the wrong kind" },
+      ],
+    });
+    const fail = r.failures.find((f) => f.phase === 4 && f.code === "RT_E_SUBSTANCE_EMPTY");
+    assert.ok(fail, "the empty security deliverable is named");
+    assert.match(fail!.reason, /declared security artifact is present but EMPTY/);
+    assert.equal(r.rows.find((x) => x.phase === 4)?.kindNonEmpty, false);
+  });
+
+  it("a non-empty expected kind passes (no false positive)", () => {
+    const r = stageWiringReading({
+      phases: [{ id: 4, status: "complete" }],
+      artifacts: [
+        { phase: 4, kind: "security", body: "real security body" },
+        { phase: 4, kind: "docs", body: "docs" },
+      ],
+    });
+    assert.equal(r.rows.find((x) => x.phase === 4)?.kindNonEmpty, true);
+    assert.equal(r.failures.some((f) => f.phase === 4), false);
   });
 });

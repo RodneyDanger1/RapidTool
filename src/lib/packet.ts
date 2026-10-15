@@ -185,6 +185,8 @@ function systemJson(
   coverage: PhaseCoverage,
   spend: PacketSpend | null,
   budget: TokenBudget | null,
+  gate: ReturnType<typeof runGate>,
+  blockedAt: PacketBlockedAt | null,
 ): string {
   // A3 (M3-14): the envelope reads three project collections directly — a
   // foreign `{}` payload must render the empty forms, never throw.
@@ -275,6 +277,40 @@ function systemJson(
         artifacts_from_p7_p12: coverage.tailArtifacts,
         empty_phases: coverage.emptyPhases,
       },
+      // 350 (packet honesty): the current edge's gate verdict PLUS the REAL
+      // class of evidence a PASS accepted (dod.ts runGate.evidenceClass/PASS
+      // is never "the product builds" — e.g. a green P6 gate's met evidence is
+      // EXECUTED tree-run spec tests, and the emitted package.json's declared
+      // typecheck/build were NOT run). `product_build_verified` is true only
+      // for a real built-artifact criterion; `qualification` names the
+      // weak-evidence pass (non-executed classes) with its code. Additive key
+      // (T-14 `phase_coverage` precedent); PACKET_VERSION stays 3.
+      gate: {
+        pass: gate.pass,
+        unmet: gate.unmet.length,
+        evidence_classes: gate.evidenceClass.classes,
+        product_build_verified: gate.evidenceClass.productBuildVerified,
+        qualification: gate.evidenceClass.qualification?.weak
+          ? {
+              weak: true,
+              note: gate.evidenceClass.qualification.note,
+              code: gate.evidenceClass.qualification.code ?? "RT_E_CLAIM_UNVERIFIED",
+            }
+          : null,
+      },
+      // D2(d) (2026-10-06): the stop edge — present ONLY when the run stopped
+      // on a gate (a `dod.blocked` row, or a `blocked` project). A clean seal
+      // omits the key, so every sealed packet stays byte-identical (the
+      // `spend`/`budget` omission precedent, not `tree_run`'s always-present
+      // null). See `packetBlockedAt`.
+      ...(blockedAt ? { blockedAt: { phase: blockedAt.phase, unmet: blockedAt.unmet } } : {}),
+      // 350: the PERSISTED machine tree-run verdict (types.ts `Project.treeRun`)
+      // — null when none is recorded. A recorded RED tree-run is stated here so
+      // a machine consumer can never read the packet as a green product simply
+      // because a later field (lastTest) is green. Additive key; version stays 3.
+      tree_run: project.treeRun
+        ? { ok: project.treeRun.ok === true, verdict: project.treeRun.verdict ?? null }
+        : null,
       // OV-41 (W23-L4): measured spend from the T-107.6 ledger — null = no
       // measured sample (never a fabricated 0). Additive key (T-14
       // `phase_coverage` precedent); PACKET_VERSION stays 3.
@@ -639,6 +675,56 @@ export type PacketProvenSeed = {
   score: number;
 };
 
+/**
+ * D2(d) (2026-10-06) — the stop edge a packet must name. A run that stopped on
+ * a gate instead of sealing carries `{phase, unmet[]}` (the stopping phase and
+ * its unmet DoD criterion ids); a clean seal carries nothing.
+ *
+ * WHY. The Agent Packet used to exist only on a clean 13-phase seal: an
+ * `enforceDod` run blocked at P6 never reached its terminal artifact. D2 makes
+ * the packet compile on ANY stop, and this is the field that states WHERE the
+ * run stopped — so a downstream agent reads "the harness stopped here" out of
+ * the same envelope that carries the mission, not out of prose alone.
+ *
+ * The stop signals are the two RECORDED ones: a `dod.blocked` warn row (the
+ * hard-DoD block `dod.hardDodBlockInto` writes) names the stopped phase; a
+ * `status:"blocked"` project (a rejected HITL park, or a blocked cursor) uses
+ * the current phase. A fresh/intake/ready edge is NOT a stop — a project that
+ * has not started has no stop edge to report — so those packets stay
+ * byte-identical (the key is omitted when null, the `spend` precedent).
+ */
+export type PacketBlockedAt = {
+  /** The phase whose DoD gate the run stopped on. */
+  phase: number;
+  /** Unmet DoD criterion ids at that gate (recorded when present, else runGate). */
+  unmet: string[];
+};
+
+/** Pure: the packet's stop edge, or null for a run that did not stop on a gate. */
+export function packetBlockedAt(project: Project): PacketBlockedAt | null {
+  if (!project || typeof project !== "object") return null;
+  const phases = Array.isArray(project.phases) ? project.phases : [];
+  const stopRow = (Array.isArray(project.logs) ? project.logs : [])
+    .slice()
+    .reverse()
+    .find((l) => l && l.event === "dod.blocked");
+  const stopPhase = stopRow
+    ? typeof stopRow.phase === "number"
+      ? stopRow.phase
+      : project.currentPhase
+    : project.status === "blocked"
+      ? project.currentPhase
+      : null;
+  if (stopPhase === null) return null;
+  const rec = phases.find((r) => r && r.id === stopPhase);
+  const recorded = rec?.gate;
+  const unmet =
+    recorded && recorded.passed === false && Array.isArray(recorded.unmet)
+      ? [...recorded.unmet]
+      : runGate(project, stopPhase).unmet.map((u) => u.id);
+  return { phase: stopPhase, unmet };
+}
+
 export function compileAgentPacket(
   project: Project,
   opts?: {
@@ -882,6 +968,16 @@ export function compileAgentPacket(
     : "";
   // H-05 (fixes/115): deterministic — derived from project state, never wall clock.
   const compiledAt = compiledAtFor(project);
+  // 335-3 (Transit): the current edge's exit criteria — the SAME registry +
+  // probe the DoD gate runs (runGate/`DOD`), rendered [x]/[ ] exactly as
+  // handoff.ts does. Computed BEFORE the machine envelope so the envelope can
+  // carry the REAL evidence class the gate recorded (dod.ts `evidenceClass`) —
+  // a green P6 gate must never be readable as "the emitted product builds".
+  // Defensive probe throws are already caught inside runGate's evaluate().
+  const gate = runGate(project, phase.id);
+  // D2(d): the stop edge the packet names when the run stopped on a gate. Null
+  // on a clean seal and on a not-yet-started edge (see packetBlockedAt).
+  const blockedAt = packetBlockedAt(project);
   const sysJson = systemJson(
     project,
     phase,
@@ -890,6 +986,8 @@ export function compileAgentPacket(
     coverage,
     spend,
     budget,
+    gate,
+    blockedAt,
   );
 
   // A3 (M3-15 family): a non-string notes field (foreign payload) must render,
@@ -928,12 +1026,6 @@ export function compileAgentPacket(
   const oracleRows = rows(project.oracle)
     .slice(0, 8)
     .map((t) => `- ${str(t?.name)}: ${str(t?.given)} ⇒ ${str(t?.expect)}`);
-  // 335-3 (Transit): the current edge's exit criteria — the SAME registry +
-  // probe the DoD gate runs (runGate/`DOD`), rendered [x]/[ ] exactly as
-  // handoff.ts:126-159 does. Without this the packet stated the rules and the
-  // report schema but never what "done" means for the edge the agent may work.
-  // Defensive probe throws are already caught inside runGate's evaluate().
-  const gate = runGate(project, phase.id);
   // 339-5 (Packet): render the unmet item's AUGMENTED `criterion` for red rows.
   // dod.ts (339-3) appends a state line to a failed state-probed criterion (the
   // deterministic-floor p6-brief-fit) and drops it from the bare registry item,
@@ -1046,12 +1138,31 @@ export function compileAgentPacket(
     `Status: ${project.status} · model: ${project.modelRoute}`,
     `Execution: ${sandboxClaim(sandbox)}`,
     generatedArtifactLine,
+    // 350: a RECORDED red machine tree-run is stated here so the current edge
+    // can never read as a green product while the persisted tree-run verdict
+    // is red. A green/absent tree-run stays silent (byte-identical packets).
+    ...(project.treeRun && project.treeRun.ok !== true
+      ? [
+          `Emitted tree run: RED (recorded) — the persisted machine tree-run verdict is not ok${
+            project.treeRun.verdictHash ? ` (verdict ${project.treeRun.verdictHash})` : ""
+          }; a green DoD gate below does not clear it.`,
+        ]
+      : []),
     // T-14 (106 §6, finding F-11): honest phase coverage in the rail. An
     // enforceDod run stopped at P6 executed 7 of 13 phases and left P7–P12 at 0
     // artifacts; the default advisory driver (gate-blind `canEnter`) does reach
     // the tail — see PHASE_TAIL_START. Either way this line reports the real
     // census so no surface implies all 13 ran.
     `Phase coverage: ${phaseCoverageLine(coverage)} — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).`,
+    // D2(d): the stop edge stated in the rail so a human (and the ingest
+    // instruction below) reads "the harness stopped here" from the same packet
+    // that is the run's terminal artifact. Omitted on a clean seal ⇒ sealed
+    // packets stay byte-identical.
+    ...(blockedAt
+      ? [
+          `Blocked at: P${blockedAt.phase} — the run stopped on a red DoD gate (${blockedAt.unmet.length} unmet: ${blockedAt.unmet.join(", ") || "n/a"}); this packet is the terminal artifact for that stop.`,
+        ]
+      : []),
     hitl,
     priorBlock,
     project.lastTest
@@ -1080,6 +1191,24 @@ export function compileAgentPacket(
     ``,
     `## Exit criteria (DoD)`,
     `Gate ${phase.code}: ${gate.pass ? "PASS" : "FAIL"} (${gate.unmet.length} unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.`,
+    // 350 (packet honesty): what a PASS's evidence actually attests. A green
+    // gate must never be read as "the emitted product builds" — the classes
+    // name the met evidence (e.g. executed tree-run spec tests, not a built
+    // artifact), and a weak (all-non-executed) pass is qualified LOUDLY with
+    // its code. Rendered only on PASS (a FAIL line already states the red), so
+    // every red packet stays byte-identical.
+    ...(gate.pass
+      ? [
+          `Evidence class (what this PASS verified): ${gate.evidenceClass.classes.join(", ") || "none"} — ${gate.evidenceClass.note}`,
+          `Product build verified: ${gate.evidenceClass.productBuildVerified ? "yes" : "no"} — a green gate is NOT a claim that the emitted product builds.`,
+          ...(gate.evidenceClass.qualification?.weak
+            ? [
+                `**QUALIFIED PASS (NOT product-complete)**: ${gate.evidenceClass.qualification.note}`,
+                `code: ${gate.evidenceClass.qualification.code ?? "RT_E_CLAIM_UNVERIFIED"}`,
+              ]
+            : []),
+        ]
+      : []),
     ...dodRows,
     ``,
     ...(ledgerRows.length
@@ -1258,6 +1387,11 @@ function truncateToBudget(assembled: string): string {
     return next === -1 ? text.slice(at) : text.slice(at, next);
   };
   const protectedBlocks = [
+    // 352: the current edge is the ONE section the consuming agent must still
+    // see — it carries the honest `Phase coverage: N of 13` census (T-14/F-11).
+    // Unprotected, a grown packet's truncation dropped the census and the rail
+    // read `null` instead of the real count.
+    "\n## Current edge\n",
     "\n## Exit criteria (DoD)\n",
     "\n## Artifacts (trimmed)\n",
     "\n## Research sources (live)\n",

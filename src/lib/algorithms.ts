@@ -1,5 +1,10 @@
 import { encode } from "gpt-tokenizer/encoding/cl100k_base";
 import { PHASES } from "./phases.ts";
+// sandbox.ts is a pure leaf over algorithms.ts's stemmer; importing its brief
+// vocabulary helpers (briefNounHits) back is a cycle only in the module-graph
+// sense — every cross-call happens at RUNTIME inside intentLattice, well after
+// both modules have initialized, and both directions export hoisted functions.
+import { briefNounHits } from "./sandbox.ts";
 import type {
   AlgorithmTrace,
   CrewSeat,
@@ -40,7 +45,7 @@ const STOP = new Set(
   ),
 );
 
-const LEX: Record<IntentLattice["nodes"][number]["kind"], string[]> = {
+export const LEX: Record<IntentLattice["nodes"][number]["kind"], string[]> = {
   actor: [
     "shop",
     "tech",
@@ -151,6 +156,30 @@ const LEX: Record<IntentLattice["nodes"][number]["kind"], string[]> = {
     "drag",
     "drop",
     "persist",
+    // 353 (lattice coverage): the six measured real-brief classes the register
+    // could not express — game/puzzle mechanics, log-analysis commands,
+    // dashboard computation, booking lifecycle, webhook delivery, and the
+    // local-first note/PWA verbs. Every term fires only on its own word form
+    // (word-boundary + stem), so none of them widen an unrelated brief's jobs.
+    "jump",
+    "swap",
+    "shuffle",
+    "compute",
+    "filter",
+    "sort",
+    "export",
+    "render",
+    "book",
+    "cancel",
+    "reschedule",
+    "confirm",
+    "subscribe",
+    "unsubscribe",
+    "deliver",
+    "retry",
+    "verify",
+    "import",
+    "receive",
     // 118 P-D3: real-estate / construction-trades jobs.
     "flip",
     "renovate",
@@ -282,6 +311,60 @@ const LEX: Record<IntentLattice["nodes"][number]["kind"], string[]> = {
     "job-cost",
     "site",
     "subcontractor",
+    // 353 (lattice coverage): the six measured real-brief classes' own product
+    // nouns — game/puzzle pieces and score, log-analysis artifacts, dashboard
+    // metrics, booking lifecycle nouns, webhook-delivery nouns, and local-first
+    // note/PWA nouns, plus the bakery/retail menu + cart. These are the
+    // single-mention nouns a brief names exactly once (a brief's REPEATED nouns
+    // are folded additively via `briefContentNouns`); each is a product concept
+    // rather than a generic connective, so it does not hijack an unrelated brief.
+    "game",
+    "coin",
+    "score",
+    "hud",
+    "sprite",
+    "tile",
+    "grid",
+    "puzzle",
+    "timestamp",
+    "fingerprint",
+    "endpoint",
+    "summary",
+    "revenue",
+    "metric",
+    "category",
+    "region",
+    "trend",
+    "churn",
+    "appointment",
+    "provider",
+    "slot",
+    "availability",
+    "confirmation",
+    "cancellation",
+    "bin",
+    "quantity",
+    "reorder",
+    "movement",
+    "supplier",
+    "barcode",
+    "webhook",
+    "subscription",
+    "signature",
+    "backoff",
+    "payload",
+    "note",
+    "tag",
+    "archive",
+    "markdown",
+    "manifest",
+    "shortcut",
+    "menu",
+    "cart",
+    "checkout",
+    "delivery",
+    "pickup",
+    "stock",
   ],
   constraint: [
     "same-day",
@@ -401,6 +484,77 @@ function phraseCount(bag: string[], term: string[]): number {
   return hits;
 }
 
+/**
+ * Generic action / connective / adjective words that clear briefNounHits'
+ * stoplist but are never a product's OWN vocabulary. Folding them would name
+ * "build"/"working" as entities; the frequency bar below already keeps a
+ * short generic brief ({@link intentLattice}'s `build a tool for my team
+ * please`) vocabulary-free, and this set keeps a long free-prose brief's
+ * verbs and adjectives out of the product nouns.
+ */
+const BRIEF_NOUN_GENERIC: ReadonlySet<string> = new Set([
+  // function words briefNounHits' stoplist does not carry
+  "as", "at", "it", "no", "not", "am", "pm", "com", "www", "https", "http",
+  "above", "below", "here",
+  // generic action / adjective / process words
+  "build", "built", "create", "created", "make", "made", "design", "designed",
+  "develop", "replace", "clone", "see", "show", "shown", "choose", "add", "use",
+  "used", "using", "get", "set", "keep", "give", "take", "run", "runs", "running",
+  "work", "working", "works", "need", "needs", "want", "wants", "include",
+  "includes", "including", "exactly", "actually", "currently", "current", "fully",
+  "almost", "fast", "faster", "slow", "new", "old", "good", "better", "best",
+  "great", "easy", "easier", "easily", "small", "large", "little", "short", "long",
+  "high", "low", "full", "empty", "clear", "simple", "professional", "production",
+  "quality", "standard", "generic", "original", "existing", "real", "more", "most",
+  "less", "least", "same", "other", "such", "very", "just", "also", "only", "even",
+  "still", "available", "availability", "offered", "offering", "based", "given",
+  "listed", "stated", "named", "day", "days", "date", "dates", "time", "times",
+  "hour", "hours", "year", "years", "today", "tomorrow", "page", "pages", "screen",
+  "screens", "site", "sites", "website", "websites", "platform", "platforms",
+  "content", "detail", "details", "facts", "info", "information", "note", "notes",
+  "example", "examples", "status", "state", "management", "manage", "config",
+  "configuration", "option", "options", "product", "products", "business", "online",
+  "email", "phone", "number", "address", "story", "redesign", "plan", "plans",
+]);
+
+/**
+ * The brief's own repeated content nouns — its product vocabulary beyond the
+ * LEX bank. Deterministic and LLM-free: frequency-ranked (count desc,
+ * first-seen asc) over `briefNounHits` (sandbox.ts), deduped by canonical
+ * stem, capped. Requires frequency ≥ 2 so a brief that merely repeats no noun
+ * stays vocabulary-free (the lattice's `vague`/fallback semantics); generic
+ * verbs/adjectives are filtered. `intentLattice` folds the result into
+ * `entities` (after LEX) and also exposes it as the additive `briefNouns`
+ * field — it never touches `jobs`/`nodes`/`complexity`.
+ */
+function briefContentNouns(brief: string, cap: number): string[] {
+  const { hits } = briefNounHits(typeof brief === "string" ? brief : "");
+  const counts = new Map<string, number>();
+  const order: string[] = [];
+  for (const t of hits) {
+    if (t.length < 3 || BRIEF_NOUN_GENERIC.has(t)) continue;
+    if (!counts.has(t)) {
+      counts.set(t, 0);
+      order.push(t);
+    }
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  // JS sort is stable — equal counts keep first-seen order (deterministic).
+  const ranked = order
+    .filter((t) => (counts.get(t) ?? 0) >= 2)
+    .sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of ranked) {
+    const stem = canonicalStem(t);
+    if (seen.has(stem)) continue;
+    seen.add(stem);
+    out.push(t);
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
 /** A1 — Intent Lattice */
 export function intentLattice(brief: string, domain: string): IntentLattice {
   // F2-84: never index/tokenize a non-string brief or domain — an empty brief
@@ -467,12 +621,31 @@ export function intentLattice(brief: string, domain: string): IntentLattice {
     unique.sort((a, b) => b.weight - a.weight);
   }
   const jobs = unique.filter((n) => n.kind === "job").map((n) => n.label);
-  const entities = unique.filter((n) => n.kind === "actor" || n.kind === "object").map((n) => n.label);
+  const lexEntities = unique.filter((n) => n.kind === "actor" || n.kind === "object").map((n) => n.label);
   const constraints = unique.filter((n) => n.kind === "constraint").map((n) => n.label);
-  // R2/B-02: vague ⇔ BOTH fallbacks fired (no jobs AND no entities came from
-  // brief vocabulary). The fallback arrays stay — A5/A6/A7 need ≥1 job; the
-  // honesty signal is the flag, not emptied arrays.
-  const vague = jobs.length === 0 && entities.length === 0;
+  // R2/B-02: vague ⇔ BOTH fallbacks fired (no jobs AND no LEX entities). Computed
+  // from the LEX-only lists so a vocabulary-free brief's flag is unchanged.
+  const vague = jobs.length === 0 && lexEntities.length === 0;
+  // 353 (lattice coverage): the brief's own repeated content nouns (see
+  // briefContentNouns) are folded into `entities` AFTER the LEX bank — deduped
+  // by canonical stem (so the LEX actor+object duplicate for one word, and the
+  // brief's own plural, collapse to one entry) and order-preserving. This is
+  // what makes a real brief's lattice name its own concepts (A5/A6/A7 and
+  // deriveTypeSignatures) instead of only the curated register; LEX stays the
+  // typed priority vote and the brief's nouns extend it. `jobs` stays LEX-only
+  // (the fold is nouns, not verbs); the `briefNouns` field itself is retained
+  // for engine.ts's product-phase naming.
+  const briefNouns = briefContentNouns(text, 12);
+  const entities: string[] = [];
+  {
+    const stems = new Set<string>();
+    for (const t of [...lexEntities, ...briefNouns]) {
+      const stem = canonicalStem(t);
+      if (stems.has(stem)) continue;
+      stems.add(stem);
+      entities.push(t);
+    }
+  }
   return {
     // A6b (325 BUG B): the lattice carries the COERCED domain (`dom`) — the
     // raw-param passthrough leaked null/42 onto `lattice.domain` (and
@@ -486,6 +659,7 @@ export function intentLattice(brief: string, domain: string): IntentLattice {
     nodes: unique.slice(0, 18),
     complexity: Math.min(10, 3 + unique.length * 0.45 + constraints.length),
     vague,
+    ...(briefNouns.length > 0 ? { briefNouns } : {}),
   };
 }
 
@@ -897,8 +1071,55 @@ export function buildTestOracle(lattice: IntentLattice): OracleTest[] {
 // (vague:true, or only the deliver-core-workflow fallback job — the sentinel
 // engine.ts:358 filters the same way) derives NOTHING, so every existing
 // deterministic/keyless path that never had capabilities keeps byte-parity.
+//
+// 353 (type-signature derivation): the derivation is CONSERVATIVE and
+// SELF-DESCRIBING — the emitted type names follow one uniform convention
+// (`<Job>Command` parameter, `<Job>Run[]` read row, brief-entity return) and a
+// guard makes every one of them a SOUND, DECLARABLE identifier: it can never
+// collide with a bare TS utility global (a standalone `Promise<Record>` is not a
+// valid type) and never starts with a non-identifier character. codegen's
+// `deriveInterfaceTypeDefinitions` (fixes/349) declares each referenced name in
+// every chunk prompt, so a floor signature the model never authored is always
+// satisfiable rather than a dangling TS2304; the capability itself is carried by
+// the function NAME, which is what binds it to its spec-graph job.
 // Pure + keyless: no store, no LLM, no time — safe anywhere runAlgorithms is.
 // ---------------------------------------------------------------------------
+
+/** TS utility/global type names that are invalid as a derived domain type — a
+ *  bare `Record`/`Promise` reference has no type argument and fails `tsc`. A
+ *  derived stem that collides gets the `Entry` suffix so it always resolves to a
+ *  declarable alias (mirrors codegen's `sanitizeFloorEntities`). */
+const TS_UTILITY_GLOBAL_TYPES: ReadonlySet<string> = new Set([
+  "Record", "Promise", "PromiseLike", "Array", "ReadonlyArray", "Readonly",
+  "Partial", "Required", "Pick", "Omit", "Exclude", "Extract", "NonNullable",
+  "ReturnType", "Parameters", "ConstructorParameters", "InstanceType", "ThisType",
+  "Uppercase", "Lowercase", "Capitalize", "Uncapitalize", "Function", "Object",
+  "String", "Number", "Boolean", "Symbol", "Map", "Set", "WeakMap", "WeakSet",
+  "Date", "RegExp", "Error", "JSON",
+]);
+
+const TS_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/** PascalCase a label into a sound, declarable type-name stem (never a bare TS
+ *  global, always a valid identifier start). Empty when the label has no word
+ *  characters, so the caller can skip it. */
+function safeTypeStem(name: string): string {
+  const P = pascal(name);
+  if (!P) return "";
+  if (TS_UTILITY_GLOBAL_TYPES.has(P)) return `${P}Entry`;
+  return TS_IDENTIFIER.test(P) ? P : `T${P}`;
+}
+
+/** Function-name stem: PascalCase, or `T`-prefixed when it cannot start an
+ *  identifier. Unlike a TYPE name, a function may be named `runRecord` (a bare
+ *  type `Record` is invalid; a function name is not), so utility globals are
+ *  left intact here and only the identifier start is guarded. */
+function safeFnStem(job: string): string {
+  const P = pascal(job);
+  if (!P) return "";
+  return TS_IDENTIFIER.test(P) ? P : `T${P}`;
+}
+
 export function deriveTypeSignatures(lattice: Pick<IntentLattice, "jobs" | "entities">): string[] {
   const jobs = (Array.isArray(lattice?.jobs) ? lattice.jobs : []).filter(
     (j): j is string => typeof j === "string" && j.trim().length > 0 && j !== "deliver-core-workflow",
@@ -908,14 +1129,14 @@ export function deriveTypeSignatures(lattice: Pick<IntentLattice, "jobs" | "enti
   );
   // Entity rotation: job i pairs with entity i (mod pool), so the run<Job>
   // return type names a real brief entity when the lattice carries one; a
-  // hand-built entity-free lattice falls back to the neutral `record`.
+  // hand-built entity-free lattice falls back to the neutral `RecordEntry`.
   const pool = entities.length > 0 ? entities : ["record"];
   const sigs: string[] = [];
   const seen = new Set<string>();
   jobs.forEach((job, i) => {
-    const P = pascal(job);
+    const P = safeFnStem(job);
     if (!P) return;
-    const E = pascal(pool[i % pool.length] ?? "record");
+    const E = safeTypeStem(pool[i % pool.length] ?? "record") || "RecordEntry";
     for (const line of [
       `run${P}(command: ${P}Command): Promise<${E}>`,
       `list${P}Runs(id: string, limit?: number): Promise<${P}Run[]>`,

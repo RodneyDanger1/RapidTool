@@ -16,7 +16,7 @@
 // never edits headless.ts.
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -24,7 +24,10 @@ import test from "node:test";
 import * as headless from "../../src/lib/headless.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TESTRUNS = existsSync(resolve(ROOT, "..", "testruns")) ? resolve(ROOT, "..", "testruns") : join(ROOT, "testruns");
+// B1-F1: the run root is the TRACKED in-repo fixture subset (`<repo>/testruns`),
+// so this suite is green on a clean checkout; `RAPIDTOOL_TESTRUNS` still
+// overrides for a host that keeps a larger run root elsewhere.
+const TESTRUNS = process.env.RAPIDTOOL_TESTRUNS || join(ROOT, "testruns");
 // Tolerate a UTF-8 BOM: the captured artifacts are rewritten by parallel runs
 // and a BOM is not a JSON token.
 const repair = JSON.parse(readFileSync(join(TESTRUNS, "bakery-florist-orders", "repair.json"), "utf8").replace(/^\uFEFF/, ""));

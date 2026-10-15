@@ -13,9 +13,11 @@
 // `src/lib/compile-check.server.ts`) and reads the real emitted bytes. Network /
 // LLM is the only boundary that may be cassetted (see README).
 //
-// Run root resolution: `RAPIDTOOL_TESTRUNS` env → `<repo>/testruns` →
-// `<repo>/../testruns` (the real run root this wave produced) →
-// `C:/Users/mnril/Desktop/testruns`.
+// Run root resolution: `RAPIDTOOL_TESTRUNS` env (highest priority) →
+// `<repo>/testruns` (the TRACKED fixture subset this repo ships) →
+// `<repo>/../testruns` (a sibling run root, when one exists). No absolute
+// developer-box path: the repo's fixtures are self-contained, so the harness is
+// green on a clean checkout (see B1-F1).
 // ---------------------------------------------------------------------------
 
 import { existsSync, readFileSync, readdirSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
@@ -28,10 +30,21 @@ import { spawnSync } from "node:child_process";
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const CASSETTE_DIR = join(REPO_ROOT, "scripts", "prevention", "cassettes");
 export const GUARD_REGISTRY_PATH = join(REPO_ROOT, "scripts", "guards", "guard-registry.json");
+/**
+ * The REVIEWED, immutable guard-count floor. It deliberately does NOT live in
+ * `guard-registry.json` (the same mutable file that lists the guards) nor as a
+ * constant the registry can override: `loadGuardFloor` reads this cassettes/
+ * fixture and `runAll` asserts it independently, so deleting a guard and
+ * lowering the registry `countFloor` in one edit still fails.
+ */
+export const GUARD_FLOOR_PATH = join(CASSETTE_DIR, "guard-floor.json");
 
 /**
- * Locate the frozen run root (`testruns/`). Env wins; then the repo-local path;
- * then this repo's sibling on the Desktop; then the known absolute path.
+ * Locate the frozen run root (`testruns/`): `RAPIDTOOL_TESTRUNS` wins, then the
+ * IN-REPO tracked fixture subset (`<repo>/testruns`), then a sibling
+ * `../testruns` (a larger run root, when the host has one). The absolute
+ * developer-box path is GONE (B1-F1): the repo ships its own fixtures, so a
+ * clean checkout resolves the same root this box does.
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {string|null}
  */
@@ -40,7 +53,6 @@ export function resolveRunRoot(env = process.env) {
   if (env.RAPIDTOOL_TESTRUNS) candidates.push(env.RAPIDTOOL_TESTRUNS);
   candidates.push(join(REPO_ROOT, "testruns"));
   candidates.push(resolve(REPO_ROOT, "..", "testruns"));
-  candidates.push("C:/Users/mnril/Desktop/testruns");
   for (const c of candidates) if (c && existsSync(c)) return c;
   return null;
 }
@@ -102,6 +114,31 @@ export function loadRubricBaselines(cassetteDir = CASSETTE_DIR) {
   const j = readJsonFile(join(cassetteDir, "rubric-baselines.json"));
   if (!j || j.__parseError || !Array.isArray(j.baselines)) return { present: false, treeCount: 0, baselines: [] };
   return { present: true, treeCount: Number(j.treeCount ?? j.baselines.length), baselines: j.baselines };
+}
+
+/**
+ * The reviewed guard-count floor + pinned guard-id set, read from
+ * `cassettes/guard-floor.json` (see GUARD_FLOOR_PATH). This is the authoritative
+ * floor; `guard-registry.json#countFloor` is only a second, weaker input that
+ * `runAll` refuses to let LOWER this one. Missing/unparseable ⇒ `present:false`,
+ * which `runAll` turns into a hard failure (fail closed — a missing floor can
+ * never mean the floor is 0).
+ * @returns {{present:boolean, countFloor:number, guardIds:string[], path:string, error?:string}}
+ */
+export function loadGuardFloor(cassetteDir = CASSETTE_DIR) {
+  const p = join(cassetteDir, "guard-floor.json");
+  const j = readJsonFile(p);
+  if (!j || j.__parseError || !Number.isFinite(j.countFloor)) {
+    return {
+      present: false,
+      countFloor: 0,
+      guardIds: [],
+      path: p,
+      error: j && j.__parseError ? j.__parseError : "guard-floor.json missing or carries no numeric countFloor",
+    };
+  }
+  const guardIds = Array.isArray(j.guardIds) ? j.guardIds.filter((x) => typeof x === "string" && x.trim()) : [];
+  return { present: true, countFloor: Number(j.countFloor), guardIds, path: p };
 }
 
 // ---------------------------------------------------------------------------
@@ -550,12 +587,31 @@ const SEAM_CHECKS = {
     const item = dod.DOD[6].find((c) => c && c.id === "p6-arch");
     if (!item || typeof item.probe !== "function") return ABSENT("DOD[6] has no p6-arch probe");
     const base = readJsonFile(join(ctx.runRoot, "office-stock-tracker", "build.json"));
-    const sentinel = { ...base, generatedTree: [], logs: [...(base && Array.isArray(base.logs) ? base.logs : []), { event: "p6.synthesis.attempt", detail: "keyed P6 synthesis attempted" }] };
+    if (!base) return ABSENT("fixture missing: office-stock-tracker/build.json");
+    // The SENTINEL is the real persisted project (its own logs already carry
+    // `p6.synthesis.*` rows) with one more dangling keyed attempt appended.
+    const sentinel = projectFixture({
+      ...base,
+      generatedTree: [],
+      logs: [...(Array.isArray(base.logs) ? base.logs : []), { event: "p6.synthesis.attempt", detail: "keyed P6 synthesis attempted" }],
+    });
+    // The CONTROL must BE the keyless floor. `{...base, generatedTree: []}` is
+    // NOT: office-stock-tracker/build.json already carries 6 `p6.synthesis.attempt`
+    // + 2 `p6.synthesis.refused` rows, so the fail-closed probe returns `false`
+    // for the control too and `mutationRed` could never be true (the permanent
+    // `pending`). The control is the same real bytes with every synthesis row
+    // removed - one variable changed - materialized as a real fixture file.
+    const keylessFloor = projectFixture({ ...withoutSynthesisRows(base), generatedTree: [] });
     return {
       present: true,
       wired: item.probe(sentinel) === false,
-      mutationRed: item.probe({ ...base, generatedTree: [] }) === true,
-      evidence: { sentinel: item.probe(sentinel), keylessNoTree: item.probe({ ...base, generatedTree: [] }) },
+      mutationRed: item.probe(keylessFloor) === true,
+      evidence: {
+        sentinel: item.probe(sentinel),
+        keylessFloor: item.probe(keylessFloor),
+        controlSynthesisRows: synthesisRowCount(keylessFloor),
+        fixtureSynthesisRows: synthesisRowCount(base),
+      },
     };
   },
 
@@ -803,6 +859,191 @@ function safeReadText(p) {
   } catch {
     return "";
   }
+}
+
+// ---------------------------------------------------------------------------
+// KEY-FIELD CANARIES (W356 `restore-guards`) — the anti-disarm contract.
+//
+// A driver that keys on a FIELD of a seam reading is silently disarmed when that
+// field is renamed, removed, or reshaped: it reports `fired:false`, which reads
+// exactly like "the historical defect is gone". A guard that can be disarmed by
+// renaming the field it reads is not a guard, so every declared key field is
+// probed against the REAL seam and a violation is folded into `missed` as a
+// CODED failure (`<canary:<guard>:<code>>` + a structured envelope), never as a
+// quiet non-fire.
+//
+// The code is a REGISTERED `ERROR_CODE_DOC` code (`RT_E_VALIDATION`: "Input or
+// model output failed validation and cannot be used" — the validation rule is the
+// declared key-field contract). Adding a NEW `RT_E_*` string here would add to
+// the 13 live-but-undocumented codes `fixes/355_0_audit_wave.md` L30 records,
+// and `src/lib/errors.ts` is out of this lane's scope.
+// ---------------------------------------------------------------------------
+
+/** The census verdict vocabulary `treeSubstanceOf` may return. */
+export const TREE_SUBSTANCE_VERDICTS = ["empty", "stub-skeleton", "mixed", "real"];
+
+/**
+ * C-06's key reading — the SHELL-DETECTING substance verdict. W356
+ * (`restore-census`) publishes the job-scoped census as the `jobScoped`
+ * sub-reading AND as the bare top-level alias; the shell reading is the one whose
+ * generated-job census has no files. The guard READS `jobScoped.verdict` and
+ * pins the top-level alias as a contract to CHECK: the A2-F3 defeat was exactly
+ * a re-point of the alias at the whole-tree census, which the guard must not be
+ * able to survive silently. `delivery-gate.test.mjs` also asserts the CLI's
+ * `substance.verdict === "empty"` on office-scheduler, i.e. the alias IS the
+ * shell reading on the gate-of-record surface.
+ */
+const SHELL_VERDICT_FIELD = "jobScoped.verdict";
+const SHELL_VERDICT_ALIAS = "verdict";
+/** The registered code every canary violation carries (see the block comment). */
+const CANARY_CODE = "RT_E_VALIDATION";
+
+/** C-06: the census shell reading + its documented top-level alias. */
+const CANARY_C06 = {
+  id: "C-06",
+  code: CANARY_CODE,
+  reading: "src/lib/compile-check.server.ts#treeSubstanceOf(...)",
+  field: SHELL_VERDICT_FIELD,
+  domain: TREE_SUBSTANCE_VERDICTS,
+  alias: SHELL_VERDICT_ALIAS,
+  observe: async (ctx) => {
+    const seams = await seamsFor(ctx);
+    const tree = ctx.trees.find((t) => t.slug === "office-scheduler" && t.tree === "emitted") || ctx.trees[0];
+    return seams.treeSubstanceOf(tree.dir, { green: true });
+  },
+};
+
+/** C-14: the `p6-arch` criterion's registry/probe contract (`dod.DOD[6]`). */
+const CANARY_C14 = {
+  id: "C-14",
+  code: CANARY_CODE,
+  reading: "src/lib/dod.ts#DOD[6] 'p6-arch'",
+  field: "probe",
+  domain: ["function"],
+  requireTrue: ["phase6IsArray", "itemFound"],
+  observe: async () => {
+    const dod = await importCached(SRC.dod);
+    const phase6 = dod && !dod.__error ? dod.DOD && dod.DOD[6] : undefined;
+    const item = Array.isArray(phase6) ? phase6.find((c) => c && c.id === "p6-arch") : undefined;
+    return { phase6IsArray: Array.isArray(phase6), itemFound: !!item, probe: typeof (item && item.probe) };
+  },
+};
+
+/**
+ * Every declared key-field canary. An entry names a reading, the field the guard
+ * keys on, the domain that field must stay in, and (optionally) an alias that
+ * must equal it and booleans that must hold. Extend this table when a driver
+ * starts keying on a new field — it is the difference between a guard and a
+ * rename-away default.
+ */
+export const KEY_FIELD_CANARIES = [CANARY_C06, CANARY_C14];
+
+/** Read a dotted path from an object; `undefined` when any hop is absent. */
+function readPath(obj, path) {
+  let cur = obj;
+  for (const hop of String(path).split(".")) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = cur[hop];
+  }
+  return cur;
+}
+
+/** The real seams, or the ctx override (replay/test injection). @param {any} ctx */
+async function seamsFor(ctx) {
+  return ctx && ctx.seams ? ctx.seams : loadSeams();
+}
+
+/** Build one coded canary violation. @param {any} entry @param {string} problem @param {any} actual @param {string} [where] */
+function canaryViolation(entry, problem, actual, where) {
+  return {
+    guard: entry.id,
+    code: entry.code,
+    problem,
+    reading: entry.reading,
+    field: entry.field,
+    expected: entry.domain.join("|"),
+    actual: actual === undefined ? "(missing)" : String(actual).slice(0, 120),
+    ...(where ? { where } : {}),
+  };
+}
+
+/**
+ * Validate one canary observation against its declared contract. Pure, so a
+ * planted shape change can be proven without editing the seam it reads.
+ * @param {any} entry @param {any} observed
+ * @returns {any|null} the violation, or null when the key field is intact.
+ */
+export function validateCanary(entry, observed) {
+  if (observed === null || typeof observed !== "object") {
+    return canaryViolation(entry, "key-reading-unavailable", observed);
+  }
+  for (const flag of entry.requireTrue || []) {
+    if (observed[flag] !== true) {
+      return canaryViolation(entry, `key-reading-shape-changed:${flag}`, observed[flag]);
+    }
+  }
+  const value = readPath(observed, entry.field);
+  if (value === undefined) return canaryViolation(entry, "key-field-missing", value);
+  if (!entry.domain.includes(value)) return canaryViolation(entry, "key-field-reshaped", value);
+  if (entry.alias !== undefined) {
+    const alias = readPath(observed, entry.alias);
+    if (alias === undefined) return canaryViolation(entry, "key-field-alias-missing", alias);
+    if (alias !== value) {
+      return canaryViolation(entry, "key-field-alias-repointed", `${entry.alias}=${alias} != ${entry.field}=${value}`);
+    }
+  }
+  return null;
+}
+
+/**
+ * Probe every declared canary against the REAL seam.
+ * @param {any} ctx
+ * @returns {Promise<{checked:string[], violations:any[]}>}
+ */
+export async function evaluateCanaries(ctx) {
+  const checked = [];
+  const violations = [];
+  for (const entry of KEY_FIELD_CANARIES) {
+    try {
+      const observed = await entry.observe(ctx);
+      const v = validateCanary(entry, observed);
+      if (v) violations.push(v);
+      else checked.push(entry.id);
+    } catch (e) {
+      violations.push({ ...canaryViolation(entry, "key-reading-threw", String(e && e.message ? e.message : e)), code: entry.code });
+    }
+  }
+  return { checked, violations };
+}
+
+// --- keyed-synthesis fixture helpers (the C-14 keyless floor) ----------------
+
+/** The keyed-synthesis event prefix `dod.newestSynthesisEvent` reads. */
+const SYNTHESIS_EVENT_PREFIX = "p6.synthesis.";
+
+/** How many `p6.synthesis.*` rows a project carries. @param {any} project */
+export function synthesisRowCount(project) {
+  const logs = project && Array.isArray(project.logs) ? project.logs : [];
+  return logs.filter((l) => l && typeof l.event === "string" && l.event.startsWith(SYNTHESIS_EVENT_PREFIX)).length;
+}
+
+/**
+ * The real persisted project with every keyed-synthesis row removed — the
+ * genuine KEYLESS FLOOR (one variable changed; every other byte is the real
+ * artifact). @param {any} project
+ */
+export function withoutSynthesisRows(project) {
+  const logs = project && Array.isArray(project.logs) ? project.logs : [];
+  return { ...project, logs: logs.filter((l) => !(l && typeof l.event === "string" && l.event.startsWith(SYNTHESIS_EVENT_PREFIX))) };
+}
+
+/**
+ * Materialize a project AS a real fixture file and read it back through the real
+ * reader: the controls under test are files on disk, not live object literals, so
+ * the seam reads exactly what a replay reads. @param {any} project
+ */
+export function projectFixture(project) {
+  return withScratch({ "build.json": JSON.stringify(project) }, (d) => readJsonFile(join(d, "build.json")));
 }
 
 // --- Campaign #1 (PR-28) seam -------------------------------------------------
@@ -1100,7 +1341,7 @@ function runCampaign2Invariants() {
   return PB.campaign2;
 }
 
-/** @type {Record<string, (ctx:any, guard:any)=>Promise<{fired:boolean,controlClean:boolean,skipped?:boolean,evidence:any}>>} */
+/** @type {Record<string, (ctx:any, guard:any)=>Promise<{fired:boolean,controlClean:boolean,skipped?:boolean,evidence:any,shapeViolations?:any[]}>>} */
 const DRIVERS = {
   "n/a": async () => ({ fired: false, controlClean: false, evidence: "no driver" }),
 };
@@ -1151,20 +1392,30 @@ DRIVERS["money"] = async (ctx) => {
 };
 
 DRIVERS["substance"] = async (ctx) => {
-  const seams = await loadSeams();
+  const seams = await seamsFor(ctx);
   const fired = [];
+  const shapeViolations = [];
   for (const t of ctx.trees) {
     let s;
     try { s = seams.treeSubstanceOf(t.dir, { green: true }); } catch (e) { return { fired: false, controlClean: false, evidence: "treeSubstanceOf error: " + e }; }
-    if (s && s.verdict === "empty") fired.push({ tree: `${t.slug}/${t.tree}`, verdict: s.verdict, real: s.real });
+    const shell = readPath(s, SHELL_VERDICT_FIELD);
+    // A missing/reshaped key field is a CANARY violation (a coded failure folded
+    // into `missed`), never a silent `fired:false` - see KEY_FIELD_CANARIES.
+    if (!TREE_SUBSTANCE_VERDICTS.includes(shell)) {
+      shapeViolations.push(canaryViolation(CANARY_C06, `key-field-${shell === undefined ? "missing" : "reshaped"}`, shell, `${t.slug}/${t.tree}`));
+      continue;
+    }
+    if (shell === "empty") {
+      fired.push({ tree: `${t.slug}/${t.tree}`, verdict: shell, real: s.real, wholeTree: readPath(s, "wholeTree.verdict") });
+    }
   }
   // Control: a tree with real modules must NOT be flagged empty.
   const control = ctx.trees.find((t) => t.slug === "bakery-website" && t.tree === "emitted");
   let controlClean = false;
   if (control) {
-    try { controlClean = seams.treeSubstanceOf(control.dir, { green: true }).verdict !== "empty"; } catch { controlClean = false; }
+    try { controlClean = readPath(seams.treeSubstanceOf(control.dir, { green: true }), SHELL_VERDICT_FIELD) !== "empty"; } catch { controlClean = false; }
   }
-  return { fired: fired.length > 0, controlClean, evidence: { empty: fired } };
+  return { fired: fired.length > 0, controlClean, shapeViolations, evidence: { empty: fired, shellField: SHELL_VERDICT_FIELD } };
 };
 
 DRIVERS["classifier"] = async (ctx) => {
@@ -1552,9 +1803,17 @@ export async function evaluateGuard(g, ctx) {
   const driver = DRIVERS[driverName];
   try {
     const r = await driver(ctx, g);
-    return { id: g.id, driver: driverName, fired: !!r.fired, controlClean: !!r.controlClean, skipped: !!r.skipped, evidence: r.evidence };
+    return {
+      id: g.id,
+      driver: driverName,
+      fired: !!r.fired,
+      controlClean: !!r.controlClean,
+      skipped: !!r.skipped,
+      shapeViolations: Array.isArray(r.shapeViolations) ? r.shapeViolations : [],
+      evidence: r.evidence,
+    };
   } catch (e) {
-    return { id: g.id, driver: driverName, fired: false, controlClean: false, skipped: false, detail: "driver error: " + String(e && e.message ? e.message : e) };
+    return { id: g.id, driver: driverName, fired: false, controlClean: false, skipped: false, shapeViolations: [], detail: "driver error: " + String(e && e.message ? e.message : e) };
   }
 }
 
@@ -1641,11 +1900,11 @@ export async function verifyHeldOut(cassettes, heldOut, _ctx) {
 // Orchestration.
 // ---------------------------------------------------------------------------
 
-/** Pinned floor: removing a registry entry must fail the gate of record (§4.6-3).
- *  Overridable by `countFloor` in the registry (now 34 — the 15 W346 guards, the
- *  five campaign #1 residual guards C1-01/02/05/06/08, the four campaign #2
- *  tourniquets R2-01/03/05/06, the five S4 final-wave pins S4-01..S4-05, and the
- *  five finish-wave pins D1-01/D2-01/D3-01/S3-01/G1-01). */
+/** Fallback floor ONLY when `cassettes/guard-floor.json` cannot be read at all
+ *  (that state is itself a hard failure, so this value can never weaken the
+ *  gate). The authoritative, reviewed floor is `loadGuardFloor()`; the registry's
+ *  own `countFloor` may only RAISE the effective floor, never lower it (fixes
+ *  the delete-a-guard-and-lower-countFloor-in-one-edit hole). */
 export const GUARD_COUNT_FLOOR = 34;
 
 /**
@@ -1694,7 +1953,24 @@ export async function runAll(ctx) {
   for (const c of cassettes) for (const t of c.trees) trees.push({ slug: c.slug, tree: t, dir: join(runRoot, c.slug, t) });
   const registry = ctx.registry ?? loadGuardRegistry(ctx.registryPath ?? GUARD_REGISTRY_PATH);
   const guards = registry.present && registry.guards.length ? registry.guards : defaultGuards();
-  const rc = { repoRoot: REPO_ROOT, runRoot, cassettes, trees, registry, runDir: (slug) => join(runRoot, slug) };
+  const rc = { repoRoot: REPO_ROOT, runRoot, cassettes, trees, registry, seams: ctx.seams, runDir: (slug) => join(runRoot, slug) };
+  // The floor is asserted INDEPENDENTLY of the mutable registry (fixes the
+  // delete-a-guard-and-lower-countFloor-in-one-edit hole). The reviewed floor
+  // plus the pinned guard-id set live in cassettes/guard-floor.json; the
+  // registry's own countFloor may only raise the effective floor, never lower
+  // it, and a registry that has dropped a pinned guard id fails outright.
+  const floor = ctx.guardFloor ?? loadGuardFloor(ctx.cassetteDir ?? CASSETTE_DIR);
+  const registryCountFloor = Number.isFinite(registry.countFloor) ? Number(registry.countFloor) : 0;
+  const registryIds = new Set(guards.map((g) => String(g.id)));
+  const floorViolations = [];
+  if (!floor.present) floorViolations.push(`guard-floor-missing (${floor.error || "no pinned floor"})`);
+  if (registryCountFloor < floor.countFloor) {
+    floorViolations.push(`registry-count-floor-lowered (registry ${registryCountFloor} < pinned ${floor.countFloor})`);
+  }
+  for (const id of floor.guardIds) {
+    if (!registryIds.has(id)) floorViolations.push(`guard-id-missing:${id}`);
+  }
+  const countFloor = Math.max(floor.countFloor, registryCountFloor);
   const results = [];
   for (const g of guards) {
     // Two orthogonal signals: fixture-integrity (historical detector) and
@@ -1705,6 +1981,7 @@ export async function runAll(ctx) {
       id: g.id,
       status: typeof g.status === "string" ? g.status : "enforced",
       driver: fx.driver,
+      shapeViolations: fx.shapeViolations,
       fixtureIntegrity: { fired: fx.fired, controlClean: fx.controlClean, skipped: fx.skipped, evidence: fx.evidence, detail: fx.detail },
       fixPresence: { present: seam.present, wired: seam.wired, mutationRed: seam.mutationRed, skipped: seam.skipped, evidence: seam.evidence },
     });
@@ -1723,22 +2000,36 @@ export async function runAll(ctx) {
   // C-19 meta-control: the pinned rubric baselines and the held-out cassette.
   const rubricBaselines = verifyRubricBaselines(cassettes, loadRubricBaselines(ctx.cassetteDir ?? CASSETTE_DIR), runRoot);
   const heldOut = await verifyHeldOut(cassettes, ctx.heldOutCassettes ?? loadHeldOutCassettes(ctx.cassetteDir ?? CASSETTE_DIR), rc);
+  // Key-field canaries: a declared key field that is missing/reshaped (or whose
+  // pinned alias was re-pointed) is a CODED failure, never a quiet `fired:false`.
+  const canaries = await evaluateCanaries(rc);
+  const canaryViolations = [...results.flatMap((r) => r.shapeViolations || []), ...canaries.violations];
   const missedAll = [...missed];
   if (!rubricBaselines.ok) missedAll.push("C-19:rubric-baselines");
   if (!heldOut.ok) missedAll.push("C-19:held-out");
   // The classification must be disjoint + total; a bookkeeping inconsistency is
   // itself a hard failure (never a silently-overlapping verdict).
   if (!fixPresenceInv.ok) missedAll.push("<fix-presence-classification>");
+  // An independent-floor violation is a hard failure too, named so the cause is
+  // visible in the same channel as a fixture miss.
+  for (const v of floorViolations) missedAll.push(`<floor:${v}>`);
+  for (const v of canaryViolations) missedAll.push(`<canary:${v.guard}:${v.code}>`);
   return {
     guards: results.length,
     count: results.length,
-    countFloor: Number.isFinite(registry.countFloor) ? registry.countFloor : GUARD_COUNT_FLOOR,
+    countFloor,
+    pinnedCountFloor: floor.countFloor,
+    registeredCountFloor: registryCountFloor,
+    guardFloor: { pinned: floor.countFloor, registry: registryCountFloor, authoritative: countFloor, present: floor.present, pinnedIds: floor.guardIds, path: floor.path },
+    floorViolations,
     historical: fired.length,
     fixtureIntegrity: { fired, missed: missedAll },
     fixPresence: { enforced, pending },
     fixPresenceInvariant: fixPresenceInv,
     rubricBaselines,
     heldOut,
+    canaries: { ok: canaryViolations.length === 0, checked: canaries.checked, violations: canaryViolations },
+    canaryViolations,
     // Top-level mirrors so a consumer can read the gate of record directly.
     fired,
     missed: missedAll,
@@ -1778,8 +2069,25 @@ export function finalize(verdict) {
   const pending = [...new Set(verdict.pending || [])];
   const skipped = [...new Set(verdict.skipped || [])];
   const count = Number(verdict.count ?? verdict.guards ?? 0);
-  const countFloor = Number(verdict.countFloor ?? 0);
+  // Defense in depth: the effective floor is the MAX of the verdict's own
+  // countFloor and the independently pinned floor, so a verdict object that
+  // smuggled in a lowered countFloor can never read `ok:true`. Any explicit
+  // floor violation is folded into `missed`.
+  const floorViolations = [...new Set(verdict.floorViolations || [])];
+  const pinnedFloor = Number(
+    (verdict.guardFloor && verdict.guardFloor.pinned) ?? verdict.pinnedCountFloor ?? 0,
+  );
+  const countFloor = Math.max(Number(verdict.countFloor ?? 0), Number.isFinite(pinnedFloor) ? pinnedFloor : 0);
   const countOk = count >= countFloor;
+  for (const v of floorViolations) missed.add(`<floor:${v}>`);
+  // Defense in depth for the key-field canaries: re-fold them from the verdict's
+  // own fields, so a verdict object that dropped a canary violation (or a caller
+  // that forged `missed:[]`) can never read `ok:true` while a guard's key field
+  // is missing or reshaped.
+  const canaryViolations = Array.isArray(verdict.canaryViolations)
+    ? verdict.canaryViolations
+    : (verdict.canaries && Array.isArray(verdict.canaries.violations) ? verdict.canaries.violations : []);
+  for (const v of canaryViolations) missed.add(`<canary:${v.guard}:${v.code}>`);
   // Defense in depth: recompute the classification invariant from the verdict's
   // own fields so an inconsistent object (an id in BOTH enforced and pending, or
   // in neither) can never read `ok:true`.
@@ -1795,8 +2103,11 @@ export function finalize(verdict) {
     count,
     countFloor,
     countOk,
+    floorViolations,
+    canaryViolations,
+    canaries: { ok: canaryViolations.length === 0, checked: (verdict.canaries && verdict.canaries.checked) || [], violations: canaryViolations },
     fixPresenceInvariant: inv,
-    ok: missedArr.length === 0 && pending.length === 0 && skipped.length === 0 && countOk && inv.ok,
+    ok: missedArr.length === 0 && pending.length === 0 && skipped.length === 0 && countOk && inv.ok && canaryViolations.length === 0,
   };
 }
 
@@ -1807,6 +2118,9 @@ export function formatVerdict(verdict) {
     guards: verdict.guards,
     count: verdict.count,
     countFloor: verdict.countFloor,
+    pinnedCountFloor: verdict.pinnedCountFloor,
+    guardFloor: verdict.guardFloor,
+    floorViolations: verdict.floorViolations,
     historical: verdict.historical,
     fixtureIntegrity: { fired: verdict.fired, missed: verdict.missed },
     fixPresence: { enforced: verdict.fixPresence.enforced, pending: verdict.pending },
@@ -1819,6 +2133,8 @@ export function formatVerdict(verdict) {
     fixPresenceInvariant: verdict.fixPresenceInvariant,
     rubricBaselines: verdict.rubricBaselines,
     heldOut: verdict.heldOut,
+    canaries: verdict.canaries,
+    canaryViolations: verdict.canaryViolations,
   });
 }
 

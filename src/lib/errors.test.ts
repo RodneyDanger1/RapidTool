@@ -544,6 +544,17 @@ describe("ERROR_CODE_DOC", () => {
     }
   });
 
+  it("350: RT_E_SPEC_VACUOUS is registered with an honest doc", () => {
+    assert.ok(
+      (ERROR_CODES as readonly string[]).includes("RT_E_SPEC_VACUOUS"),
+      "RT_E_SPEC_VACUOUS missing from ERROR_CODES",
+    );
+    const doc = ERROR_CODE_DOC.RT_E_SPEC_VACUOUS;
+    assert.ok(doc.meaning.trim().length > 0, "meaning is empty");
+    assert.ok(doc.agentAction.trim().length > 0, "agentAction is empty");
+    assert.match(doc.meaning, /vacuo|vacuity|no behavioural|shape/i, "the meaning names the class");
+  });
+
   it("W61 final wave G-2: every guard-registry expectedCode resolves in ERROR_CODE_DOC", () => {
     // The proof layer names failure codes as `expectedCode`; a code only the
     // registry believes in is aspirational. Every `RT_E_*` it references must

@@ -33,7 +33,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSchemaSql, declaresUiSurface, deliveryKindOf, filterOffIntentResearch, hydrateProject, inferDomain, inferName, isOffIntentResearch, liveLayer, recordPhaseSpend, rejectHitl, repairPhases, researchQueryText, stripOutOfScope, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSchemaSql, declaresUiSurface, deliveryKindOf, DOMAIN_TERMS, filterOffIntentResearch, filterRelevantResearch, hydrateProject, inferDomain, inferName, isOffIntentResearch, liveLayer, phaseGroundedArtifact, priorArtifactContext, recordPhaseSpend, rejectHitl, repairPhases, researchQueryFor, researchQueryText, stageWiringLogRows, stripOutOfScope, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { BRIEF_CORE_REGISTER } from "./sandbox.ts";
+import { runGate } from "./dod.ts";
 import { exportProjectJson, importProject } from "./io.ts";
 import { normalizeLedger, recordSessionSpend, resetSessionBudget, sessionTokenBudget, type TokenSpend } from "./token-ledger.ts";
 import { wildResumeRun } from "./headless.ts";
@@ -289,6 +291,32 @@ describe("T4 · 112 §4.4 — deps.proven is additive on the engine's keyless P6
         withProven.logs.map((l) => l.event),
         plain.logs.map((l) => l.event),
         "keyless log events unchanged (proven mints no row)",
+      );
+    } finally {
+      if (saved === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = saved;
+    }
+  });
+
+  it("liveLayer(p, 2) keyless is the deterministic floor — the grounded-artifact seam never fabricates", async () => {
+    const saved = process.env.DEEPSEEK_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
+    try {
+      const p = emptyProject({
+        name: "Grounded",
+        brief: "A bakery website with a donut menu, order pickup and local delivery.",
+      });
+      const floor = applyPhaseResult(p, 2);
+      const live = await liveLayer(p, 2);
+      assert.deepEqual(
+        live.artifacts.map((a) => a.title),
+        floor.artifacts.map((a) => a.title),
+        "keyless: no grounded phase artifact is fabricated",
+      );
+      assert.equal(
+        live.logs.some((l) => l.event === "p2.live.artifact.failed"),
+        false,
+        "keyless: the grounded seam emits no degrade row",
       );
     } finally {
       if (saved === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -1045,7 +1073,7 @@ describe("W61 C6 - deepenResearch empty-corpus guard", () => {
 describe("W61 C9 - intent-first research query + off-intent filter", () => {
   const p0Intent = "architecture feasibility 2026";
 
-  it("the phase intent leads; at most 3 domain qualifiers follow", () => {
+  it("the phase intent leads; the business name is present; ≤3 ADDED qualifiers follow", () => {
     const p = emptyProject({
       name: "Golden Crust Bakery",
       brief:
@@ -1054,12 +1082,56 @@ describe("W61 C9 - intent-first research query + off-intent filter", () => {
     p.domain = "web-marketing";
     const q = researchQueryText(p, p0Intent);
     assert.ok(q.startsWith(p0Intent), `the phase intent leads (got: ${q})`);
+    // W61 C9 fix: the business NAME is guaranteed in the query.
+    for (const tok of ["golden", "crust", "bakery"]) {
+      assert.ok(q.includes(tok), `the business name token ${tok} must appear (got: ${q})`);
+    }
     const qualifiers = q.slice(p0Intent.length).trim().split(/\s+/).filter(Boolean);
-    assert.ok(qualifiers.length >= 1, "at least one domain qualifier rides along");
+    const added = qualifiers.length - 3; // the 3-name unit, then the capped additions
+    assert.ok(added >= 1, "at least one ADDED qualifier rides along besides the name");
     assert.ok(
-      qualifiers.length <= 3,
-      `at most 3 domain qualifiers (got ${qualifiers.length}: ${qualifiers.join(" ")})`,
+      added <= 3,
+      `at most 3 added qualifiers (got ${added}: ${qualifiers.join(" ")})`,
     );
+  });
+
+  it("P0/P7/P11 topics are domain-aware and the business name rides every query", () => {
+    const p = emptyProject({
+      name: "Bloedow Bakery",
+      brief:
+        "# Bloedow Bakery\n\nA bakery website with a donut menu, order pickup, local delivery and preorder.",
+    });
+    p.domain = "web-marketing";
+    const q0 = researchQueryFor(p, 0);
+    const q7 = researchQueryFor(p, 7);
+    const q11 = researchQueryFor(p, 11);
+    assert.ok(q0.startsWith("website "), `P0 topic names the domain (got: ${q0})`);
+    assert.ok(q7.startsWith("website "), `P7 topic names the domain (got: ${q7})`);
+    assert.ok(q11.startsWith("website "), `P11 topic names the domain (got: ${q11})`);
+    for (const q of [q0, q7, q11]) {
+      assert.ok(q.includes("bloedow") && q.includes("bakery"), `name in every query (got: ${q})`);
+    }
+    // The software intent is preserved so the engineering blocklist still applies.
+    assert.ok(q0.includes("architecture") && q0.includes("feasibility"), "P0 keeps the engineering intent");
+  });
+
+  it("a domain with no descriptor keeps the legacy software topic (additive-only)", () => {
+    const p = emptyProject({ name: "Shiftline", brief: "An internal scheduling tool for a small office." });
+    p.domain = "custom-software";
+    const q = researchQueryFor(p, 0);
+    assert.ok(q.startsWith("architecture feasibility 2026"), `legacy P0 intent preserved (got: ${q})`);
+    assert.ok(q.includes("shiftline"), "the business name still rides the query");
+  });
+
+  it("the register carries the web-marketing and retail category fallbacks", () => {
+    const web = emptyProject({ name: "Bloom", brief: "" });
+    web.domain = "web-marketing";
+    const qWeb = researchQueryText(web, "competitors");
+    assert.ok(qWeb.includes("website"), `web-marketing register fallback present (got: ${qWeb})`);
+    const shop = emptyProject({ name: "Bloom", brief: "" });
+    shop.domain = "retail";
+    const qShop = researchQueryText(shop, "competitors");
+    assert.ok(qShop.includes("storefront"), `retail register fallback present (got: ${qShop})`);
   });
 
   it("a mislabeled real-estate domain no longer makes the domain bag lead", () => {
@@ -1104,6 +1176,66 @@ describe("W61 C9 - intent-first research query + off-intent filter", () => {
       "P7 market-landscape research is not subject to the engineering blocklist",
     );
   });
+
+  it("filterRelevantResearch drops by RELEVANCE, not one hardcoded vertical", () => {
+    const p = emptyProject({
+      name: "Bloedow Bakery",
+      brief: "A bakery website with a donut menu, order pickup, delivery and preorder.",
+    });
+    p.domain = "web-marketing";
+    const onIntent = {
+      title: "Bloedow Bakery — donuts, breads and cakes",
+      url: "https://example.com/bloedow",
+      content: "Order pickup and local delivery.",
+    };
+    const rental = {
+      title: "Apartments for Rent in Winona, MN",
+      url: "https://www.apartments.com/winona-mn/",
+      content: "Find your next rental home.",
+    };
+    const unrelated = {
+      title: "Enterprise ERP implementation trends",
+      url: "https://example.com/erp",
+      content: "A generic business-software overview.",
+    };
+    const { accepted, dropped } = filterRelevantResearch(p, 0, [onIntent, rental, unrelated]);
+    assert.deepEqual(accepted, [onIntent], "only the on-intent result survives");
+    assert.deepEqual(dropped, [rental, unrelated], "both the rental AND the unrelated result are dropped");
+  });
+
+  it("filterRelevantResearch partitions without reordering and keeps an intent-only match", () => {
+    const p = emptyProject({ name: "Bloedow Bakery", brief: "A bakery website for donut orders." });
+    p.domain = "web-marketing";
+    const a = { title: "A note on donut order workflows", url: "https://example.com/a" };
+    // Matches only the phase intent ("architecture"), which is enough to be on-intent.
+    const b = { title: "Software architecture overview", url: "https://example.com/b" };
+    const c = { title: "Apartments for Rent", url: "https://example.com/c" };
+    const { accepted, dropped } = filterRelevantResearch(p, 0, [a, b, c]);
+    assert.deepEqual(accepted, [a, b], "on-intent results are kept in input order");
+    assert.deepEqual(dropped, [c], "the off-intent result is dropped");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W62 C9(b) — the product phases name the brief's OWN nouns (lattice.briefNouns
+// folded by A1 and merged into productNouns). Before: P4 printed the LEX bank's
+// generic nouns for every brief.
+// ---------------------------------------------------------------------------
+describe("W62 C9(b) — P2/P4 name the brief's own nouns", () => {
+  const brief =
+    "# Bloedow Bakery\n\nA bakery website. The menu lists donut, bread and cake. Order a donut or a cake. Pickup or delivery: order a donut, cake and bread.";
+
+  it("folds the brief's nouns into the lattice and emits them in P2 and P4", () => {
+    const p = emptyProject({ name: "Bloedow Bakery", brief });
+    p.domain = "web-marketing";
+    assert.ok(p.lattice?.briefNouns?.includes("donut"), `lattice folded donut (got: ${p.lattice?.briefNouns?.join(",")})`);
+    const p2 = applyPhaseResult(p, 2);
+    const p4 = applyPhaseResult(p, 4);
+    const bodyOf = (proj: typeof p, phase: number) =>
+      proj.artifacts.filter((a) => a.phase === phase).map((a) => a.body).join("\n");
+    assert.ok(bodyOf(p2, 2).includes("donut"), `P2 must name donut (got: ${bodyOf(p2, 2).slice(0, 160)})`);
+    assert.ok(bodyOf(p4, 4).includes("donut"), `P4 must name donut (got: ${bodyOf(p4, 4).slice(0, 160)})`);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1132,5 +1264,260 @@ describe("349 L3 — every phase 0..12 records ≥1 artifact with a non-empty bo
         `P${def.id} ${def.title}: every recorded artifact has an empty body`,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W62 · C1-07 remediation — a lone DECISIVE register hit survives the
+// UI-surface demotion (a bakery website is web-marketing), while a lone
+// INCIDENTAL hit (the held-out tool library's "catalogue") still demotes.
+// ---------------------------------------------------------------------------
+describe("W62 C1-07 — inferDomain trusts a DECISIVE lone hit, not an incidental one", () => {
+  const SHORT = "A bakery website with a donut menu, order pickup and local delivery.";
+  const LONG =
+    "# Bloedow Bakery\n\nA bakery website. The menu lists donut, bread and cake. Order a donut or a cake. Pickup or delivery: order a donut, cake and bread.";
+
+  it("the canonical short bakery brief infers web-marketing (was custom-software)", () => {
+    assert.equal(inferDomain(SHORT), "web-marketing");
+  });
+
+  it("the long Bloedow brief infers web-marketing", () => {
+    assert.equal(inferDomain(LONG), "web-marketing");
+  });
+
+  it("a lone incidental register hit on a UI brief still demotes to custom-software", () => {
+    // "catalogue" is a web-marketing term but NOT decisive — the held-out
+    // tool-library brief carries it (and a dashboard) and must stay
+    // custom-software. This is the exact class the C1-07 ≥2 rule protects.
+    const heldOutShape =
+      "A community tool library lets members borrow shared tools. Browse the catalogue and reserve a tool; " +
+      "manage the catalogue and overdue loans. A dashboard lists overdue loans.";
+    assert.equal(inferDomain(heldOutShape), "custom-software");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W62 · C1-07 remediation — a valid brief that names product objects but hits
+// no LEX job/entity must NOT seal `vague` (which failed p0-verdict +
+// p0-brief-grounded and hard-blocked a keyed enforceDod run at P0).
+// ---------------------------------------------------------------------------
+describe("W62 C1-07 — a vocabulary-bearing brief with no LEX hit still passes P0", () => {
+  const SHORT = "A bakery website with a donut menu, order pickup and local delivery.";
+
+  it("the short bakery brief is not vague and its P0 gate passes", () => {
+    const p = emptyProject({ name: "Bloedow", brief: SHORT });
+    assert.equal(p.lattice?.vague, false, "the brief names product objects, so it is not vocabulary-free");
+    const after = applyPhaseResult(p, 0);
+    assert.notEqual(after.scorecard?.verdict, "reframe");
+    const gate = runGate(after, 0);
+    assert.equal(gate.pass, true, `P0 must pass (unmet: ${gate.unmet.map((g) => g.id).join(", ")})`);
+    assert.equal(gate.unmet.length, 0);
+  });
+
+  it("a genuinely vocabulary-free brief stays vague and still parks reframe", () => {
+    const p = emptyProject({ name: "Vague", brief: "hi" });
+    assert.equal(p.lattice?.vague, true);
+    assert.equal(applyPhaseResult(p, 0).scorecard?.verdict, "reframe");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W62 · C1-07 remediation — the DOMAIN_TERMS register cannot silently drift
+// from sandbox.ts's BRIEF_CORE_REGISTER (the comment there claimed a pin that
+// did not exist; the register was missing every web/retail/mobile term).
+// ---------------------------------------------------------------------------
+describe("W62 C1-07 — DOMAIN_TERMS cannot silently drift from BRIEF_CORE_REGISTER", () => {
+  it("every live DOMAIN_TERMS value is present in BRIEF_CORE_REGISTER", () => {
+    const live = [...new Set(Object.values(DOMAIN_TERMS).flat())];
+    const missing = live.filter((t) => !BRIEF_CORE_REGISTER.has(t));
+    assert.deepEqual(
+      missing,
+      [],
+      `BRIEF_CORE_REGISTER (src/lib/sandbox.ts) is missing live DOMAIN_TERMS values: ${missing.join(", ")}`,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W62 · C1-07 remediation — the P1-P5 templates must not claim evidence they
+// do not have: P2 asserts declared contracts (never observed reads/writes),
+// P3 never emits a placeholder that claims the brief named services, P5 states
+// the learning loop's real state instead of a constant "no loop behind it".
+// ---------------------------------------------------------------------------
+describe("W62 C1-07 — P1-P5 artifacts declare, never fabricate", () => {
+  const bodyOf = (proj: Project, phase: PhaseId): string =>
+    (proj.artifacts ?? [])
+      .filter((a) => a.phase === phase)
+      .map((a) => a.body)
+      .join("\n");
+
+  it("P2 presents the DECLARED data contract and never asserts observed reads/writes", () => {
+    const p = emptyProject({ name: "Bloedow", brief: "A bakery website with a donut menu, order pickup and local delivery." });
+    const body = bodyOf(applyPhaseResult(p, 2), 2);
+    assert.ok(!body.includes("read and write"), "no fabricated read/write claim");
+    assert.ok(body.includes("DECLARATION"), "the persistence model is labelled a declaration");
+  });
+
+  it("P3/P11 never emit the 'external services named by the brief' placeholder", () => {
+    for (const brief of [
+      "A bakery website with a donut menu, order pickup and local delivery.",
+      "An internal tool for a small office team.",
+    ]) {
+      const proj = emptyProject({ name: "X", brief });
+      for (const phase of [3, 11] as PhaseId[]) {
+        const body = bodyOf(applyPhaseResult(proj, phase), phase);
+        assert.ok(
+          !body.includes("external services named by the brief"),
+          `P${phase} placeholder leaked for: ${brief}`,
+        );
+      }
+    }
+  });
+
+  it("P5 states the learning loop's real state, not a constant 'no loop behind it'", () => {
+    const p = emptyProject({ name: "Bloedow", brief: "A bakery website with a donut menu, order pickup and local delivery." });
+    const body = bodyOf(applyPhaseResult(p, 5), 5);
+    assert.ok(!body.includes("no loop behind it"), "the stale constant claim is struck");
+    assert.ok(body.includes("IMPLEMENTED"), "the implemented half of the loop is named");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W62 · C1-07 remediation — the learning loop is no longer write-only for
+// P1-P5: a human reject mints an L5 correction lesson (its first production
+// caller) that the next regeneration reads back into the artifact.
+// ---------------------------------------------------------------------------
+describe("W62 C1-07 — a human reject's lesson reaches the next regeneration", () => {
+  it("mints an L5 correction lesson and reads it back into the regenerated P4 artifact", async () => {
+    await import("./knowledge.ts"); // resolve the lazy lesson seam (H2 pattern)
+    const p = emptyProject({
+      name: "Ledgeline",
+      brief: "An office invoice tracker with a supplier list, invoice records and payment rows.",
+    });
+    p.currentPhase = 4;
+    const gated = applyPhaseResult(p, 4);
+    const rejected = rejectHitl(gated, "The security policy must name every protected entity explicitly.");
+    assert.ok(
+      (rejected.memory ?? []).some((m) => m.id.startsWith("lesson-user-correction-")),
+      "rejectHitl is a production caller of correctionLesson",
+    );
+    const again = applyPhaseResult(rejected, 4);
+    assert.ok(
+      bodyOf(again, 4).includes("Lessons carried from prior runs"),
+      "the minted lesson is read back into the next attempt's artifact",
+    );
+  });
+});
+
+function bodyOf(proj: Project, phase: PhaseId): string {
+  return (proj.artifacts ?? [])
+    .filter((a) => a.phase === phase)
+    .map((a) => a.body)
+    .join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// 2026-10-06 — pipeline fixes (items 1/2/3). Context flow, coded empty stages,
+// and a relevance filter that no longer keeps a body-only generic-term hit.
+// ---------------------------------------------------------------------------
+describe("2026-10-06 — pipeline flow, coded empty stages and the research floor", () => {
+  it("filterRelevantResearch drops a body-only generic-term hit below the floor", () => {
+    // The measured defect: a Wikipedia "Pixar" page matched the generic term
+    // `software` in its BODY only and scored 0.042 — it must not earn the corpus.
+    const p = emptyProject({
+      name: "Sky Hopper",
+      brief: "A 2D browser arcade game: jumping, platforms, coins and a high score.",
+    });
+    const junk = {
+      title: "Pixar",
+      url: "https://en.wikipedia.org/wiki/Pixar",
+      content: "The animation studio's feature won a musical score award.",
+    };
+    const { accepted, dropped } = filterRelevantResearch(p, 0, [junk]);
+    assert.deepEqual(accepted, [], "a body-only generic-term hit is not on-intent");
+    assert.deepEqual(dropped, [junk]);
+  });
+
+  it("filterRelevantResearch keeps a result whose TITLE/URL carries a query term", () => {
+    const p = emptyProject({
+      name: "Sky Hopper",
+      brief: "A 2D browser arcade game: jumping, platforms, coins and a high score.",
+    });
+    const onIntent = { title: "Sky Hopper game tutorial", url: "https://example.com/x", content: "" };
+    const { accepted, dropped } = filterRelevantResearch(p, 0, [onIntent]);
+    assert.deepEqual(accepted, [onIntent], "a title term is a claim about the page's subject");
+    assert.deepEqual(dropped, []);
+  });
+
+  it("stageWiringLogRows codes a complete phase that produced nothing (never a silent pass)", () => {
+    const stripped = {
+      phases: [{ id: 1, status: "complete" }],
+      artifacts: [{ phase: 1, kind: "gate", body: "gate row is bookkeeping" }],
+      logs: [],
+    };
+    const rows = stageWiringLogRows(stripped as unknown as Project, 1);
+    assert.equal(rows.length, 2, "no deliverable + no graph kind are both coded");
+    assert.ok(rows.every((r) => r.event === "p1.stage.unwired" && r.level === "warn"));
+    assert.match(rows[0].detail, /RT_E_PLAN_UNDERPRODUCED · P1 completed with NO deliverable/);
+    assert.ok(rows.some((r) => /produced no graph artifact/.test(r.detail)));
+    // Idempotent: the same record yields no duplicate row.
+    const once = { ...stripped, logs: rows };
+    assert.deepEqual(stageWiringLogRows(once as unknown as Project, 1), []);
+  });
+
+  it("a healthy phase is inert: applyPhaseResult writes no stage.unwired row", () => {
+    const p = emptyProject({
+      name: "Bloedow Bakery",
+      brief: "A bakery website with a donut menu, order pickup and local delivery.",
+    });
+    const done = applyPhaseResult(p, 1);
+    assert.deepEqual(stageWiringLogRows(done, 1), []);
+    assert.equal(done.logs.some((l) => l.event === "p1.stage.unwired"), false);
+  });
+
+  it("the grounded deliverable pins thinking OFF (E1 starvation) and threads prior artifacts", async () => {
+    const base = emptyProject({
+      name: "Grounded",
+      brief: "A bakery website with a donut menu, order pickup and local delivery.",
+    });
+    // The real call passes the applied record, so the deterministic template
+    // for this phase is already present beside the model artifact.
+    const p = applyPhaseResult(base, 2);
+    const seen: Array<{ prompt: string; opts: { thinking?: boolean; maxTokens?: number } }> = [];
+    const completer = async (prompt: string, opts?: { thinking?: boolean; maxTokens?: number }) => {
+      seen.push({ prompt, opts: opts ?? {} });
+      return { ok: true as const, text: "# P2 deliverable", model: "stub" };
+    };
+    const r = await phaseGroundedArtifact(p, 2, completer);
+    assert.equal(r.ok, true);
+    assert.equal(
+      seen[0].opts.thinking,
+      false,
+      "measured live: thinking ON + a bounded window returned reasoning only (empty content) — E1",
+    );
+    assert.ok((seen[0].opts.maxTokens ?? 0) >= 2000, "the artifact window has headroom for a heading + body");
+    assert.match(seen[0].prompt, /Produce the REAL deliverable for phase P2/);
+    assert.match(seen[0].prompt, /# Prior phase artifacts/);
+    // Item 4: the deterministic template beside the artifact is rendered, with
+    // an explicit no-silent-contradiction rule and the authority statement.
+    assert.match(seen[0].prompt, /# Deterministic template shipped beside your artifact/);
+    assert.match(seen[0].prompt, /Data model & retrieval/);
+    assert.match(seen[0].prompt, /do NOT silently contradict it/);
+    assert.match(seen[0].prompt, /Your artifact is the authoritative deliverable for this phase/);
+  });
+
+  it("priorArtifactContext feeds earlier phases forward, excluding the current phase and bookkeeping", () => {
+    const p = emptyProject({
+      name: "Bloedow Bakery",
+      brief: "A bakery website with a donut menu, order pickup and local delivery.",
+    });
+    assert.deepEqual(priorArtifactContext(p, 0), [], "P0 has nothing before it");
+    let acc = p;
+    for (let phase = 0; phase <= 2; phase++) acc = applyPhaseResult(acc, phase as PhaseId);
+    const ctx = priorArtifactContext(acc, 3);
+    assert.ok(ctx.length > 0, "P3 sees the earlier phases' deliverables");
+    assert.equal(ctx.some((c) => c.phase >= 3), false, "the current phase never rides its own context");
+    assert.equal(ctx.some((c) => c.title === "Agent packet (A4)"), false, "the packet row is bookkeeping");
+    assert.equal(ctx.some((c) => c.title.startsWith("DoD gate")), false, "gate rows are bookkeeping");
   });
 });

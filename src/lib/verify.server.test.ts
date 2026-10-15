@@ -1836,6 +1836,24 @@ describe("345 L1-F2 — shape-only case sets cannot certify behaviour", () => {
       restoreKey();
     }
   });
+
+  it("350: a genuine pass states the executed-assertion floor (iterations >= 1, executedAssertions >= 1, no code)", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([{ cases: [{ id: "c1", expression: "add(2,3) === 5" }] }]);
+    try {
+      const outcome = await verifyAndFixServer("exports.add = (a, b) => a + b;", "", { maxIterations: 1 });
+      assert.equal(outcome.status, "passed", JSON.stringify(outcome));
+      assert.ok((outcome.iterations ?? 0) >= 1, "a pass reports a real executed loop iteration");
+      assert.ok(
+        (outcome.executedAssertions ?? 0) >= 1,
+        "the honest producer states the executed-assertion floor",
+      );
+      assert.equal(outcome.code, undefined, "a pass carries no error code (never dual-channel)");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

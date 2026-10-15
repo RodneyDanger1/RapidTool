@@ -39,6 +39,7 @@ import {
   markerPathFor,
   MAX_HISTORY_ROWS,
   parseGrader,
+  persist,
   passAtK,
   passCaretK,
   passesAcceptance,
@@ -816,10 +817,16 @@ test("342-2: drainPipeline threads researchLive to the research phase (keyless f
     const url = String(input);
     calls.push(url);
     if (url.includes("lite.duckduckgo.com")) {
-      const target = encodeURIComponent("https://example.com/breakout-guide");
+      // The fixture must be ON-TOPIC for the project: W61 C9's relevance filter
+      // (engine.filterRelevantResearch, applied by the headless overlay) drops a
+      // result that shares no content term with the phase intent, the domain or
+      // the project's vocabulary — the old "breakout paddle physics" snippet was
+      // such a result and was correctly filtered out, which made this threading
+      // test assert on an empty corpus.
+      const target = encodeURIComponent("https://example.com/notes-app-research");
       return new Response(
-        `<a href="//duckduckgo.com/l/?uddg=${target}">Breakout guide</a>` +
-          `<td class='result-snippet'>A real snippet about breakout paddle physics.</td>`,
+        `<a href="//duckduckgo.com/l/?uddg=${target}">ResearchDrain notes app: competitors and market landscape</a>` +
+          `<td class='result-snippet'>A real snippet about competitors, market landscape and search for a notes app.</td>`,
         { status: 200 },
       );
     }
@@ -1712,13 +1719,61 @@ test("L1-E3(3) — historyEndClass tri-state: unfunded wins, funded needs a scor
   assert.equal(historyEndClass(entryLike, "keyless"), "unmeasured");
 });
 
-test("L1-E3(4) — WIRING GUARD: entries rows + the crash row carry endClass (E-1)", () => {
-  // The end-to-end value is covered by the keyless scratch smoke; this pins
-  // the two landing sites in the driver source so a future edit that drops
-  // either goes red without a full pipeline run.
-  const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
-  assert.match(src, /entryRow\.endClass = historyEndClass\(entryRow, mode\);/, "every entries row must carry the end class");
-  assert.match(src, /endClass: "unmeasured",/, "the crash-fallback row must class as unmeasured");
+/** A fully-shaped entries/trial row for the real `persist()` writer (B1-F10). */
+function persistedRow(over = {}) {
+  const criteria = Object.fromEntries(["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"].map((m) => [m, { score: 1, evidence: "pin" }]));
+  return {
+    slug: "pin-case",
+    name: "Pin Case",
+    domain: "custom-software",
+    domainMatch: null,
+    kind: "app",
+    status: "ok",
+    mode: "keyless",
+    criteria,
+    total: 9,
+    mean: 1,
+    baseline: null,
+    coverage: { covered: {}, missing: [] },
+    trials: trialsSummary([true], { k: 1 }),
+    grader: null,
+    perTrial: [],
+    notes: {},
+    ...over,
+  };
+}
+
+test("L1-E3(4) — the persisted history rows carry a REAL endClass (computed, never fabricated)", () => {
+  // B1-F10: the pre-fix leg matched two source lines. This calls the REAL
+  // `persist()` writer against a scratch out-dir and reads what it wrote: the
+  // history row's endClass is DERIVED from the row (a no-balance row is
+  // "unfunded", an unscored keyless row is "unmeasured"), and the crash-fallback
+  // row shape classes as "unmeasured" under both modes so a crash can never be
+  // read as a funded measurement.
+  const dir = mkdtempSync(join(tmpdir(), "run-eval-endclass-"));
+  try {
+    const paths = { outDir: dir, resultsPath: join(dir, "results.json"), historyPath: join(dir, "history.json") };
+    const results = persist(
+      [
+        { entryRow: persistedRow({ slug: "scored", notes: { noBalance: true } }), card: null, trialRows: [] },
+        { entryRow: persistedRow({ slug: "unscored" }), card: null, trialRows: [] },
+      ],
+      "keyless",
+      [],
+      {},
+      paths,
+    );
+    assert.equal(results.entries.length, 2, "the entries array carries one entryRow per case");
+    const history = JSON.parse(readFileSync(paths.historyPath, "utf8"));
+    const byslug = Object.fromEntries(history.map((h) => [h.slug, h]));
+    assert.equal(byslug["scored"].endClass, "unfunded", "a no-balance row classes unfunded (the wallet refused — not a measurement)");
+    assert.equal(byslug["unscored"].endClass, "unmeasured", "an unscored keyless row classes unmeasured");
+    for (const mode of ["keyed", "keyless"]) {
+      assert.equal(historyEndClass({ notes: { error: "boom", trialsCrashed: true } }, mode), "unmeasured", `${mode}: the crash row is unmeasured`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1761,11 +1816,27 @@ test("L1-E6(b) — MAX_HISTORY_ROWS pins the append bound + the persist slice wi
   assert.equal(kept.length, MAX_HISTORY_ROWS);
   assert.equal(kept[kept.length - 1], 259, "the newest (this run's) row is kept");
   assert.ok(!kept.includes(0), "the oldest rows are the ones dropped");
-  // Wiring guard: persist() slices before the atomic write — and both persists
-  // are atomic (no bare writeFileSync of results/history remains).
-  const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
-  assert.match(src, /writeJsonAtomic\(RESULTS_PATH, results\)/, "results.json persists atomically");
-  assert.match(src, /writeJsonAtomic\(HISTORY_PATH, history\.slice\(-MAX_HISTORY_ROWS\)\)/, "history.json is capped + atomic");
+  // B1-F10 — behavioural, via the REAL `persist()` writer: an over-long
+  // history is CAPPED at MAX_HISTORY_ROWS before the write, and neither write
+  // leaves a `.tmp` behind (the atomic same-dir rename).
+  const dir = mkdtempSync(join(tmpdir(), "run-eval-history-cap-"));
+  try {
+    const paths = { outDir: dir, resultsPath: join(dir, "results.json"), historyPath: join(dir, "history.json") };
+    writeFileSync(paths.historyPath, JSON.stringify(Array.from({ length: 260 }, (_, i) => ({ at: "old", slug: `s${i}` }))), "utf8");
+    persist([{ entryRow: persistedRow({ slug: "newest" }), card: null, trialRows: [] }], "keyless", [], {}, paths);
+    const history = JSON.parse(readFileSync(paths.historyPath, "utf8"));
+    assert.equal(history.length, MAX_HISTORY_ROWS, "history.json is capped at MAX_HISTORY_ROWS rows");
+    assert.equal(history[history.length - 1].slug, "newest", "the newest (this run's) row survives the cap");
+    assert.ok(!history.some((h) => h.slug === "s0"), "the oldest rows are the ones dropped");
+    assert.ok(existsSync(paths.resultsPath), "results.json was written by the same call");
+    assert.deepEqual(
+      readdirSync(dir).filter((n) => n.endsWith(".tmp")),
+      [],
+      "both writes are atomic — a failed/partial write would leave a .tmp",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------

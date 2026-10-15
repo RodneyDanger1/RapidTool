@@ -2,8 +2,15 @@
 # .github/workflows/gate.yml — THE one CI workflow (W17 LANE 5 · row: CI-workflow)
 #
 # What it does: runs the repo's own stability script, unchanged.
-#   scripts/gate.sh = typecheck → lint → assertion-gap lint → both test legs → build
+#   scripts/gate.sh = typecheck → lint → assertion-gap lint → prevention
+#     (verify-prevention --all --selftest: 34 guards, two orthogonal signals) →
+#     module-coverage → skip-registry (inside the verdict program) → the scripts
+#     test leg → the src/lib test leg → build
 #   stdout = exactly one JSON verdict; exit 0 all-green · 1 hard fail · 2 usage · 3 flake.
+# B1-F7: the step was named "Four gates" and the header listed five stages — both
+#   undercounted the real gate set. The name/description are corrected here, and
+#   the flake detector (`--double`) is no longer the only gate CI never ran: the
+#   `gate-double` job below runs it on a schedule and on demand.
 #
 # NO KEYS: this workflow declares no secrets and references none. Every gate is
 # keyless by design (AGENTS.md §Honesty 2 "keyless floors" — no DEEPSEEK_API_KEY →
@@ -30,9 +37,11 @@
 #   not evidence, until the first green run on the remote.
 #
 # WHAT A GREEN CI CERTIFIES (and what it does NOT) — fixes/344 F-17:
-#   Certifies: the four gate.sh gates on ubuntu-22.04 with the locked install
+#   Certifies: every gate.sh stage on ubuntu-22.04 with the locked install
 #     (`npm ci` from package-lock.json) on Node 22.23.2 — typecheck, lint, the
-#     assertion-gap lint, both test legs, and the production build.
+#     assertion-gap lint, the keyless prevention proof layer (verify-prevention
+#     --all --selftest), module coverage, the skip registry, both test legs, and
+#     the production build.
 #   Does NOT certify: (a) Windows path handling — the ubuntu leg cannot see the
 #     cygpath branch (gate.sh), node-runner's native .cmd spawn, or the OV-2
 #     `/workspace` class; (b) anything keyed — no secret is declared and no
@@ -56,6 +65,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # B1-F7: the `--double` flake leg is a SEPARATE scheduled job (below), so a
+  # routine push/PR is not doubled. Catch flakes on a nightly cadence instead.
+  schedule:
+    - cron: "17 3 * * *"
 
 # Least privilege: reading the repo is all this workflow needs (competitor habit —
 # cline's desktop-test.yml declares `permissions: contents: read`).
@@ -88,8 +101,37 @@ jobs:
       - name: Install (locked, from package-lock.json)
         run: npm ci --no-audit --no-fund
 
-      - name: Four gates — scripts/gate.sh
+      - name: scripts/gate.sh — typecheck · lint · gaps · prevention · module-coverage · skip-registry · tests (scripts + src/lib) · build
         run: bash scripts/gate.sh
+
+  # ---------------------------------------------------------------------------
+  # B1-F7 — the FLAKE leg. `scripts/gate.sh --double` re-runs BOTH test legs in
+  # the same invocation and exits 3 on a run-1/run-2 disagreement; a test that
+  # fails BOTH runs is a hard failure (exit 1), never a flake. The routine `gate`
+  # job above never passed `--double`, so the repo's flake detector was dead in
+  # CI. This job runs it on the nightly schedule and on manual dispatch only —
+  # not on every push — so the extra minutes are bounded.
+  # ---------------------------------------------------------------------------
+  gate-double:
+    name: gate.sh --double (flake detector, scheduled/manual)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node (pinned to the dev host)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.2"
+          cache: npm
+
+      - name: Install (locked, from package-lock.json)
+        run: npm ci --no-audit --no-fund
+
+      - name: scripts/gate.sh --double (run-1/run-2 flake detector)
+        run: bash scripts/gate.sh --double
 
   # ---------------------------------------------------------------------------
   # PROPOSAL ONLY — the Windows leg. Do NOT uncomment without the owner's call:
@@ -112,6 +154,6 @@ jobs:
   #         cache: npm
   #     - name: Install (locked)
   #       run: npm ci --no-audit --no-fund
-  #     - name: Four gates — scripts/gate.sh (git-bash)
+  #     - name: scripts/gate.sh (git-bash)
   #       shell: bash
   #       run: bash scripts/gate.sh

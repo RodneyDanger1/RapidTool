@@ -20,6 +20,14 @@
 > (25 tools + 24 tests) · `fixes/` **744** · `wave_plans/` **139** · `research/` 476. Re-derive with
 > `git ls-files <dir> | wc -l`.
 
+> **Re-counted 2026-10-15 (W357 · `fix-preview` docs-truth; HEAD `30bce78` + the uncommitted W356/W357
+> lanes; untracked in-flight lane files are not counted — `git ls-files`):** the 1,933 block directly
+> above is stale. Live: total **2,088** · `src/` **262** · `src/lib/` **250** (132 non-test + 118
+> colocated `*.test.ts`) · `scripts/` **152** (39 `*.test.mjs`) · `fixes/` **783** · `wave_plans/`
+> **139** · `research/` 476 (`multiagent/` 103 · `eval-corpus/` 23 · `eval-out/` 345) · root
+> (top-level) **42**. Re-derive with `(git ls-files <dir>).Count` (PowerShell) or
+> `git ls-files <dir> | wc -l` (git-bash).
+
 ```
 RapidTool Main/
 │

@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createLlmTasks, parseConstraintList } from "./llm-tasks.ts";
+import {
+  assessNarrativeGrounding,
+  createLlmTasks,
+  NARRATIVE_OFF_TOPIC_SCORE,
+  parseConstraintList,
+  type NarrativeSource,
+} from "./llm-tasks.ts";
+import { RESEARCH_RELEVANCE_FLOOR } from "./research.ts";
 import type { LlmResult } from "./llm.ts";
 import { completeDeepSeek } from "./deepseek.server.ts";
 import type { PhaseDef } from "./types.ts";
@@ -121,17 +128,128 @@ describe("createLlmTasks (injected completer)", () => {
     }
   });
 
-  it("phaseNarrative returns a grounded paragraph", async () => {
+  it("phaseNarrative returns a paragraph and reports an insufficient (no-source) call", async () => {
     const { phaseNarrative } = createLlmTasks(async () => ok("A feasibility paragraph."));
     assert.deepEqual(await phaseNarrative(SNAPSHOT, PHASE), {
       ok: true,
       text: "A feasibility paragraph.",
+      grounded: false,
+      sourceCount: 0,
+      offTopic: false,
+      insufficient: true,
     });
+  });
+
+  it("phaseNarrative threads the query + sources into the prompt and marks it grounded", async () => {
+    const seen: string[] = [];
+    const { phaseNarrative } = createLlmTasks(async (prompt) => {
+      seen.push(prompt);
+      return ok("Grounded summary.");
+    });
+    const sources: NarrativeSource[] = [
+      { title: "Invoice tracker guide", url: "https://tools.example/invoice", content: "track invoices" },
+    ];
+    const r = await phaseNarrative(
+      { ...SNAPSHOT, query: "invoice tracker", sources },
+      PHASE,
+    );
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.grounded, true);
+      assert.equal(r.sourceCount, 1);
+      assert.equal(r.offTopic, false);
+      assert.equal(r.insufficient, false);
+    }
+    assert.match(seen[0], /Research query: invoice tracker/);
+    assert.match(seen[0], /https:\/\/tools\.example\/invoice/);
+    assert.match(seen[0], /summarize ONLY these/i);
+  });
+
+  it("phaseNarrative states when sources are off-topic (no strategy invention)", async () => {
+    const seen: string[] = [];
+    const { phaseNarrative } = createLlmTasks(async (prompt) => {
+      seen.push(prompt);
+      return ok("The sources do not address the query.");
+    });
+    const sources: NarrativeSource[] = [
+      { title: "Celebration cakes", url: "https://cakes.example/x", content: "luxury celebration cake" },
+    ];
+    const r = await phaseNarrative({ ...SNAPSHOT, query: "invoice tracker", sources }, PHASE);
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.offTopic, true);
+      assert.equal(r.grounded, false);
+    }
+    assert.match(seen[0], /off-topic/i);
+    assert.match(seen[0], /do NOT infer a strategy/i);
+  });
+
+  it("assessNarrativeGrounding scores sources, honouring a pre-computed score", () => {
+    const noSources = assessNarrativeGrounding("invoice", []);
+    assert.equal(noSources.insufficient, true);
+    assert.equal(noSources.offTopic, false);
+
+    const noQuery = assessNarrativeGrounding(undefined, [
+      { title: "anything", url: "https://a.example", content: "" },
+    ]);
+    assert.equal(noQuery.insufficient, false);
+    assert.equal(noQuery.offTopic, false);
+    assert.equal(noQuery.onTopicCount, 1);
+
+    const precomputed = assessNarrativeGrounding("zzz", [
+      { title: "unrelated", url: "https://a.example", content: "", score: 0.9 },
+    ]);
+    assert.equal(precomputed.onTopicCount, 1, "a supplied score is trusted");
+    assert.equal(precomputed.offTopic, false);
   });
 
   it("phaseNarrative returns not-configured", async () => {
     const { phaseNarrative } = createLlmTasks(async () => notConfigured());
     assert.deepEqual(await phaseNarrative(SNAPSHOT, PHASE), { ok: false, reason: "not-configured" });
+  });
+
+  // Item 1 (context flow) + item 4 (narrative/artifact split): a later phase's
+  // narrative is threaded the PRIOR phases' deliverables and told to build on
+  // (never contradict) them instead of reasoning from the brief alone.
+  it("phaseNarrative threads the PRIOR phase artifacts into the prompt (context flow)", async () => {
+    const seen: string[] = [];
+    const { phaseNarrative } = createLlmTasks(async (prompt) => {
+      seen.push(prompt);
+      return ok("P2 builds on P1.");
+    });
+    const r = await phaseNarrative(
+      {
+        ...SNAPSHOT,
+        priorArtifacts: [
+          { phase: 0, title: "Feasibility & Architecture Scorecard", body: "verdict: proceed" },
+          { phase: 1, title: "Execution topology (this build)", body: "orders → kitchen → delivery" },
+        ],
+      },
+      PHASE,
+    );
+    assert.equal(r.ok, true);
+    assert.match(seen[0], /Prior phase artifacts/);
+    assert.match(seen[0], /P0 Feasibility & Architecture Scorecard: verdict: proceed/);
+    assert.match(seen[0], /P1 Execution topology \(this build\): orders → kitchen → delivery/);
+    assert.match(seen[0], /do NOT restate the brief, contradict them/i);
+    // With priors present the no-source honesty clause points at them, not at
+    // an invented strategy.
+    assert.match(seen[0], /Reason ONLY from the project brief and the prior phase artifacts/i);
+  });
+
+  it("no priors ⇒ the legacy ungrounded clause (additive-only)", async () => {
+    const seen: string[] = [];
+    const { phaseNarrative } = createLlmTasks(async (prompt) => {
+      seen.push(prompt);
+      return ok("ok");
+    });
+    await phaseNarrative(SNAPSHOT, PHASE);
+    assert.doesNotMatch(seen[0], /Prior phase artifacts/);
+    assert.match(seen[0], /reason only from the project brief and phase summary/i);
+  });
+
+  it("the narrative off-topic floor IS the retrieval relevance floor (no drift)", () => {
+    assert.equal(NARRATIVE_OFF_TOPIC_SCORE, RESEARCH_RELEVANCE_FLOOR);
   });
 });
 

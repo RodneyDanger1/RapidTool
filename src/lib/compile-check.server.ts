@@ -36,6 +36,7 @@ import { inventoryFromJobSources } from "./doctor.ts";
 import { checkEntryContract, validateExpectedBehavior, type EntryContractRecord } from "./entry-oracle.ts";
 import { runNodeBounded } from "./node-runner.server.ts";
 import { maskLiteralsAndComments } from "./sandbox.ts";
+import type { ErrorCode } from "./errors.ts";
 
 export type CompileVerdict = "pass" | "fail";
 
@@ -58,6 +59,11 @@ export type CompileCheckResult = {
   verdicts: CompileFileVerdict[];
   /** Set only when the dir is unreadable or holds no checkable code files. */
   error?: string;
+  /** 350: the registered code for the dir-level `error` (a per-file parse fail
+   *  is carried by the file's own verdict instead). `RT_E_PATH_KIND_MISMATCH`
+   *  when the target is not a directory (file-where-dir), else
+   *  `RT_E_CHECK_FAILED`. Absent on a normal run. */
+  code?: ErrorCode;
 };
 
 /** Directories that are never walked (deps/build output/hidden VCS). */
@@ -159,9 +165,11 @@ export function compileCheckDir(dir: string): CompileCheckResult {
   try {
     root = statSync(dir).isDirectory() ? dir : "";
   } catch {
-    return { ...empty, error: `compile-check: dir not readable: ${dir}` };
+    return { ...empty, error: `compile-check: dir not readable: ${dir}`, code: "RT_E_CHECK_FAILED" };
   }
-  if (!root) return { ...empty, error: `compile-check: not a directory: ${dir}` };
+  if (!root) {
+    return { ...empty, error: `compile-check: not a directory: ${dir}`, code: "RT_E_PATH_KIND_MISMATCH" };
+  }
 
   const verdicts: CompileFileVerdict[] = [];
   let skipped = 0;
@@ -237,7 +245,13 @@ export function compileCheckDir(dir: string): CompileCheckResult {
 
   const failed = verdicts.filter((v) => v.verdict === "fail").length;
   if (verdicts.length === 0) {
-    return { ...empty, dir: root, skipped, error: "compile-check: no checkable code files (.js/.mjs/.cjs/.ts/.tsx/.mts/.cts/.jsx) under the dir" };
+    return {
+      ...empty,
+      dir: root,
+      skipped,
+      error: "compile-check: no checkable code files (.js/.mjs/.cjs/.ts/.tsx/.mts/.cts/.jsx) under the dir",
+      code: "RT_E_CHECK_FAILED",
+    };
   }
   return {
     ok: failed === 0,
@@ -326,6 +340,16 @@ export type TreeSpecVerdict = {
   tests: { pass: number; fail: number; skipped?: number };
   /** Execution verdict of the spec under the bounded runner. */
   run: TreeRunVerdict;
+  /** 350: the registered error class this verdict carries. Present on every
+   *  non-pass verdict that is not a plain executed assertion failure: the
+   *  vacuity refusal (`RT_E_SPEC_VACUOUS` for load-only/shape-only,
+   *  `RT_E_SPEC_SKIP_VACUOUS` for skip-dominated) or the runner family
+   *  (`RT_E_RUNNER_FAILED`/`RT_E_RUNNER_UNAVAILABLE`) when the spec could not
+   *  execute at all. Absent on `pass` and on an executed TAP failure (whose
+   *  detail carries the failing tail). Without it a vacuity refusal surfaced as
+   *  a bare `run:"fail"` beside the declared `npm test`'s exit 0 — two readings
+   *  of the SAME spec that silently disagreed. */
+  code?: ErrorCode;
   /** 346 E1 (item 2): true when the spec's source carries at least one
    *  BEHAVIOURAL assertion (a value/relational/call-outcome check), false when
    *  every assertion is shape-only (`typeof … === "function"`,
@@ -452,6 +476,20 @@ export type TreeRunOutcome = {
    *  declared `expectedBehavior` row failed (J1), or a UI-shell generated core
    *  failed to LOAD — the top-level reason the tree is not ok. */
   error?: string;
+  /** 350: the registered code of the DECISIVE reason the tree is not ok — so a
+   *  red tree-run is machine-classifiable instead of bare prose (the mission's
+   *  "a red tree is never ok" invariant must also be readable by a machine).
+   *  Choose order: copy/compile failure -> `RT_E_CHECK_FAILED`/`RT_E_INTERNAL`;
+   *  a vacuity-refused spec -> its own `RT_E_SPEC_VACUOUS`/`RT_E_SPEC_SKIP_VACUOUS`;
+   *  any other red leg -> `RT_E_TREE_RUN_FAILED`. Absent when `ok` is true. */
+  code?: ErrorCode;
+  /** 350: the bounded spec leg and the tree's own declared `test` script read
+   *  the SAME spec and DISAGREE — the declared script exited 0 while the spec
+   *  leg refused it for vacuity (no behavioural assertion / skip-dominated).
+   *  Present only for that combination, naming the spec and the code, so a
+   *  consumer never has to reconcile `tests[].run:"fail"` with
+   *  `project.test.run:"pass"` by hand. */
+  specScriptDisagreement?: { spec: string; code: ErrorCode; note: string };
   /** 216 (T-18) + 217d: the emitted project's OWN declared `typecheck`,
    *  `test` + `build` scripts, run under the same bounded runner (real exit
    *  codes + bounded output tails; `build` once a dependency root is present —
@@ -532,19 +570,52 @@ export type TreeRunOutcome = {
  *  loud `note` marking the trap and the way out. */
 export type TreeSubstanceVerdict = "real" | "mixed" | "stub-skeleton" | "empty";
 
-export type TreeSubstance = {
-  /** TODO(E-15)/empty-job-body/throw-TODO modules (doctor.classifyJobSource). */
+/** ONE scoped reading of the census — the same five fields under two distinctly
+ *  named scopes on `TreeSubstance` (`jobScoped` | `wholeTree`), so editing
+ *  either reader can never silently move the other's number. */
+export type TreeSubstanceReading = {
   stubs: number;
-  /** reexport-only bridge modules — bridges, not job implementations. */
   reexports: number;
-  /** genuinely implemented job modules. */
+  real: number;
+  files: Array<{ path: string; kind: "stub" | "reexport" | "real" }>;
+  verdict: TreeSubstanceVerdict;
+};
+
+export type TreeSubstance = {
+  /** W356: the JOB-SCOPED reading (`src/jobs/*` + `jobs/*` top-level modules) —
+   *  the campaign's tracked substance number, byte-for-byte the HEAD derivation
+   *  the C-06 substance guard and the `emit --run --git` hold read. Restored to
+   *  the top level; the fixes/354 A2-F3 whole-tree reading lives beside it under
+   *  `wholeTree`, never instead of it. TODO(E-15)/empty-body/throw-TODO modules. */
+  stubs: number;
+  /** reexport-only bridge modules — bridges, not implementations. */
+  reexports: number;
+  /** genuinely implemented modules. */
   real: number;
   /** Capped sample (doctor's 32-row shape): path (POSIX rel) + class. */
   files: Array<{ path: string; kind: "stub" | "reexport" | "real" }>;
   /** `real` (≥1 real, zero stubs/reexports) · `mixed` (real + leftovers) ·
-   *  `stub-skeleton` (job modules exist, none real) · `empty` (no job
-   *  modules under `src/jobs/` or `jobs/` — nothing to census). */
+   *  `stub-skeleton` (code modules exist, none real) · `empty` (no code
+   *  modules at all). */
   verdict: TreeSubstanceVerdict;
+  /** The JOB-scoped reading above, under its own distinct name (identical
+   *  numbers by construction): the explicit handle for a consumer that must not
+   *  be moved by an edit to the whole-tree reader. W358 (R-8, type-level half):
+   *  REQUIRED — a producer that omits it does not compile, so the runtime
+   *  `censusShape` guard in `scripts/quality-ratchet.mjs` can never be the only
+   *  thing standing between a reader change and a silently unscoped census.
+   *  `treeSubstanceOf` always sets it; a hand-built outcome must supply both
+   *  scopes (the ratchet reads them off the real reader, so an invented scope is
+   *  never evidence). */
+  jobScoped: TreeSubstanceReading;
+  /** fixes/354 A2-F3, kept: EVERY emitted code module under the tree (recursive,
+   *  `SKIP_DIRS` skipped, spec files excluded). Genuinely useful for the
+   *  below-floor / "green-but-empty" story, but NOT the campaign's tracked
+   *  substance number — publishing it as the bare top-level `verdict` is exactly
+   *  what made a scaffold-only tree read `real`. REQUIRED for the same reason as
+   *  `jobScoped` (R-8): a census that reports only one scope is the defect the
+   *  scope canaries exist to catch. */
+  wholeTree: TreeSubstanceReading;
   /** True when THIS verdict is green while the tree still ships stub or
    *  reexport-only job modules (or none real at all): exit 0 must never be
    *  read as product quality (K3). False on a red verdict and on clean/
@@ -664,6 +735,152 @@ function collectTreeJobSources(root: string): Array<{ path: string; source: stri
   return out;
 }
 
+/** Code-module extensions the whole-tree substance census reads. */
+const TREE_CODE_EXT_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i;
+
+/**
+ * fixes/354 A2-F3: EVERY emitted code module under `root` (recursive), not just
+ * `src/jobs/**`. The emitter writes the barrel at `src/generated.ts` and real
+ * code under `src/generated/`, `src/domain/` and `src/ui/`; a census that globs
+ * only the job dirs reported `verdict:"empty", real:0` on a tree whose own
+ * `tsc`/`npm test` are green — the exact "green-but-empty" misread. Deps/build
+ * output are skipped (`SKIP_DIRS`) and the emitted spec/test files are excluded
+ * (this census is the PRODUCT, not its tests). Sorted POSIX rel paths.
+ */
+function collectTreeCodeSources(root: string): Array<{ path: string; source: string }> {
+  const out: Array<{ path: string; source: string }> = [];
+  const walk = (dir: string): void => {
+    let entries: import("node:fs").Dirent<string>[] = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true, encoding: "utf8" });
+    } catch {
+      return;
+    }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of entries) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) walk(full);
+        continue;
+      }
+      if (!TREE_CODE_EXT_RE.test(e.name) || SPEC_FILE_RE.test(e.name)) continue;
+      try {
+        if (!statSync(full).isFile()) continue;
+        out.push({
+          path: relative(root, full).replace(/\\/g, "/"),
+          source: readFileSync(full, "utf8"),
+        });
+      } catch {
+        /* skip unreadable — same best-effort rule as the job census */
+      }
+    }
+  };
+  walk(root);
+  return out;
+}
+
+function substanceVerdictOf(files: number, stubs: number, reexports: number, real: number): TreeSubstanceVerdict {
+  return files === 0 ? "empty" : real === 0 ? "stub-skeleton" : stubs + reexports === 0 ? "real" : "mixed";
+}
+
+/**
+ * W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4) — the ONE derivation of a
+ * tree-run's product-substance census. Reads only (never writes; never walks
+ * node_modules) and never invents a module body. Exported so tests and other
+ * consumers derive the same object `treeRun()` attaches to its verdict.
+ *
+ * W356: TWO readings are published, each under a distinctly named field, and
+ * the top-level fields are the JOB-SCOPED one:
+ *
+ *  - `jobScoped` (= the bare top-level `stubs`/`reexports`/`real`/`files`/
+ *    `verdict`, byte-identical to HEAD's derivation) — `src/jobs/*` + `jobs/*`
+ *    top-level modules. This is the campaign's tracked substance number: the
+ *    C-06 guard (`scripts/prevention/replay-harness.mjs` `substance` driver) and
+ *    the `emit --run --git` hold (`scripts/rapidtool-cli.mjs` `RT_E_SUBSTANCE_EMPTY`)
+ *    both key on the bare `verdict`, and `verdict === "empty"` must stay
+ *    REACHABLE for a tree whose generated product is empty.
+ *  - `wholeTree` (fixes/354 A2-F3, kept — not deleted) — every emitted code
+ *    module under the tree, so a tree whose real code lives only under
+ *    `src/generated/` reports `real > 0` instead of `empty`. Genuinely useful
+ *    for the below-floor story, but publishing it as the one bare number is the
+ *    measurement defect W356 undoes.
+ *
+ * Editing either reader therefore moves only its own field.
+ *
+ * W358 (R-8, type-level half): BOTH scopes are required fields on
+ * `TreeSubstance`, so a producer that publishes only one does not compile —
+ * `censusShape` in `scripts/quality-ratchet.mjs` enforces the same contract at
+ * runtime on the real reader's output. The `compile-check.server.test.ts`
+ * R-8 plant pins the requirement (the repo's own `tsc --noEmit` is its prover).
+ *
+ * `note` is set only when JOB modules EXIST and the job census is not clean —
+ * the loud marking for K3 (a green exit 0 on a stub tree) and K4 (the emitted
+ * oracle asserts those stubs reject). Trees with no job-file signal at all stay
+ * silent: no job modules is not this trap.
+ */
+export function treeSubstanceOf(dir: string, opts: { green?: boolean } = {}): TreeSubstance {
+  const subject = resolve(dir);
+  const jobInv = inventoryFromJobSources(collectTreeJobSources(subject), subject);
+  const wholeInv = inventoryFromJobSources(collectTreeCodeSources(subject), subject);
+  const jobScoped: TreeSubstanceReading = {
+    stubs: jobInv.stubs,
+    reexports: jobInv.reexports,
+    real: jobInv.real,
+    files: jobInv.files,
+    verdict: substanceVerdictOf(jobInv.files.length, jobInv.stubs, jobInv.reexports, jobInv.real),
+  };
+  const wholeTree: TreeSubstanceReading = {
+    stubs: wholeInv.stubs,
+    reexports: wholeInv.reexports,
+    real: wholeInv.real,
+    files: wholeInv.files,
+    verdict: substanceVerdictOf(wholeInv.files.length, wholeInv.stubs, wholeInv.reexports, wholeInv.real),
+  };
+  const jobVerdict = jobScoped.verdict;
+  const green = opts.green === true;
+  // K3/K4 are JOB-layer traps: the marking keys off the job-scoped census, so a
+  // tree with no job modules stays silent (its real product modules are not a
+  // stub wall) and a stub-job tree is marked regardless of what else it ships.
+  const greenWhileStubbed = green && jobInv.files.length > 0 && (jobInv.stubs > 0 || jobInv.reexports > 0);
+  const oracleStubTrap = jobInv.files.length > 0 ? detectOracleStubTrap(subject) : false;
+
+  let note: string | undefined;
+  if (jobInv.files.length > 0 && jobVerdict !== "real") {
+    const counts = `stubs:${jobInv.stubs} reexports:${jobInv.reexports} real:${jobInv.real}`;
+    const what =
+      jobInv.stubs > 0 && jobInv.real === 0
+        ? `every one of the ${jobInv.files.length} job module(s) is a TODO(E-15) stub or a reexport-only bridge`
+        : jobInv.stubs > 0
+          ? `${jobInv.stubs} of ${jobInv.files.length} job module(s) are TODO(E-15) stubs`
+          : `${jobInv.reexports} job module(s) are reexport-only bridges`;
+    const reading = green
+      ? " green here means the emitted files parse and the emitted tests as emitted pass — never that the brief's jobs work"
+      : "";
+    const trap = oracleStubTrap
+      ? " tests/oracle.spec.ts asserts those stub seams REJECT, so implementing them turns those rows RED — replace each stub assertion with the row's real acceptance assertion as you implement (the K4 oracle trap)."
+      : "";
+    note =
+      `SUBSTANCE MARKING (${counts}): ${what} — this tree is NOT product-complete ` +
+      `(\`doctor --tree\` shows the same census; K3: exit 0 must never be read as product quality).${reading}${trap}`;
+  }
+
+  return {
+    // The bare top-level reading IS the job-scoped one (W356) — the number the
+    // campaign tracks and the field the substance guard's `verdict === "empty"`
+    // shell detection reads.
+    stubs: jobScoped.stubs,
+    reexports: jobScoped.reexports,
+    real: jobScoped.real,
+    files: jobScoped.files,
+    verdict: jobVerdict,
+    jobScoped,
+    wholeTree,
+    greenWhileStubbed,
+    oracleStubTrap,
+    ...(note ? { note } : {}),
+  };
+}
+
 /**
  * W43 · C6 (K4): does the tree's own oracle spec assert the stub-refusal form?
  * Bounded read of the scaffold-reserved `tests/oracle.spec.ts`; true when an
@@ -679,58 +896,6 @@ function detectOracleStubTrap(root: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4) — the ONE derivation of a
- * tree-run's product-substance census. Reads only (never writes; never walks
- * node_modules) and never invents a job body. Exported so tests and other
- * consumers derive the same object `treeRun()` attaches to its verdict.
- *
- * `note` is set only when job modules EXIST and the census is not clean — the
- * loud marking for K3 (a green exit 0 on a stub tree) and K4 (the emitted
- * oracle asserts those stubs reject). Trees with no job-file signal at all
- * stay silent: no job modules is not this trap.
- */
-export function treeSubstanceOf(dir: string, opts: { green?: boolean } = {}): TreeSubstance {
-  const subject = resolve(dir);
-  const sources = collectTreeJobSources(subject);
-  const inv = inventoryFromJobSources(sources, subject);
-  const { stubs, reexports, real } = inv;
-  const files = inv.files;
-  const verdict: TreeSubstanceVerdict =
-    files.length === 0
-      ? "empty"
-      : real === 0
-        ? "stub-skeleton"
-        : stubs + reexports === 0
-          ? "real"
-          : "mixed";
-  const green = opts.green === true;
-  const greenWhileStubbed = green && files.length > 0 && (stubs > 0 || reexports > 0);
-  const oracleStubTrap = files.length > 0 ? detectOracleStubTrap(subject) : false;
-
-  let note: string | undefined;
-  if (files.length > 0 && verdict !== "real") {
-    const counts = `stubs:${stubs} reexports:${reexports} real:${real}`;
-    const what =
-      stubs > 0 && real === 0
-        ? `every one of the ${files.length} job module(s) is a TODO(E-15) stub or a reexport-only bridge`
-        : stubs > 0
-          ? `${stubs} of ${files.length} job module(s) are TODO(E-15) stubs`
-          : `${reexports} job module(s) are reexport-only bridges`;
-    const reading = green
-      ? " green here means the emitted files parse and the emitted tests as emitted pass — never that the brief's jobs work"
-      : "";
-    const trap = oracleStubTrap
-      ? " tests/oracle.spec.ts asserts those stub seams REJECT, so implementing them turns those rows RED — replace each stub assertion with the row's real acceptance assertion as you implement (the K4 oracle trap)."
-      : "";
-    note =
-      `SUBSTANCE MARKING (${counts}): ${what} — this tree is NOT product-complete ` +
-      `(\`doctor --tree\` shows the same census; K3: exit 0 must never be read as product quality).${reading}${trap}`;
-  }
-
-  return { stubs, reexports, real, files, verdict, greenWhileStubbed, oracleStubTrap, ...(note ? { note } : {}) };
 }
 
 /**
@@ -1387,19 +1552,19 @@ async function runSpecFile(
   });
   if (!run.ok) {
     if (run.reason === "timeout") {
-      return { ...base, run: "timeout", detail: `spec killed after ${timeoutMs / 1000}s`, durationMs: duration() };
+      return { ...base, code: "RT_E_RUNNER_FAILED", run: "timeout", detail: `spec killed after ${timeoutMs / 1000}s`, durationMs: duration() };
     }
     if (run.reason === "not-configured") {
-      return { ...base, run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
+      return { ...base, code: "RT_E_RUNNER_UNAVAILABLE", run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
     }
-    return { ...base, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
+    return { ...base, code: run.code, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
   }
   const env = parseWrapperEnvelope(run.stdout);
   if (!env) {
-    return { ...base, run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
+    return { ...base, code: "RT_E_RUNNER_FAILED", run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
   }
   if (env.kind === "error") {
-    return { ...base, run: "error", detail: (env.error ?? "spec runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+    return { ...base, code: "RT_E_RUNNER_FAILED", run: "error", detail: (env.error ?? "spec runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
   }
   const tap = env.tail ?? "";
   const summary = parseTapSummary(tap);
@@ -1436,6 +1601,12 @@ async function runSpecFile(
     if (!behavioural || noTapPass || skipDominated) {
       return {
         ...base,
+        // 350: this is a NON-EXECUTION refusal — the spec ran green under
+        // node:test but its assertions certify nothing. The registered code is
+        // what lets the tree-run's top-level reason (and a consumer) tell this
+        // apart from an executed failure, and it is the disagreement with the
+        // declared `npm test`'s exit 0 that must be answerable, not silent.
+        code: skipDominated ? "RT_E_SPEC_SKIP_VACUOUS" : "RT_E_SPEC_VACUOUS",
         tests: skipDominated ? { pass: summary.pass, fail: tests.fail, skipped } : { pass: 0, fail: tests.fail },
         run: "fail",
         behavioural: false,
@@ -1974,6 +2145,9 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
       ok: false,
       dir: subject,
       sandbox: false,
+      // The copy/scratch failure is an internal I/O failure, not a product
+      // defect — its own registered class, never a bare prose `error`.
+      code: "RT_E_INTERNAL",
       compile: {
         ok: false,
         dir: subject,
@@ -1998,6 +2172,7 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
     const outcome: TreeRunOutcome = { ok: false, dir: subject, sandbox: false, compile, tests: [], run: null };
     if (compile.error) {
       outcome.error = compile.error;
+      outcome.code = "RT_E_CHECK_FAILED";
       return outcome;
     }
     const compileByFile = new Map(compile.verdicts.map((v) => [v.file, v]));
@@ -2093,6 +2268,29 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
         outcome.error = combined.slice(0, 1800);
       }
     }
+    // 350: a RED spec leg names itself in the top-level `error`. Before this,
+    // `ok:false` could arrive with `error` UNSET when the only red was a spec
+    // (a red tree with no stated reason). The vacuity-refused spec beside a
+    // GREEN declared `test` script is the runner/declared-script disagreement:
+    // both executions read the SAME spec and disagree, so it is surfaced as its
+    // own coded field rather than left for a consumer to reconcile.
+    const redSpecs = outcome.tests.filter((t) => t.run !== "pass");
+    const vacuityRefused = redSpecs.find(
+      (t) => t.code === "RT_E_SPEC_VACUOUS" || t.code === "RT_E_SPEC_SKIP_VACUOUS",
+    );
+    const decisiveSpec = vacuityRefused ?? redSpecs[0];
+    if (decisiveSpec) {
+      const why = `the emitted spec ${decisiveSpec.file} ${decisiveSpec.run} — ${decisiveSpec.detail ?? decisiveSpec.run}`;
+      outcome.error = (outcome.error ? `${outcome.error} · ${why}` : why).slice(0, 1800);
+    }
+    if (vacuityRefused && vacuityRefused.code && projectLeg.verdict.test?.run === "pass") {
+      outcome.specScriptDisagreement = {
+        spec: vacuityRefused.file,
+        code: vacuityRefused.code,
+        note:
+          `the bounded spec leg REFUSED ${vacuityRefused.file} for vacuity (${vacuityRefused.code}) while the tree's own declared \`npm run test\` exited 0 on the SAME spec — the two executions disagree; a vacuous green is not behaviour`,
+      };
+    }
     const specsGreen = outcome.tests.length === 0 || outcome.tests.every((t) => t.run === "pass");
     // Fail-closed: missing entry verdict is NOT green. Headless skip is NOT
     // green. Only an executed pass or a structural UI-shell skip counts.
@@ -2123,6 +2321,13 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
     }
     outcome.ok =
       compile.ok && specsGreen && entryGreen && coreGreen && projectLeg.verdict.ok && (outcome.behavior?.ok ?? true);
+    // 350: a red tree is never ok AND is never bare prose — the decisive reason
+    // carries its registered code so a machine consumer can branch on it. The
+    // vacuity-refused spec's own class wins (it is the disagreement the declared
+    // `npm test` cannot see); any other red leg is the tree-run family.
+    if (!outcome.ok) {
+      outcome.code = vacuityRefused?.code ?? redSpecs.find((t) => t.code)?.code ?? "RT_E_TREE_RUN_FAILED";
+    }
     // 332-3 (T2) + F-4: `ok` is "nothing ran red"; the declared-script state is
     // a SCOPED claim — a green tree whose declared typecheck/build could not
     // execute keeps `ok:true` but is not `declaredScriptsVerified`. A

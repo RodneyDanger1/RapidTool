@@ -25,6 +25,7 @@
 // ---------------------------------------------------------------------------
 import { createServerFn } from "@tanstack/react-start";
 import { fnv1a } from "./algorithms.ts";
+import { classifyError } from "./errors.ts";
 import { recordGateInto } from "./dod.ts";
 import { accrueReproducedCounts, isLessonMemoryId, stampPacket } from "./engine.ts";
 import type { Artifact, ArtifactKind, JsonLog, MemoryEntry, PhaseId, Project } from "./types.ts";
@@ -64,27 +65,51 @@ export async function verifyAndFix(
   opts?: { maxIterations?: number; server?: VerifyServerFn | null },
 ): Promise<VerifyOutcome> {
   if (typeof source !== "string" || source.trim().length === 0) {
-    return { status: "error", iterations: 0, evidence: "empty source" };
+    // An empty source is an INPUT-validation refusal, not an opaque error —
+    // it carries RT_E_VALIDATION like every other surfaced failure in the tree
+    // (before this it was a bare `status:"error"` a caller could only flatten
+    // to RT_E_UNKNOWN).
+    return { status: "error", iterations: 0, evidence: "empty source", code: "RT_E_VALIDATION" };
   }
   // Test/dev dependency injection: an explicit `server` bypasses the
   // createServerFn round-trip; `null` models an unavailable transport without
-  // inventing a verdict.
+  // inventing a verdict. 350: an injected server that THROWS is classified by
+  // the same seam as the real transport — a surfaced failure always carries a
+  // registered code, never a raw throw escaping the shim.
   if (opts?.server !== undefined) {
-    return opts.server
-      ? opts.server(source, brief, { maxIterations: opts.maxIterations })
-      : {
-          status: "not-configured",
-          iterations: 0,
-          evidence: "no verify transport (injected server: null)",
-        };
+    if (!opts.server) {
+      return {
+        status: "not-configured",
+        iterations: 0,
+        evidence: "no verify transport (injected server: null)",
+        // The transport itself is absent — the runner-availability class
+        // (RT_E_RUNNER_UNAVAILABLE's doc: "not configured in this
+        // environment"), never a bare statusless refusal.
+        code: "RT_E_RUNNER_UNAVAILABLE",
+      };
+    }
+    try {
+      return await opts.server(source, brief, { maxIterations: opts.maxIterations });
+    } catch (err) {
+      return {
+        status: "error",
+        iterations: 0,
+        evidence: err instanceof Error ? err.message : String(err),
+        code: classifyError(err, "RT_E_INTERNAL"),
+      };
+    }
   }
   try {
     return await verifyServer({ data: { source, brief, maxIterations: opts?.maxIterations } });
   } catch (err) {
+    // A transport throw is classified by errors.ts (timeout / permission /
+    // network / JSON …), never left as a bare statusless error for a caller to
+    // flatten to RT_E_UNKNOWN.
     return {
       status: "error",
       iterations: 0,
       evidence: err instanceof Error ? err.message : String(err),
+      code: classifyError(err, "RT_E_INTERNAL"),
     };
   }
 }
@@ -107,6 +132,10 @@ export type VerifyOutcomeShape = {
   code?: VerifyOutcome["code"];
   finalSource?: string;
   cases?: unknown[];
+  /** 350: the executed-assertion floor the server states on a pass (see
+   *  verify.server.ts VerifyOutcome.executedAssertions). Carried through this
+   *  view so a consumer of the whole-project outcome can read it. */
+  executedAssertions?: VerifyOutcome["executedAssertions"];
   /** B4 lint-advisory findings (verify.server.ts's LintFailure[], structurally).
    *  ADVISORY ONLY — never gates or weakens a machine pass. */
   lint?: VerifyOutcome["lint"];
@@ -215,13 +244,28 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
         row.expression.trim().length > 0
       );
     });
+  // 350 (executed-assertion floor): a genuine `passed` verdict is minted only
+  // by a machine loop that RAN — `iterations` counts the loop passes the runner
+  // actually executed (runCases refuses zero cases and every case must have
+  // authenticated and passed), so a passed envelope with `iterations < 1` is an
+  // unexecuted claim and is refused here. A passed envelope also carrying a
+  // `code` is self-contradictory (verify.server.ts sets a code only on failure
+  // — the dual-channel rule), so it is refused rather than laundered into
+  // `tested`. Both refusals take the same no-state-change path as the hollow
+  // case-set floor above.
+  const executedIterations =
+    typeof outcome.iterations === "number" && Number.isFinite(outcome.iterations)
+      ? Math.floor(outcome.iterations)
+      : 0;
   if (
     outcome.status === "passed" &&
     (evidence.trim().length === 0 ||
       caseSet === null ||
       caseSet.length === 0 ||
       !hasRunnableCase ||
-      !hasFinalSource)
+      !hasFinalSource ||
+      executedIterations < 1 ||
+      typeof outcome.code === "string")
   ) {
     return project;
   }

@@ -176,14 +176,18 @@ async function createPgliteSql(): Promise<Sql> {
     }) as Record<string, string>;
     // K2 (W39): the auth SOURCE dir's KEYS, for the copy-up completeness check
     // (parity with scripts/migrate.mjs, which listings the dir with readdir).
-    // Lazy glob — keys only, so the opt-in auth SQL never enters this path's
-    // bundle and is definitely never applied here (the eager glob above is
-    // non-recursive by pattern). Absent dir → empty object → unknown, and the
-    // preflight skips the copy-up half rather than guessing.
-    const authSources = import.meta.glob("/migrations/auth/*.sql") as Record<
-      string,
-      () => Promise<unknown>
-    >;
+    // Keys only — the opt-in auth SQL is never applied here (the eager glob
+    // above is non-recursive by pattern), so nothing ever calls these thunks.
+    // `query: "?raw"` is load-bearing, not cosmetic: a glob WITHOUT a query
+    // resolves each match as a JavaScript module, and the SSR bundle then dies
+    // parsing SQL (`[PARSE_ERROR] … migrations/auth/0001_auth.sql:1:10`). The
+    // `?raw` query makes each match a module whose default export is the file's
+    // TEXT, i.e. data. Absent dir → empty object → unknown, and the preflight
+    // skips the copy-up half rather than guessing.
+    const authSources = import.meta.glob("/migrations/auth/*.sql", {
+      query: "?raw",
+      import: "default",
+    }) as Record<string, () => Promise<string>>;
     const doneRows = await pg.query<{ name: string }>(
       "select name from _migrations",
     );

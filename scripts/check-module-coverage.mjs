@@ -9,7 +9,8 @@
  * (`fixtures.review.ts` + `fixtures.server.ts`).
  *
  * This guard computes reachability: start from every test file
- * (`src/lib/**\/*.test.ts` and `scripts/**\/*.test.mjs`), follow static
+ * (`src/lib/**\/*.test.ts`, `src/components/**\/*.test.ts` and
+ * `scripts/**\/*.test.mjs`), follow static
  * imports / re-exports / dynamic `import()` / `require()` through the
  * `src/lib` module graph, and report every module nothing reaches. A module
  * with zero importing test is a failure unless it is on the explicit,
@@ -51,34 +52,35 @@ export const COVERAGE_ALLOWLIST = {
   // for db.ts / gate-session-marker.ts / providers.ts / preview.ts, whose real
   // tests now reach them, so their entries are deleted — a regression that
   // orphans them again FAILS this guard instead of falling back to an exemption).
-  // --- auth surface: live; mixed classes. client.ts / use-current-user.ts read
-  //     `import.meta.env` (still harness-blocked); the five W51 · 337-2 entries
-  //     below are NOW node-loadable but have no driveable behaviour in the
-  //     harness — their old blocker text was true until W51 and is corrected.
-  "src/lib/auth/client.ts":
-    "LIVE browser auth entry (imported by auth/gates.tsx, auth/use-current-user.ts, auth/middleware.ts). Harness-blocked: reads `import.meta.env.VITE_AUTH_ENABLED` at module load — a Vite-only transform; under plain Node the import throws `Cannot read properties of undefined (reading 'VITE_AUTH_ENABLED')`.",
-  "src/lib/auth/gate-session.server.ts":
-    "LIVE Better Auth gate-session plugin (imported by auth/server.ts:40). NOW NODE-LOADABLE — W51 · 337-2 added the missing `.ts` to its two relative imports; verified by importing it under `node --experimental-strip-types` (exit 0). No test drives it: exercising `gateIdentitySessions()` needs a live Better Auth `/get-session` request context the node harness does not provide.",
-  "src/lib/auth/pglite-dialect.ts":
-    "LIVE Kysely dialect over PGlite (imported by auth/server.ts:42). NOW NODE-LOADABLE — W51 · 337-2 replaced its constructor parameter properties with explicit field assignments; verified by import under `node --experimental-strip-types` (exit 0). No test drives it: a behavioural test needs a PGlite instance, and db.ts's PGlite branch calls Vite's `import.meta.glob` (absent under plain Node).",
+  // --- W357 · 357-fix-gates JOB 1: SEVEN entries of the account/session chain are
+  //     DELETED because the module they named IS reached by a test now — the 354
+  //     wave's account suites walk the chain by static import, so an entry for any
+  //     of them is a stale exemption (this guard FAILS on a stale entry by design).
+  //     Removed: client.ts · email-password.ts · gate-session.server.ts ·
+  //     middleware.ts · pglite-dialect.ts · server.ts · verify.server.ts.
+  //     The paths that reach them (measured, `coveredModules` BFS parents):
+  //       account-default.test.ts -> verify.server.ts -> server.ts
+  //         -> {email-password, gate-session.server, pglite-dialect}.ts
+  //       account.test.ts -> account.ts -> middleware.ts -> client.ts
+  //     Reachability is a STATIC import fact, which is what this guard measures;
+  //     "harness-blocked" was the old entry's reason why no test could DRIVE the
+  //     module, and it is not the question this guard asks. A regression that
+  //     orphans any of the seven again FAILS this guard instead of falling back to
+  //     an exemption, which is the whole point of removing the entries.
+  // --- auth surface: live; the two remaining gaps are harness-blocked ---
+  //     use-current-user.ts imports client.ts, which reads `import.meta.env`
+  //     (Vite-only) at load, and it is reached by no test; popup.server.ts is
+  //     loaded by vite.config.ts's `ssrLoadModule`, never imported.
   "src/lib/auth/popup.server.ts":
     "LIVE `/auth/popup` handler (loaded by the Vite `authPopupPlugin`, vite.config.ts:112 `ssrLoadModule`). NOW NODE-LOADABLE — W51 · 337-2 fixed the transitive `auth/server.ts` `./preview` specifier; verified by import under `node --experimental-strip-types` (exit 0). No test drives it: `handleAuthPopupRequest` calls `auth.api.signInWithOAuth2` (a live Better Auth backend + network).",
-  "src/lib/auth/server.ts":
-    "LIVE app Better Auth instance (reached at runtime via popup.server.ts / verify.server.ts). NOW NODE-LOADABLE — W51 · 337-2 added `.ts` to the `\"./preview\"`/`\"./providers\"` specifiers and removed pglite-dialect's parameter properties; verified by import under `node --experimental-strip-types` (exit 0). No test drives it: asserting `betterAuth({…})` behaviour needs a live database + broker.",
   "src/lib/auth/use-current-user.ts":
-    "LIVE client session hook (imported by auth/gates.tsx:6). Harness-blocked: imports auth/client.ts, which reads `import.meta.env` at load (Vite-only).",
-  "src/lib/auth/verify.server.ts":
-    "LIVE server-side session resolver (imported by auth/middleware.ts:42). NOW NODE-LOADABLE — W51 · 337-2 fixed the transitive `auth/server.ts` `./preview` specifier; verified by import under `node --experimental-strip-types` (exit 0). No test drives it: `getSessionUser`/`requireUserId` need the TanStack Start request context (`getRequest()`), absent in the node harness.",
+    "LIVE client session hook (imported by auth/gates.tsx:6, which no test imports either). Harness-blocked: imports auth/client.ts, which reads `import.meta.env` at load (Vite-only).",
   // --- auth surface: `.tsx` (JSX is outside the node runner) ---
   "src/lib/auth/provider.tsx":
     "LIVE app-root provider (imported by src/routes/__root.tsx:3). `.tsx`: `node --experimental-strip-types` refuses JSX files (`Unknown file extension \".tsx\"`) and test discovery is `*.test.ts` only.",
-  // --- auth surface: importable, but not a useful test target ---
-  "src/lib/auth/email-password.ts":
-    "LIVE email/password on/off switch (imported by auth/server.ts:39). Pure one-line flag: the only possible test freezes its value, which would fight the documented enable path (`emailAndPasswordEnabled = true`), so it is allowlisted rather than pinned.",
+  // --- auth surface: importable, but nothing imports it (and its text is `.tsx`) ---
   "src/lib/auth/gates.tsx":
     "NO CONSUMER (precise scan: the only reference is a doc-comment example in auth/use-current-user.ts:49; no real import anywhere) AND `.tsx`, so the node runner cannot load it. Proposed: wire it to a route or remove it.",
-  "src/lib/auth/middleware.ts":
-    "LIVE-by-contract: `authMiddleware` is THE documented server-function wrapper, but ZERO importers in this repo (its only `import` is its own doc comment at :12). Importable, yet driving its behaviour needs the TanStack Start server runtime; a node test could only assert the export exists. Proposed: wire a real server function to it, or remove.",
   "src/lib/error-component.tsx":
     "LIVE router error/not-found boundary (imported by src/router.tsx:2 and src/routes/__root.tsx:4). `.tsx`: `node --experimental-strip-types` refuses JSX files and test discovery is `*.test.ts` only.",
   // --- the remainder R9-f05 named ---
@@ -134,10 +136,17 @@ export function libModules(root = projectRoot(), unreadable = []) {
   ).sort();
 }
 
-/** Every test file that could import a `src/lib` module. */
+/**
+ * Every test file that could import a `src/lib` module. B1-COORD: the
+ * `src/components` walk is NEW — those suites (`console.guards.test.ts`,
+ * `preview-sandbox.test.ts`) were discovered by no test leg and by no coverage
+ * walk, so they could rot silently; they are now a leg (npm test / gate.sh) and
+ * a coverage root here.
+ */
 export function testFiles(root = projectRoot(), unreadable = []) {
   return [
     ...walk(join(root, "src", "lib"), (name) => TEST_FILE_RE.test(name), [], unreadable),
+    ...walk(join(root, "src", "components"), (name) => TEST_FILE_RE.test(name), [], unreadable),
     ...walk(join(root, "scripts"), (name) => TEST_FILE_RE.test(name), [], unreadable),
   ].sort();
 }

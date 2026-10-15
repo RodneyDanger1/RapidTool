@@ -101,6 +101,24 @@ export function preflight(input) {
   if (!Number.isFinite(start)) {
     return { ok: false, violations: [{ code: "RT_E_RUNLOCK_BAD_START", detail: `--run-start is not a parseable ISO timestamp: ${input.runStart}` }], checked: 0 };
   }
+  // B1-F6 (fail closed): an EMPTY scan is not a clean window. An absent/unreadable
+  // `--collect` directory (or an empty `--src-mtimes` payload) used to yield
+  // `checked:0, violations:[]` and ALLOW — a vacuous pass that certifies a window
+  // it never inspected. Refuse coded instead, like check-module-coverage's
+  // `unreadable` handling.
+  if (!Array.isArray(input.srcMtimes) || input.srcMtimes.length === 0) {
+    return {
+      ok: false,
+      violations: [
+        {
+          code: "RT_E_RUNLOCK_NO_INPUT",
+          detail:
+            "no src mtimes to check — an empty scan never certifies a clean window (pass --src-mtimes or a non-empty --collect dir)",
+        },
+      ],
+      checked: 0,
+    };
+  }
   const end = input.runEnd ? Date.parse(input.runEnd) : null;
   if (input.lockPath && !existsSync(input.lockPath)) {
     violations.push({ code: "RT_E_RUNLOCK_MISSING", path: input.lockPath, detail: `no RUNLOCK at ${input.lockPath} — refuse to start` });

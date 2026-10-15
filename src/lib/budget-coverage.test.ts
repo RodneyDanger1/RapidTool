@@ -199,7 +199,10 @@ describe("wildClassifierReview — every response that reports usage is metered 
 describe("source pins — one metered call site per seam (CF-SE2-3b, 312/317)", () => {
   it("engine.ts — fetchResearch narrative records the completed call", () => {
     const src = readModule("engine.ts");
-    assert.match(src, /if \(comp && comp\.usage\) recordSessionSpend\(comp\.usage\);/);
+    // 348 (R3): the narrative call routes through llm-tasks' grounded
+    // `phaseNarrative`, which reports `usage` on its success arm; the metered
+    // site narrows to that arm (a refusal carries no usage through this seam).
+    assert.match(src, /if \(comp && comp\.ok === true && comp\.usage\) recordSessionSpend\(comp\.usage\);/);
     assert.match(src, /import \{[^}]*recordSessionSpend[^}]*\} from "\.\/token-ledger\.ts";/);
   });
 

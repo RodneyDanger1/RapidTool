@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compileAgentPacket, exportProfiles, packetBudgetBoundary, packetInputHash, PACKET_VERSION } from "./packet.ts";
+import { compileAgentPacket, exportProfiles, packetBlockedAt, packetBudgetBoundary, packetInputHash, PACKET_VERSION } from "./packet.ts";
 import { DOD } from "./dod.ts";
 import { PHASES } from "./phases.ts";
 import { createTokenBudget, emptyLedger, recordSpend } from "./token-ledger.ts";
@@ -1356,6 +1356,64 @@ test("W49/335-3: the packet carries the current edge's DoD exit criteria (gate v
   assert.match(out, /\n- \[[ x]\] /, "criteria render as a [x]/[ ] checklist");
 });
 
+// 350 (packet honesty): the packet must state the REAL class of evidence a
+// gate PASS accepts (dod.ts runGate.evidenceClass) so a green gate is never
+// read as "the emitted product builds", and it must state a recorded RED
+// tree-run rather than let a later green field imply a green product.
+test("350: the machine envelope states the real gate evidence class", () => {
+  const env = parseSystemJson(compileAgentPacket(makeProject()));
+  const gate = env.gate as Record<string, unknown>;
+  assert.equal(gate.pass, false, "premise: a fresh project's P0 gate is red");
+  assert.deepEqual(gate.evidence_classes, ["field-predicate"], "the met criteria's real classes are stated");
+  assert.equal(gate.product_build_verified, false, "no built-artifact criterion passed");
+  assert.equal(env.tree_run, null, "no recorded tree-run is null, never a fabricated green");
+});
+
+test("350: a PASS renders the evidence class + product-build honesty in the DoD section", () => {
+  const p = makeProject();
+  p.scorecard = {
+    overall: 7,
+    verdict: "proceed",
+    axes: [
+      { key: "feasibility", label: "Feasibility", score: 7, note: "n/a" },
+      { key: "complexity", label: "Complexity", score: 7, note: "n/a" },
+      { key: "risk", label: "Risk", score: 7, note: "n/a" },
+      { key: "cost", label: "Cost", score: 7, note: "n/a" },
+      { key: "time", label: "Time", score: 7, note: "n/a" },
+    ],
+    bottlenecks: [],
+    attackVectors: [],
+    libraries: [],
+  };
+  const out = compileAgentPacket(p);
+  assert.match(out, /Gate P0: PASS/, "premise: the scorecard clears the P0 gate");
+  assert.ok(
+    out.includes("Evidence class (what this PASS verified): field-predicate"),
+    "the met evidence class is stated for a green gate",
+  );
+  assert.ok(out.includes("Product build verified: no"), "a green gate does not claim the product builds");
+  assert.ok(out.includes("QUALIFIED PASS (NOT product-complete)"), "a weak-evidence pass is qualified loudly");
+  assert.ok(out.includes("RT_E_CLAIM_UNVERIFIED"), "the qualification carries its code");
+  const env = parseSystemJson(out);
+  const gate = env.gate as Record<string, unknown>;
+  assert.equal(gate.pass, true);
+  assert.equal((gate.qualification as { code?: string } | null)?.code, "RT_E_CLAIM_UNVERIFIED");
+});
+
+test("350: a recorded RED tree-run is stated on the current edge; green/absent stays silent", () => {
+  const red = makeProject();
+  red.treeRun = { ok: false, verdict: "fail", verdictHash: "123" };
+  const out = compileAgentPacket(red);
+  assert.ok(out.includes("Emitted tree run: RED (recorded)"), "a red persisted tree-run is stated");
+  assert.deepEqual(parseSystemJson(out).tree_run, { ok: false, verdict: "fail" });
+
+  const green = makeProject();
+  green.treeRun = { ok: true, verdict: "pass" };
+  const greenOut = compileAgentPacket(green);
+  assert.ok(!greenOut.includes("Emitted tree run: RED"), "a green tree-run stays silent");
+  assert.deepEqual(parseSystemJson(greenOut).tree_run, { ok: true, verdict: "pass" });
+});
+
 test("W49/335-3: report_schema states the ingest seam's phase-match rule and artifact caps", () => {
   const out = compileAgentPacket(makeProject());
   assert.ok(out.includes("must equal current_phase.id"), "a report for another phase is rejected by the seam");
@@ -1703,4 +1761,58 @@ test("W61 C4: a >14k-char packet keeps the DoD + Artifacts + Research sections",
   assert.ok(out.includes("## Artifacts (trimmed)"), "Artifacts section survives the cut");
   assert.ok(out.includes("## Research sources (live)"), "Research sources survive the cut");
   assert.ok(out.includes("## Required output schema"), "the required-output schema still survives");
+});
+
+// ---------------------------------------------------------------------------
+// D2(d) (2026-10-06) — the packet compiles on ANY stop and names the stop edge.
+// The Agent Packet used to exist only on a clean 13-phase seal, so an
+// enforceDod run blocked at a red gate never reached its terminal artifact.
+// `blockedAt: {phase, unmet[]}` names the stop in the same envelope that
+// carries the mission; a clean seal omits the key (byte-identical).
+// ---------------------------------------------------------------------------
+function stoppedProject(): Project {
+  const p = makeProject();
+  return {
+    ...p,
+    status: "blocked",
+    currentPhase: 6 as Project["currentPhase"],
+    phases: p.phases.map((ph) =>
+      ph.id === 6
+        ? {
+            ...ph,
+            status: "complete" as const,
+            gate: { passed: false, unmet: ["p6-verified", "p6-brief-fit"], evidenceHash: "123", checkedAt: 1 },
+          }
+        : ph,
+    ),
+    logs: [
+      {
+        ts: 1,
+        phase: 6 as Project["currentPhase"],
+        level: "warn" as const,
+        event: "dod.blocked",
+        detail: "P6 advance blocked — unmet: p6-verified, p6-brief-fit",
+      },
+    ],
+  };
+}
+
+test("D2(d): a stopped run carries blockedAt {phase, unmet[]} in the envelope and the rail", () => {
+  const out = compileAgentPacket(stoppedProject());
+  const m = /"blockedAt": \{\s*"phase": (\d+),\s*"unmet": \[([^\]]*)\]/.exec(out);
+  assert.ok(m, `the envelope carries the {phase, unmet} shape (packet: ${out.slice(0, 200)})`);
+  assert.equal(Number(m![1]), 6, "the stopping phase is named");
+  assert.ok(m![2].includes('"p6-verified"') && m![2].includes('"p6-brief-fit"'), "the unmet criteria are named");
+  assert.ok(out.includes("Blocked at: P6"), "the rail names the stop edge");
+});
+
+test("D2(d): packetBlockedAt mirrors {phase, unmet[]} from the stop records (pure)", () => {
+  assert.deepEqual(packetBlockedAt(stoppedProject()), { phase: 6, unmet: ["p6-verified", "p6-brief-fit"] });
+  assert.equal(packetBlockedAt(null as unknown as Project), null, "total on a null project");
+});
+
+test("D2(d): a clean seal omits blockedAt (byte-identical packet)", () => {
+  const out = compileAgentPacket(makeProject());
+  assert.ok(!out.includes("blockedAt"), "no blockedAt key on a clean run");
+  assert.ok(!out.includes("Blocked at:"), "no blocked-at rail on a clean run");
 });

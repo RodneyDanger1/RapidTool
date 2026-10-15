@@ -259,6 +259,15 @@ export type DeepSeekCompleteOptions = {
    * thinking disabled (flash has no thinking-on shape in this module).
    */
   thinking?: boolean;
+  /**
+   * fixes/348: opt-in SAMPLING controls. Absent (every caller but P6
+   * synthesis) ⇒ the vendor default and the byte-identical legacy body. When
+   * present, finite values only: `temperature` in [0,2] and an integer `seed`
+   * ≥0 ride the request body, so a run's sampling is reproducible (the vendor
+   * documents `seed` as best-effort) and a low temperature is quality-directed.
+   */
+  temperature?: number;
+  seed?: number;
   /** Test/dev hook; defaults to the per-tier timeout. */
   timeoutMs?: number;
   /** fixes/152: injectable fetch — tests stub transient 429/5xx/network
@@ -580,6 +589,16 @@ async function completeDeepSeekInner(
       ? { thinking: { type: "disabled" as const } }
       : { thinking: { type: "enabled" as const }, reasoning_effort: "high" as const }),
     max_tokens: maxTokens,
+    // fixes/348: opt-in sampling controls — present only when the caller asked
+    // (P6 synthesis), so every other caller's request body is byte-identical.
+    // `temperature` is clamped to the vendor's [0,2]; `seed` is floored to an
+    // integer ≥0. A hostile (non-finite) value is dropped, never sent as NaN.
+    ...(typeof opts.temperature === "number" && Number.isFinite(opts.temperature)
+      ? { temperature: Math.min(2, Math.max(0, opts.temperature)) }
+      : {}),
+    ...(typeof opts.seed === "number" && Number.isFinite(opts.seed)
+      ? { seed: Math.max(0, Math.floor(opts.seed)) }
+      : {}),
     ...(opts.json ? { response_format: { type: "json_object" as const } } : {}),
     stream: false,
   };

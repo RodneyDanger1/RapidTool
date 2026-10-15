@@ -204,4 +204,14 @@ the rest of this block is the record).
   process env); a fresh `emit --run` is verified when its declared scripts resolve from the repo's own
   `node_modules/`.
 
+## CORRECTION — 2026-10-06 (354 wave · B2 UI/docs-truth): the tracked counts have drifted again
+
+Re-derived `git ls-files` at HEAD `30bce78` + the mid-wave 354 lanes (untracked new files from
+those lanes are not counted, matching the convention above): **total 2,088 · `src` 262 ·
+`src/lib` 250 · `scripts` 152 · `fixes` 783 · `wave_plans` 139**. Host runtime `node -v` →
+**v24.15.0** (the `engines` contract is `>=22`; the "22.23.2" pin in the 345-F1 block is the
+Hermes-bundled runtime, not this dev host). The 10-line-tour counts (239/49/744) and every
+earlier dated count block are superseded. Every claim here was re-derived from the command
+named beside it; where this file and the bytes disagree, the bytes win.
+
 <!-- END START-HERE · maintained by organizers · append corrections, never rewrite history -->

@@ -2892,15 +2892,74 @@ export const MAX_HISTORY_ROWS = 200;
  *  gate consume these files, formats must not move). Exported for the unit
  *  seam: run-eval.test.mjs drives the failed-rename path (rename(2) onto an
  *  existing directory → EPERM on this host) against a real target. */
+/** True when a pid is alive (EPERM counts — the process exists). */
+export function evalPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === "EPERM";
+  }
+}
+
+/**
+ * Reclaim pid-named temp files a crashed earlier run left beside `target`.
+ * writeJsonAtomic writes `<target>.<pid>.tmp` then renames; a kill between the
+ * two leaves that temp forever (the next run uses a new pid). Sweep only pids
+ * that are no longer alive — a concurrent run's temp is never touched.
+ */
+export function sweepStaleJsonTemps(target, { isAlive = evalPidAlive } = {}) {
+  const dir = dirname(target);
+  const prefix = `${basename(target)}.`;
+  const swept = [];
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return swept;
+  }
+  for (const name of entries) {
+    if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
+    const pid = Number.parseInt(name.slice(prefix.length, -".tmp".length), 10);
+    if (!Number.isInteger(pid) || pid === process.pid || isAlive(pid)) continue;
+    try {
+      rmSync(join(dir, name), { force: true });
+      swept.push(name);
+    } catch {
+      /* best-effort reclaim */
+    }
+  }
+  return swept;
+}
+
 export function writeJsonAtomic(target, value) {
   mkdirSync(dirname(target), { recursive: true });
+  sweepStaleJsonTemps(target);
   const tmp = `${target}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(value, null, 2), "utf8");
   renameSync(tmp, target);
 }
 
-function persist(rows, mode, skips = [], extra = {}) {
-  mkdirSync(OUT_DIR, { recursive: true });
+/**
+ * Write this run's `results.json` + append its rows to `history.json` (capped at
+ * MAX_HISTORY_ROWS, both atomic). B1-F10: exported WITH a `paths` seam so the
+ * two wiring claims (the history row's `endClass` is COMPUTED from the row, and
+ * both writes are atomic+capped) are testable by calling the real writer instead
+ * of by matching its source text.
+ * @param {any[]} rows @param {string} mode @param {any[]} [skips] @param {any} [extra]
+ * @param {{outDir?:string, resultsPath?:string, historyPath?:string}} [paths]
+ */
+export function persist(
+  rows,
+  mode,
+  skips = [],
+  extra = {},
+  paths = { outDir: OUT_DIR, resultsPath: RESULTS_PATH, historyPath: HISTORY_PATH },
+) {
+  const outDir = paths.outDir ?? OUT_DIR;
+  const resultsPath = paths.resultsPath ?? RESULTS_PATH;
+  const historyPath = paths.historyPath ?? HISTORY_PATH;
+  mkdirSync(outDir, { recursive: true });
   const results = {
     generatedAt: new Date().toISOString(),
     mode,
@@ -2919,9 +2978,9 @@ function persist(rows, mode, skips = [], extra = {}) {
   };
   // W42·L1-E6(a): atomic (same-dir tmp + rename) — a kill mid-write can no
   // longer tear results.json; the reader sees the previous run or this one.
-  writeJsonAtomic(RESULTS_PATH, results);
+  writeJsonAtomic(resultsPath, results);
 
-  const history = readJson(HISTORY_PATH, []);
+  const history = readJson(historyPath, []);
   const at = new Date().toISOString();
   for (const row of rows) {
     const trialRows = Array.isArray(row.trialRows) && row.trialRows.length > 0 ? row.trialRows : [row.entryRow];
@@ -2955,7 +3014,7 @@ function persist(rows, mode, skips = [], extra = {}) {
   }
   // W42·L1-E6(b): bound the append-only trend — keep the newest
   // MAX_HISTORY_ROWS rows (this run's included) before the atomic write.
-  writeJsonAtomic(HISTORY_PATH, history.slice(-MAX_HISTORY_ROWS));
+  writeJsonAtomic(historyPath, history.slice(-MAX_HISTORY_ROWS));
   return results;
 }
 
@@ -3443,21 +3502,46 @@ const isMainModule = (() => {
   }
 })();
 
+/**
+ * The fatal-crash tombstone (W52 · A5 / bug16). Re-derives the out-dir guard
+ * HERE, because `main()`'s refusal runs late: a crash BEFORE it (key resolution,
+ * argument parsing) used to write a tombstone into the bare default
+ * `research/eval-out/`, rewriting tracked files the guard exists to protect.
+ * No verdict, no rewrite — and the write is atomic, so a kill mid-write can
+ * never leave a torn `results.json` that reads as "the previous run".
+ *
+ * B1-F10: exported (with its paths as a seam) so the contract is testable by
+ * calling the REAL crash handler instead of by matching its source text. The
+ * caller owns the process exit; this function only reports what it did.
+ * @param {unknown} e
+ * @param {{outDir?:string, explicit?:boolean, resultsPath?:string, mode?:string}} [opts]
+ * @returns {{written:boolean, refused:boolean, path?:string, message?:string}}
+ */
+export function writeCrashTombstone(
+  e,
+  { outDir = OUT_DIR, explicit = OUT_EXPLICIT, resultsPath = RESULTS_PATH, mode = keyedOk ? "keyed" : "keyless" } = {},
+) {
+  const outRefusal = evalOutRefusal(outDir, { explicit });
+  if (outRefusal !== null) return { written: false, refused: true, message: outRefusal.message };
+  mkdirSync(outDir, { recursive: true });
+  writeJsonAtomic(resultsPath, {
+    generatedAt: new Date().toISOString(),
+    mode,
+    entries: [],
+    error: e instanceof Error ? e.message : String(e),
+  });
+  return { written: true, refused: false, path: resultsPath };
+}
+
 if (isMainModule) {
   main().catch((e) => {
     // The driver itself failing is still data-shaped, but it IS a real crash:
     // print + exit 0 per the results-are-data contract, after recording it.
     try {
-      mkdirSync(OUT_DIR, { recursive: true });
-      // W44 A5 (bug-hunter · scripts box): the crash tombstone must be atomic
-      // too — a plain writeFileSync can leave a 0-byte/partial results.json
-      // (kill mid-write) that readers then misread as "the previous run".
-      writeJsonAtomic(RESULTS_PATH, {
-        generatedAt: new Date().toISOString(),
-        mode: keyedOk ? "keyed" : "keyless",
-        entries: [],
-        error: e instanceof Error ? e.message : String(e),
-      });
+      const tombstone = writeCrashTombstone(e);
+      if (tombstone.refused) {
+        console.error(`eval driver crashed before the out-dir guard — not writing a tombstone: ${tombstone.message}`);
+      }
     } catch {
       /* nowhere to write */
     }

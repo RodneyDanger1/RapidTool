@@ -31,7 +31,7 @@ import {
   treeEmissionCensus,
 } from "./doctor.ts";
 import { RUNNER_IS_NOT_A_SANDBOX } from "./sandbox-policy.ts";
-import { archTrace } from "./dod.ts";
+import { archTrace, classifyModuleSource } from "./dod.ts";
 import { fnv1a } from "./algorithms.ts";
 import { m1Substance } from "./maker-score.ts";
 import { fixtureAcceptanceState } from "./fixtures.ts";
@@ -1585,5 +1585,84 @@ describe("fixes/346-X5 â€” the armed resample's usage is read back from the jour
     assert.equal(c.fleetMetrics.workingAppByBrief.length, 5);
     assert.equal(c.fleetAcceptance.sampleCount, 1, "the acceptance aggregate names its sample count too");
     assert.equal(c.fleetMetrics.estimatedCostUsd, null, "spend is still never fabricated");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-05 product-quality lane â€” `DoctorFactory.productQuality` is a NEW,
+// additive, byte-derived reading of the trusted project record. It must never
+// flip any existing field.
+// ---------------------------------------------------------------------------
+describe("2026-10-05 â€” doctor productQuality (additive, never flips the factory bar)", () => {
+  it("derives the reading from the trusted project record's own bytes", () => {
+    const c = factoryClaim(evidenceFromProjectRecord(ov9Project()), {});
+    assert.equal(c.productQuality.tree.present, true);
+    assert.equal(c.productQuality.tree.fileCount, 2);
+    assert.equal(c.productQuality.modules.real, 2, "the two domain modules are real");
+    assert.equal(c.productQuality.webEntry.present, false, "no index.html in the record's tree");
+    assert.equal(c.productQuality.flags.emptyTree, false);
+    assert.equal(c.productQuality.quality, false, "no web entry â‡’ not product-quality");
+    assert.ok(c.productQuality.reasons.some((r) => /no web entry/.test(r)));
+  });
+
+  it("fail-closed with no trusted record (all-absent reading, not a fabricated pass)", () => {
+    const c = factoryClaim();
+    assert.equal(c.productQuality.tree.present, false);
+    assert.equal(c.productQuality.flags.emptyTree, true);
+    assert.equal(c.productQuality.flags.noEmptyTree, false);
+    assert.equal(c.productQuality.quality, false);
+    assert.equal(c.autonomousSoftwareFactory, false, "the human-gated bar is unchanged");
+  });
+
+  it("does not change the existing factory fields for a record that carries a tree", () => {
+    const record = ov9Project();
+    const a = factoryClaim(evidenceFromProjectRecord(record), {});
+    const b = factoryClaim(evidenceFromProjectRecord(record), {});
+    assert.equal(a.autonomousSoftwareFactory, b.autonomousSoftwareFactory);
+    assert.equal(a.autonomousFactoryV2, b.autonomousFactoryV2);
+    assert.deepEqual(a.gaps, b.gaps);
+    assert.equal(a.humanFixtures, false, "no human fixtures on the fixture record");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-06 — item 3 (one classifier) + items 2/4 (the doctor surfaces the
+// gate-evidence qualification and the P0–P12 stage-wiring census of the record).
+// ---------------------------------------------------------------------------
+describe("2026-10-06 — doctor surfaces the unified classifier + wiring readings", () => {
+  it("classifyJobSource DELEGATES to dod.classifyModuleSource (the one classifier)", () => {
+    const samples = [
+      "",
+      'export function x() { throw new Error("TODO(E-15) t"); }',
+      'export * from "./a.ts";',
+      "export function createBoard() { return 1; }",
+      "const JOBS = ['a']; function synthesize() {} function test_no_skip() {}",
+    ];
+    for (const s of samples) {
+      assert.equal(classifyJobSource(s), classifyModuleSource(s), `classifier parity for ${JSON.stringify(s.slice(0, 40))}`);
+    }
+  });
+
+  it("the default factory claim carries an empty (fail-closed) wiring + gate-evidence reading", () => {
+    const claim = factoryClaim();
+    assert.equal(claim.stageWiring.rows.length, 13);
+    assert.equal(claim.stageWiring.ok, true, "no complete phase ? no wiring failure");
+    assert.deepEqual(claim.gateEvidence.phases, []);
+  });
+
+  it("factoryClaim derives stageWiring + gateEvidence from the trusted record", () => {
+    const record = {
+      id: "rec-1",
+      brief: "x",
+      phases: [{ id: 3, status: "complete" }],
+      artifacts: [{ id: "a", phase: 3, kind: "mcp", title: "mcp", body: "contract" }],
+    };
+    const claim = factoryClaim({ fleet: [record], fleetTelemetry: [] });
+    assert.equal(claim.stageWiring.rows.length, 13);
+    assert.equal(claim.gateEvidence.phases.length, 1);
+    assert.deepEqual(claim.gateEvidence.weakPhases, [3], "P3's artifact-presence-only gate is qualified weak");
+    // The same readings ride the forwarded fleet aggregate.
+    assert.equal(claim.fleetAcceptance.stageWiring.rows.length, 13);
+    assert.deepEqual(claim.fleetAcceptance.gateEvidence.weakPhases, [3]);
   });
 });

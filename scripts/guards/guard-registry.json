@@ -646,7 +646,7 @@
       "keyless": true,
       "status": "enforced",
       "fixSeam": "scripts/rapidtool-cli.mjs emit seal consumes headless.planUnderproductionSeal (landed) so a below-floor refusal's envelope names the floor code the project's own journal carries; fix-presence is measured against `git show HEAD:scripts/rapidtool-cli.mjs`.",
-      "proof": "The guard asserts the CLI emit seal consumes `planUnderproductionSeal(` and carries `RT_E_PLAN_UNDERPRODUCED`. Real artifact: `headless.planUnderproductionSeal(testruns/campaign2/office-stock-tracker/build.json)` returns code RT_E_PLAN_UNDERPRODUCED (floor 8, emitted 2, 2 journaled floor hits). Mutation: stripping the consumer fires the detector; the live source is silent. Landed at HEAD (rapidtool-cli.mjs:2368/2594); guard R2-01 stays green."
+      "proof": "The guard asserts the CLI emit seal consumes `planUnderproductionSeal(` and carries `RT_E_PLAN_UNDERPRODUCED`. Real artifact: `headless.planUnderproductionSeal(testruns/campaign2/office-stock-tracker/build.json)` returns code RT_E_PLAN_UNDERPRODUCED (floor 8, emitted 2, 2 journaled floor hits). Mutation: stripping the consumer fires the detector; the live source is silent. Landed at HEAD; the two consumption sites are the `emit` seal's `planUnderproductionSeal(project)` calls (cited by symbol — line numbers drift every wave); guard R2-01 stays green."
     },
     {
       "id": "D3-01",

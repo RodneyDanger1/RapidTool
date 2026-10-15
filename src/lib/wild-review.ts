@@ -24,23 +24,28 @@
  *
  * Host/guard contract (this module is client-safe — no top-level server
  * imports, no node:fs):
- *   - non-Node host (browser / worker without `process.versions.node`) ⇒
- *     returns null, the engine keeps its existing `.server` default (mock
- *     proxy in the browser) — ZERO behavior change;
  *   - bare Node, key absent ⇒ returns null (keyless runs keep the exact
  *     DoD-floor bytes they have today);
  *   - bare Node, key present ⇒ the classifier can actually verdict, and the
- *     engine logs `wild.review (classifier)`.
+ *     engine logs `wild.review (classifier)`;
+ *   - non-Node host (browser console) ⇒ `createHostWildReviewer` reaches the
+ *     SERVER's keyed classifier through `wild-bridge.ts`'s createServerFn
+ *     (llm.ts's server-fn `complete()`/`llmStatus()`); a server that reports
+ *     no key returns null and the engine keeps the honest `not-configured`
+ *     path. (2026-10-05: this replaces the old browser-always-null behavior
+ *     that parked every consent gate with `wild.paused_classifier`.)
  *
- * TODO(R14-f01): the keyed evidence run (bare-Node wild run logging
- * `wild.review (classifier)`) plus any remaining driver threading
- * (runUntilGate/liveLayer surfaces) land with the funded boundary run — this
- * shell wires the seam + every wildStep caller that exists today; the
+ * TODO(R14-f01): the keyed evidence run plus any remaining driver threading
+ * (runUntilGate/liveLayer surfaces) land with the funded boundary run; the
  * classifier POLICY layer (allow-lists W-43/F4, plan review R13-f02) stays
  * engine-side and is NOT implemented here.
  */
 
-import type { WildCompleter } from "./wild-mode.server.ts";
+import type {
+  WildClassifierResult,
+  WildCompleter,
+  WildReviewContext,
+} from "./wild-mode.server.ts";
 import type { WildReviewer } from "./engine.ts";
 
 /**
@@ -109,6 +114,50 @@ export async function createNodeWildReviewer(): Promise<WildReviewer | null> {
   } catch {
     // Missing provider module / load failure — the engine's default resolution
     // stays in charge (honest not-configured path), never a fake reviewer.
+    return null;
+  }
+}
+
+/**
+ * Host-aware reviewer resolution — the generalized seam.
+ *
+ * Bare Node (CLI / headless / tests): `createNodeWildReviewer()` exactly as
+ * before (provider `completeDeepSeek` + direct-env probe; null keyless).
+ *
+ * Denied host (the browser console): the runtime-assembled `*.server.`
+ * specifiers are the import-protection mock, so the Node seam is unavailable —
+ * but the SERVER process can still make the keyed calls. This branch asks the
+ * server (llm.ts's server-fn `llmStatus()`) whether the key is configured; when
+ * it is, it returns a REAL reviewer that routes each review through
+ * `wild-bridge.ts`'s `createServerFn` (which runs the production
+ * `wildClassifierReview` server-side — the same classifier the Node seam
+ * binds). When the server reports no key — or the probe/transport fails — it
+ * returns null, so the engine's `unavailableWildReviewer` keeps the exact
+ * honest `not-configured` path. NEVER throws.
+ */
+export async function createHostWildReviewer(): Promise<WildReviewer | null> {
+  if (isBareNodeHost()) return createNodeWildReviewer();
+  try {
+    // The LIVE server probe: a browser host has no process env, so the truth
+    // about the key comes from the server. Outside a request context (bare-Node
+    // tests that spoof the host) llmStatus() resolves { configured: false } —
+    // the honest keyless path. Never a keyed call from this probe itself.
+    const llm = (await import("./llm.ts")) as {
+      llmStatus?: () => Promise<{ configured: boolean }>;
+    };
+    if (typeof llm.llmStatus !== "function") return null;
+    const status = await llm.llmStatus();
+    if (status.configured !== true) return null;
+    const bridge = (await import("./wild-bridge.ts")) as {
+      wildClassifierBridge?: (ctx: WildReviewContext) => Promise<WildClassifierResult>;
+    };
+    const review = bridge.wildClassifierBridge;
+    if (typeof review !== "function") return null;
+    // A real closure (a string `.name`) — trusted by engine.isTrustedCallable;
+    // it is the bridge round-trip, never a proxy.
+    return (ctx: WildReviewContext) => review(ctx);
+  } catch {
+    // Probe/transport failure — the engine's honest not-configured default.
     return null;
   }
 }

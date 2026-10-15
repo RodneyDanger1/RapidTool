@@ -85,11 +85,12 @@ export function readJson(p) {
 
 /**
  * Locate the frozen run root (`testruns/`), mirroring the P-A harness: env →
- * `<repo>/testruns` → the sibling `<repo>/../testruns` → the known Desktop path.
+ * the IN-REPO tracked fixture subset (`<repo>/testruns`) → a sibling
+ * `<repo>/../testruns`. No absolute developer-box path (B1-F1).
  * @param {NodeJS.ProcessEnv} [env] @returns {string|null}
  */
 export function resolveRunRoot(env = process.env) {
-  const candidates = [env.RAPIDTOOL_TESTRUNS, join(REPO_ROOT, "testruns"), resolve(REPO_ROOT, "..", "testruns"), "C:/Users/mnril/Desktop/testruns"];
+  const candidates = [env.RAPIDTOOL_TESTRUNS, join(REPO_ROOT, "testruns"), resolve(REPO_ROOT, "..", "testruns")];
   for (const c of candidates) if (c && existsSync(c)) return c;
   return null;
 }

@@ -11,8 +11,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, specExitIsGreen, specSourceHasBehaviouralAssert, supplyChainFloorFor, treeRun, treeSubstanceOf, treeVerdictHash, typecheckDir, verifyKindDir } from "./compile-check.server.ts";
+import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, specExitIsGreen, specSourceHasBehaviouralAssert, supplyChainFloorFor, treeRun, treeSubstanceOf, treeVerdictHash, type TreeSubstance, typecheckDir, verifyKindDir } from "./compile-check.server.ts";
 import { inventoryFromJobSources } from "./doctor.ts";
+import { jobModuleCensus, moduleCensus } from "./product-quality.ts";
 import { collectJobSources } from "./headless.ts";
 import { scrubbedEnv } from "./node-runner.server.ts";
 
@@ -265,6 +266,65 @@ describe("treeRun — execute the emitted tree in-loop (fixes/144 M3/B3)", () =>
       assert.ok(tail.includes('test "beta must fail" failed'), `first not-ok tail extractable: ${tail}`);
       assert.ok(tail.includes("want"), "assertion message from the not-ok block survives");
       assert.equal(r.run!.run, "pass", "entry smoke still green — the red is the spec's own");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // 350 (measured defect): the bounded runner's spec leg refused a VACUOUS
+  // spec (`run:"fail"`, `0 pass / 0 fail`, no code) while the tree's OWN
+  // declared `npm run test` exited 0 on the SAME spec — two executions that
+  // silently disagreed. Now the refusal carries its registered code, the red
+  // spec is named in the top-level `error`, and the disagreement is its own
+  // coded field.
+  it("350: a vacuous spec refused by the spec leg beside a green declared `npm test` is coded, not silent", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({
+        name: "vacuous", type: "module", main: "src/main.ts",
+        scripts: { test: "node --test --test-reporter=tap tests/oracle.spec.ts" },
+      }));
+      write(dir, "src/main.ts", "export const boot = (): string => 'ok';\n");
+      // TAP-green: two passing tests, zero failures — but every assertion is a
+      // shape/presence probe, so nothing about behaviour is certified.
+      write(dir, "tests/oracle.spec.ts", [
+        `import { test } from "node:test";`,
+        `import assert from "node:assert/strict";`,
+        `const x = 1;`,
+        `test("shape", () => { assert.equal(typeof x, "number"); });`,
+        `test("presence", () => { assert.ok(x); });`,
+        ``,
+      ].join("\n"));
+      const r = await treeRunAsConsumer(dir);
+      const spec = r.tests[0]!;
+      assert.equal(spec.run, "fail", "the vacuous green is refused by the spec leg");
+      assert.deepEqual(spec.tests, { pass: 0, fail: 0 }, "0 pass / 0 fail — the measured defect shape");
+      assert.equal(spec.code, "RT_E_SPEC_VACUOUS", "the refusal carries its registered code");
+      assert.equal(r.project!.test.run, "pass", "the tree's own declared test exited 0 on the SAME spec");
+      assert.equal(r.ok, false, "a red spec leg is never ok");
+      assert.equal(r.code, "RT_E_SPEC_VACUOUS", "the top-level red carries the decisive code");
+      assert.match(r.error ?? "", /tests\/oracle\.spec\.ts/, "the red spec is named in the top-level error");
+      assert.ok(
+        r.specScriptDisagreement,
+        "the runner/declared-script disagreement is its own machine field",
+      );
+      assert.equal(r.specScriptDisagreement!.spec, "tests/oracle.spec.ts");
+      assert.equal(r.specScriptDisagreement!.code, "RT_E_SPEC_VACUOUS");
+      assert.match(r.specScriptDisagreement!.note, /disagree/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("350 control: a genuinely behavioural spec leg is a pass and carries no code", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.tests[0]!.run, "pass");
+      assert.equal(r.tests[0]!.code, undefined, "an executed pass carries no error code");
+      assert.equal(r.code, undefined, "an ok tree carries no error code");
+      assert.equal(r.specScriptDisagreement, undefined);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1776,14 +1836,28 @@ function writeJobs(dir: string, jobs: Record<string, string>): void {
 }
 
 describe("treeSubstanceOf — the product-substance census (fixes/312_c6_ux · K3/K4)", () => {
-  it("no job modules → verdict empty, census zeros, NO note (job-less trees stay silent)", () => {
+  it("no job modules → the JOB-SCOPED reading (bare top level + jobScoped) is empty, NO note; the whole-tree reading still sees the emitted product code", () => {
     const dir = tempDir();
     try {
-      writeEmittedTree(dir, PASSING_SPEC);
+      writeEmittedTree(dir, PASSING_SPEC); // src/main.ts + src/lib/rows.ts are real code
       const s = treeSubstanceOf(dir, { green: true });
+      // W356: the bare top-level fields ARE the job-scoped reading, restored to
+      // HEAD — `verdict:"empty"` must stay REACHABLE for a tree with no
+      // generated job product, so the C-06 substance guard's shell detection
+      // (and the `emit --run --git` RT_E_SUBSTANCE_EMPTY hold) fires again.
       assert.equal(s.verdict, "empty");
-      assert.equal(s.files.length, 0);
-      assert.deepEqual([s.stubs, s.reexports, s.real], [0, 0, 0]);
+      assert.equal(s.real, 0, "no job modules → the tracked `real` is 0");
+      assert.deepEqual(
+        [s.jobScoped.stubs, s.jobScoped.reexports, s.jobScoped.real, s.jobScoped.files.length],
+        [0, 0, 0, 0],
+        "the job-scoped reading owns the bare top level and stays empty on a job-less tree",
+      );
+      assert.equal(s.jobScoped.verdict, "empty");
+      assert.deepEqual(s.files, s.jobScoped.files, "the bare `files` sample IS the job-scoped sample");
+      // fixes/354 A2-F3, kept — not deleted — under its own distinct name: the
+      // whole emitted tree still counts the real product modules.
+      assert.equal(s.wholeTree.verdict, "real");
+      assert.ok(s.wholeTree.real >= 2, "src/main.ts + src/lib/rows.ts are real modules");
       assert.equal(s.greenWhileStubbed, false, "nothing to census is never green-while-stubbed");
       assert.equal(s.oracleStubTrap, false, "no job modules → no trap to detect");
       assert.equal(s.note, undefined, "the note trigger is narrow — no job-file signal, no marking");
@@ -1792,14 +1866,52 @@ describe("treeSubstanceOf — the product-substance census (fixes/312_c6_ux · K
     }
   });
 
-  it("all-stub jobs → stub-skeleton + the loud note names the counts, the K3 reading and the K4 trap", () => {
+  it("fixes/354 A2-F3 on the `wholeTree` field: real code under src/generated/ (no job modules) reports real > 0 there — and `empty` on the job-scoped field", () => {
+    const dir = tempDir();
+    try {
+      // The measured "green-but-empty" shape: the emitter writes the barrel at
+      // src/generated.ts and real code under src/generated/, with no src/jobs/.
+      write(dir, "src/generated.ts", 'export * from "./generated/greeting.ts";\n');
+      write(dir, "src/generated/greeting.ts", 'export function greet(name: string): string { return `hi ${name}`; }\n');
+      const s = treeSubstanceOf(dir, { green: true });
+      assert.equal(s.wholeTree.verdict, "mixed", "the barrel is a reexport and the module is real");
+      assert.equal(s.wholeTree.real, 1, "the real generated module is counted HERE (pre-354 this read real:0)");
+      assert.ok(s.wholeTree.files.some((f) => f.path === "src/generated/greeting.ts" && f.kind === "real"));
+      // W356: editing the whole-tree reader moves only `wholeTree` — the number
+      // the campaign tracks (the bare top level / jobScoped) did not move.
+      assert.equal(s.verdict, "empty", "the job-scoped reading stays empty — no job modules exist");
+      assert.equal(s.jobScoped.files.length, 0, "the job-scoped reading selects no rows");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a tree with NO code modules at all still reads empty (fail-closed on true emptiness)", () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "x", type: "module" }));
+      const s = treeSubstanceOf(dir);
+      assert.equal(s.verdict, "empty");
+      assert.equal(s.wholeTree.verdict, "empty", "both readings agree on a truly empty tree");
+      assert.equal(s.files.length, 0);
+      assert.equal(s.note, undefined, "nothing to census → no marking");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("all-stub jobs → the JOB-scoped verdict is a stub skeleton (the K3 trap), the whole-tree reading is mixed, and the loud note names the job counts", () => {
     const dir = tempDir();
     try {
       writeEmittedTree(dir, TRAP_SPEC);
       writeJobs(dir, { "route.ts": STUB_JOB });
       const s = treeSubstanceOf(dir, { green: true });
-      assert.equal(s.verdict, "stub-skeleton");
+      assert.equal(s.verdict, "stub-skeleton", "the job product has no real module — the shell detection this guard reads");
       assert.deepEqual([s.stubs, s.reexports, s.real], [1, 0, 0]);
+      assert.equal(s.wholeTree.verdict, "mixed", "the whole tree also ships the real product modules");
+      assert.deepEqual([s.wholeTree.stubs, s.wholeTree.reexports, s.wholeTree.real], [1, 0, 2]);
+      assert.deepEqual([s.jobScoped.stubs, s.jobScoped.reexports, s.jobScoped.real], [1, 0, 0]);
+      assert.equal(s.jobScoped.verdict, "stub-skeleton", "the job layer is a stub skeleton");
       assert.equal(s.greenWhileStubbed, true, "green + stub jobs = the K3 misread this marking exists for");
       assert.equal(s.oracleStubTrap, true, "the oracle asserts the stub refusal — implementing reddens it (K4)");
       assert.ok(s.note, "a non-clean census over an EXISTING job-file set must carry the note");
@@ -1840,6 +1952,8 @@ describe("treeSubstanceOf — the product-substance census (fixes/312_c6_ux · K
       const s = treeSubstanceOf(dir);
       assert.equal(s.verdict, "mixed");
       assert.deepEqual([s.stubs, s.reexports, s.real], [1, 0, 1]);
+      assert.deepEqual([s.jobScoped.stubs, s.jobScoped.reexports, s.jobScoped.real], [1, 0, 1]);
+      assert.deepEqual([s.wholeTree.stubs, s.wholeTree.reexports, s.wholeTree.real], [1, 0, 3]);
       assert.match(s.note!, /1 of 2 job module\(s\) are TODO\(E-15\) stubs/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1854,6 +1968,8 @@ describe("treeSubstanceOf — the product-substance census (fixes/312_c6_ux · K
       const s = treeSubstanceOf(dir, { green: true });
       assert.equal(s.verdict, "real");
       assert.deepEqual([s.stubs, s.reexports, s.real], [0, 0, 1]);
+      assert.deepEqual([s.jobScoped.stubs, s.jobScoped.reexports, s.jobScoped.real], [0, 0, 1]);
+      assert.deepEqual([s.wholeTree.stubs, s.wholeTree.reexports, s.wholeTree.real], [0, 0, 3]);
       assert.equal(s.greenWhileStubbed, false, "a clean census is never green-while-stubbed");
       assert.equal(s.note, undefined, "a real census must not manufacture a marking");
     } finally {
@@ -1867,8 +1983,11 @@ describe("treeSubstanceOf — the product-substance census (fixes/312_c6_ux · K
       writeEmittedTree(dir, PASSING_SPEC);
       writeJobs(dir, { "bridge.ts": BRIDGE_JOB });
       const s = treeSubstanceOf(dir, { green: true });
-      assert.equal(s.verdict, "stub-skeleton", "no real module → not clean, whatever the leftover kind");
+      assert.equal(s.verdict, "stub-skeleton", "no real JOB module — the job layer is not clean");
       assert.deepEqual([s.stubs, s.reexports, s.real], [0, 1, 0]);
+      assert.deepEqual([s.jobScoped.stubs, s.jobScoped.reexports, s.jobScoped.real], [0, 1, 0]);
+      assert.equal(s.jobScoped.verdict, "stub-skeleton", "no real job module → the job layer is not clean");
+      assert.equal(s.wholeTree.verdict, "mixed", "the whole tree also ships real product modules");
       assert.equal(s.greenWhileStubbed, true, "reexport-only leftovers count as green-while-stubbed");
       assert.match(s.note!, /1 job module\(s\) are reexport-only bridges/);
     } finally {
@@ -1887,18 +2006,54 @@ describe("treeSubstanceOf — the product-substance census (fixes/312_c6_ux · K
       const census = treeSubstanceOf(dir);
       const headlessFiles = collectJobSources(dir);
       assert.deepEqual(
-        census.files.map((f) => f.path),
+        census.jobScoped.files.map((f) => f.path),
         headlessFiles.map((f) => f.path),
-        "the mirror (src/jobs + jobs, top-level .ts/.js/.mjs) must select exactly headless.collectJobSources' rows",
+        "the job-scoped mirror (src/jobs + jobs, top-level .ts/.js/.mjs) must select exactly headless.collectJobSources' rows",
       );
-      assert.equal(census.files.length, 3, "notes.md (extension) and loose.ts (directory) are never rows");
+      assert.equal(census.jobScoped.files.length, 3, "notes.md (extension) and loose.ts (directory) are never rows");
       const inv = inventoryFromJobSources(headlessFiles, dir);
       assert.deepEqual(
-        [census.stubs, census.reexports, census.real],
+        [census.jobScoped.stubs, census.jobScoped.reexports, census.jobScoped.real],
         [inv.stubs, inv.reexports, inv.real],
-        "the census counts must be the doctor's own classifier over those rows",
+        "the job-scoped census counts must be the doctor's own classifier over those rows",
       );
-      assert.equal(census.verdict, "mixed", "stub + reexport + real together = mixed");
+      assert.equal(census.jobScoped.verdict, "mixed", "stub + reexport + real job files = mixed");
+      assert.deepEqual(
+        census.files,
+        census.jobScoped.files,
+        "W356: the bare top-level `files` sample is the job-scoped sample (the tracked reading)",
+      );
+      assert.equal(census.verdict, census.jobScoped.verdict, "W356: the bare `verdict` IS the job-scoped verdict");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("R-8 (type-level): the census shape REQUIRES both scoped readings — a producer that omits one cannot compile", () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      const s = treeSubstanceOf(dir, { green: true });
+      // The reader publishes both scopes for every tree, so the required shape is
+      // satisfiable — and the plant below is a COMPILE error: its prover is the
+      // repo's own `npx tsc --noEmit`. If `jobScoped`/`wholeTree` ever go
+      // optional again, tsc reports "Unused '@ts-expect-error' directive" here
+      // and the typecheck gate reds, which is the point of pinning it in the
+      // type rather than only in `censusShape` (the runtime half, in
+      // `scripts/quality-ratchet.mjs`).
+      assert.ok(s.jobScoped && s.wholeTree, "treeSubstanceOf always sets both scoped readings");
+      const unscoped = {
+        stubs: 0,
+        reexports: 0,
+        real: 0,
+        files: [],
+        verdict: "empty" as const,
+        greenWhileStubbed: false,
+        oracleStubTrap: false,
+      };
+      // @ts-expect-error R-8 plant: `jobScoped` and `wholeTree` are both REQUIRED on TreeSubstance
+      const omitted: TreeSubstance = unscoped;
+      assert.equal(omitted.verdict, "empty", "the planted omission must fail the COMPILER, not a runtime assertion");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1958,7 +2113,9 @@ describe("treeRun — the K3 substance marking rides the verdict (fixes/312_c6_u
       const r = await treeRunAsConsumer(dir);
       assert.equal(r.ok, true, "the tree executes green — the marking qualifies it, it never fakes a red");
       assert.ok(r.substance, "every runnable verdict carries the census");
-      assert.equal(r.substance!.verdict, "stub-skeleton");
+      assert.equal(r.substance!.verdict, "stub-skeleton", "W356: the carried `verdict` is the job-scoped reading");
+      assert.equal(r.substance!.jobScoped?.verdict, "stub-skeleton");
+      assert.equal(r.substance!.wholeTree?.verdict, "mixed", "the whole-tree reading ships beside it");
       assert.equal(r.substance!.greenWhileStubbed, true);
       assert.match(r.note ?? "", /SUBSTANCE MARKING/, `the loud note rides the top-level note: ${r.note}`);
       assert.match(r.note ?? "", /stubs:1 reexports:0 real:0/);
@@ -2628,4 +2785,76 @@ describe("W61 B6 - skipped/todo bodies and assert.fail are not behavioural", () 
       true,
     );
   });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-06 — item 3: compile-check's substance verdict and product-quality's
+// module census agree BY CONSTRUCTION on the same bytes — including a tree of
+// pure re-exports and a tree of throw-stubs. Both route every classification
+// through dod.classifyModuleSource; this proves it on real files on disk.
+// ---------------------------------------------------------------------------
+describe("2026-10-06 — substance verdict <-> product-quality census parity", () => {
+  const readTree = (root: string): Array<{ path: string; source: string }> => {
+    const out: Array<{ path: string; source: string }> = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!/\.(ts|js|mjs)$/.test(e.name)) continue;
+        out.push({ path: full.slice(root.length + 1).replace(/\\/g, "/"), source: readFileSync(full, "utf8") });
+      }
+    };
+    walk(root);
+    return out.sort((a, b) => (a.path < b.path ? -1 : 1));
+  };
+  const STUB_JOB_SRC = 'export function runX() { throw new Error("TODO(E-15) stub: runX"); }\n';
+  const BRIDGE_SRC = 'export * from "./route.ts";\n';
+
+  const parityCase = (label: string, jobs: Record<string, string>): void => {
+    it(`${label}: substance verdict and product-quality census agree row for row`, () => {
+      const dir = tempDir();
+      try {
+        for (const [name, body] of Object.entries(jobs)) write(dir, `src/jobs/${name}`, body);
+        const substance = treeSubstanceOf(dir, { green: true });
+        const files = readTree(dir);
+        const whole = moduleCensus(files);
+        const job = jobModuleCensus(files);
+        const triple = [substance.stubs, substance.reexports, substance.real];
+        // W356: the bare top level + `jobScoped` are the JOB reading, `wholeTree`
+        // is the whole-tree reading. This fixture writes ONLY src/jobs/**, so the
+        // two must agree here — asserted, not assumed.
+        assert.deepEqual(triple, [job.stubs, job.reexports, job.real], "job census ≠ the bare (job-scoped) reading");
+        assert.deepEqual(
+          [substance.wholeTree.stubs, substance.wholeTree.reexports, substance.wholeTree.real],
+          [whole.stubs, whole.reexports, whole.real],
+          "whole-tree census ≠ the `wholeTree` reading",
+        );
+        // The verdict label is exactly the census arithmetic (no second rule).
+        const labelOf = (stubs: number, reexports: number, real: number): string =>
+          files.length === 0
+            ? "empty"
+            : real === 0
+              ? "stub-skeleton"
+              : stubs + reexports === 0
+                ? "real"
+                : "mixed";
+        assert.equal(substance.verdict, labelOf(job.stubs, job.reexports, job.real), "the verdict label must be the census arithmetic");
+        assert.equal(
+          substance.wholeTree.verdict,
+          labelOf(whole.stubs, whole.reexports, whole.real),
+          "the wholeTree label must be the census arithmetic",
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  };
+
+  parityCase("a tree of PURE RE-EXPORTS", { "a.ts": BRIDGE_SRC, "b.ts": BRIDGE_SRC });
+  parityCase("a tree of THROW-STUBS", { "a.ts": STUB_JOB_SRC, "b.ts": STUB_JOB_SRC });
+  parityCase("a REAL job tree", { "a.ts": "export function a() { return 1; }\n" });
+  parityCase("a MIXED tree", { "a.ts": STUB_JOB_SRC, "b.ts": "export function b() { return 1; }\n" });
 });

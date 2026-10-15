@@ -58,6 +58,14 @@ export type WildReviewContext = {
   phase: PhaseId;
   /** "advance" = judge a just-executed phase before leaving it; "gate" = an open approval gate. */
   reason: "advance" | "gate";
+  /**
+   * 347 — "plan" = judge the PLANNER ROWS before the first mutation. At that
+   * point the phase has not executed, so its artifacts and unmet DoD criteria
+   * cannot exist; judging the plan against them made every plan review reject
+   * ("the artifact list is empty") and parked a zero-human Wild Mode run at
+   * P0. Absent ⇒ "phase" (the pre-347 prompt, byte-identical).
+   */
+  mode?: "phase" | "plan";
   gate: WildGateInfo;
 };
 
@@ -194,25 +202,41 @@ export function buildWildReviewPrompt(ctx: WildReviewContext): string {
             : []),
         ]
       : [];
+  const planMode = ctx.mode === "plan";
+  const reviewReason = planMode
+    ? "this is a PLAN review — the rows below were proposed BEFORE the phase executed, so no phase artifacts can exist yet"
+    : ctx.reason === "gate"
+      ? "an approval gate is open for this phase"
+      : "this phase just executed; decide whether the loop may leave it";
+  const instruction = planMode
+    ? "Judge the PLAN itself: does it name concrete, phase-appropriate deliverables and a verification step for THIS phase? Approve when the plan is specific and sufficient for the phase's exit criteria; reject when it is generic, incomplete, or contradicts the phase. Do NOT reject for artifacts that cannot exist before execution."
+    : "Decide: VERDICT: approve|reject then FEEDBACK with an honest 3+ sentence critique.";
   return [
     `Project: ${p.name}`,
     `Domain: ${p.domain}`,
     `Brief: ${clip(p.brief ?? "", 400)}`,
     ``,
     `Phase under review: ${def.code} ${def.title} — ${def.summary}`,
-    `Review reason: ${ctx.reason === "gate" ? "an approval gate is open for this phase" : "this phase just executed; decide whether the loop may leave it"}`,
+    `Review reason: ${reviewReason}`,
     ...(planLines.length > 0 ? ["", ...planLines] : []),
-    ``,
-    // Blinded judge (185-U8): do NOT inject a pre-chewed PASS/FAIL DoD machine
-    // verdict. The model must weigh unmet criteria + artifacts itself.
-    `Unmet DoD criteria:\n${unmet}`,
-    ``,
-    artifacts ? `Phase artifacts:\n${artifacts}` : "Phase artifacts: (none)",
-    ``,
-    lastTest,
+    // 347: a plan review must NOT be shown the phase's (nonexistent) artifacts
+    // or its unmet DoD — those read as "the phase is empty" and reject every
+    // plan before execution. The rows above are the whole evidence.
+    ...(planMode
+      ? []
+      : [
+          ``,
+          // Blinded judge (185-U8): do NOT inject a pre-chewed PASS/FAIL DoD machine
+          // verdict. The model must weigh unmet criteria + artifacts itself.
+          `Unmet DoD criteria:\n${unmet}`,
+          ``,
+          artifacts ? `Phase artifacts:\n${artifacts}` : "Phase artifacts: (none)",
+          ``,
+          lastTest,
+        ]),
     ...(historyLines.length > 0 ? ["", ...historyLines] : []),
     ``,
-    `Decide: VERDICT: approve|reject then FEEDBACK with an honest 3+ sentence critique.`,
+    instruction,
   ].join("\n");
 }
 

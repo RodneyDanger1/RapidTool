@@ -29,6 +29,7 @@ import {
   FORBIDDEN_PRIMITIVE_NAMES,
   injectMissingExports,
   liveP6Synthesis,
+  p6SynthesisDeciding,
   localBindingLines,
   materializeImportableTree,
   mintTreeRunTested,
@@ -53,6 +54,7 @@ import {
   p6SynthesisProseRepairPrompt,
   p6SynthesisRepairPrompt,
   p6SynthesisSignatureRepairPrompt,
+  p6SynthesisContractTypeRepairPrompt,
   p6SynthesisSystemPrompt,
   p6SynthesisUserPrompt,
   p6RepairAgentSystemPrompt,
@@ -79,6 +81,10 @@ import {
   TREE_CHUNK0_RELOCATED_PATH,
   TREE_ENTRY_PATH,
   validateSynthesisModule,
+  deriveInterfaceTypeDefinitions,
+  interfaceTypeDefinitionLines,
+  contractTypeRedeclarations,
+  signatureTypeNames,
   unawaitedAsyncValueUses,
   REPAIR_TREE_FAILURE_TAIL_MAX,
   synthWithBackoff,
@@ -88,6 +94,11 @@ import {
   defaultTreeTypecheck,
   typecheckOffenderPaths,
   P6_TYPECHECK_REPAIR_MAX_CHUNKS,
+  // fixes/348 — full-brief budget, deterministic sampling, brief-coverage rank.
+  compactBriefForPrompt,
+  briefCoverageRatio,
+  P6_SYNTH_TEMPERATURE,
+  p6SeedForBrief,
   // W346 lane A — A1/A2/A3/A6/A12 pins.
   bindingLinesForCollision,
   briefModuleFloor,
@@ -105,6 +116,22 @@ import {
   p6SynthesisJsxRepairPrompt,
   p6SynthesisJsxNamespaceRepairPrompt,
   p6SynthesisMoneyRepairPrompt,
+  // fixes/349-P6 convergence classes (size / truncation / non-ESM / implicit-any / missing type).
+  compactModuleUnderBound,
+  implicitAnyParameters,
+  materializedCjsResidueHits,
+  stripCjsRuntimeGuards,
+  missingTypeDefinitionsForSource,
+  missingTypeNamesForSource,
+  stripLocalTypeDeclarations,
+  p6SynthesisSizeRepairPrompt,
+  // fixes/354 — self-sufficient contract types, TS2554 sibling arity.
+  signatureArityBounds,
+  siblingCallArityMismatches,
+  p6SynthesisArityRepairPrompt,
+  p6SynthesisEsmRepairPrompt,
+  p6SynthesisParamTypeRepairPrompt,
+  P6_MODULE_MAX_CHARS,
   registryNamesFor,
   suppressionPragmaHit,
   typecheckErrorCount,
@@ -143,7 +170,9 @@ const KANBAN_MODULE = [
   " * @param {string} name",
   " * @returns {{id: string, name: string, columns: Array}}",
   " */",
-  "function createBoard(name) {",
+  // fixes/349-P6: the chunked tree's validator requires typed parameters
+  // (noImplicitAny ⇒ TS7006), so the fixture is annotated. Bodies unchanged.
+  "function createBoard(name: string): { id: string; name: string; columns: unknown[] } {",
   '  if (typeof name !== "string" || name === "") { throw new Error("name required"); }',
   '  return { id: "b-" + name, name: name, columns: [] };',
   "}",
@@ -153,7 +182,7 @@ const KANBAN_MODULE = [
   " * @param {object} board",
   " * @param {Array} columns",
   " */",
-  "function addColumn(board, columns) {",
+  "function addColumn(board: { columns: unknown[] }, columns: unknown[]): { columns: unknown[] } {",
   '  if (!board || typeof board !== "object") { throw new Error("board required"); }',
   "  board.columns = columns || [];",
   "  return board;",
@@ -163,11 +192,11 @@ const KANBAN_MODULE = [
   " * req-3: drag cards between columns.",
   " * @param {Array} cards",
   " */",
-  "function dragCard(cards) {",
+  "function dragCard(cards: unknown[]): unknown[] {",
   "  return cards;",
   "}",
   "",
-  "function kanbanBoard(columns) {",
+  "function kanbanBoard(columns: unknown[]): { columns: unknown[] } {",
   "  return { columns: columns };",
   "}",
   "",
@@ -438,7 +467,19 @@ describe("p6Synthesis prompts (byte-stable contract)", () => {
     const s = p6SynthesisSystemPrompt();
     assert.match(s, /\bjson\b/i);
     assert.match(s, /\{"module":/);
-    assert.match(s, /module\.exports\.add = add/);
+    assert.match(s, /function add\(a: number, b: number\): number/);
+  });
+
+  // fixes/354 (A1-F1): the prompt historically instructed the model to ASSIGN
+  // `module.exports`, manufacturing the exact CJS shape the validator refuses.
+  // It must now advertise the plain-declaration envelope instead.
+  it("A1-F1: the system prompt no longer instructs a `module.exports` assignment", () => {
+    const s = p6SynthesisSystemPrompt();
+    assert.doesNotMatch(s, /Assign module\.exports/, "the assignment instruction is gone");
+    assert.doesNotMatch(s, /module\.exports\.[A-Za-z_$][\w$]*\s*=/, "no `module.exports.<name> =` example/instruction remains");
+    assert.doesNotMatch(s, /assign `?module\.exports/i, "nothing tells the model to assign module.exports");
+    assert.match(s, /never write `module\.exports`/, "the model is told NOT to write it");
+    assert.match(s, /exports` array/i, "the envelope exports array is the advertised binding");
   });
 
   // fixes/215b: the prompt's rule 4 and the validator denylist MUST agree.
@@ -1180,7 +1221,9 @@ function chunkModule(names: readonly string[], priorFirst?: string): string {
     : [];
   return [
     ...cross,
-    ...names.map((n) => `/** (fixes/144 fake chunk fn) ${n} */\nfunction ${n}(input) { return input; }`),
+    // fixes/349-P6: the chunked tree's validator requires typed parameters
+    // (TS7006), so the fake carries an annotated param/return.
+    ...names.map((n) => `/** (fixes/144 fake chunk fn) ${n} */\nfunction ${n}(input: unknown): unknown { return input; }`),
     "const ledgerKit = { property: 1, ledger: 1, rent: 1, collection: 1, tenant: 1, records: 1, lease: 1, renewal: 1, reminders: 1, payment: 1, tracking: 1 };",
     ...names.map((n) => `module.exports.${n} = ${n};`),
   ].join("\n");
@@ -3370,6 +3413,71 @@ describe("P6 synthesis budget constants reach both call sites (fixes/154)", () =
   });
 });
 
+describe("fixes/348 full-brief budget + deterministic sampling + brief-coverage rank", () => {
+  it("compactBriefForPrompt sends a realistic 8k brief IN FULL (no 2 000-char slice)", () => {
+    const brief =
+      "# Bloedow Bakery — Website\n\n" +
+      "Build the menu and the admin order queue. ".repeat(190) +
+      "\n\n## Non-negotiables\n- No invented prices. TAIL_SENTINEL";
+    assert.ok(brief.length > 8_000, `fixture is a real over-8k brief (${brief.length})`);
+    const out = compactBriefForPrompt(brief);
+    assert.equal(out, brief.trim(), "under budget ⇒ byte-identical, the WHOLE brief");
+    assert.ok(out.includes("TAIL_SENTINEL"), "the non-negotiables reach the model");
+    assert.ok(!out.includes("[TRUNCATED"), "nothing was cut");
+  });
+
+  it("compactBriefForPrompt preserves every gate noun when over budget (noun-free lines elided, marked)", () => {
+    const brief = "# Ledgerly rent ledger\n\n" + "z ".repeat(30_000) + "\nTenant lease payment handles renewals.\n";
+    assert.ok(brief.length > 48_000, `fixture is over budget (${brief.length})`);
+    const out = compactBriefForPrompt(brief);
+    assert.ok(out.length <= 48_000, "the compaction is bounded");
+    assert.ok(out.includes("Tenant lease payment"), "the noun-bearing line survives");
+    assert.ok(out.includes("BRIEF-COMPACTED"), "the elision is MARKED, never silent");
+  });
+
+  it("synthesis opts carry a deterministic low temperature + brief-derived seed on EVERY call", async () => {
+    const f = chunkedDeps();
+    const base = p6Base(LEDGER_BRIEF);
+    await liveP6Synthesis(base, f.deps);
+    assert.ok(f.synthOpts.length > 0, "the chunk path made synthesis calls");
+    for (const opts of f.synthOpts) {
+      assert.equal(opts.temperature, P6_SYNTH_TEMPERATURE, "a low temperature rides every synthesis call");
+      assert.equal(opts.seed, p6SeedForBrief(LEDGER_BRIEF), "candidate-0 seed is brief-derived and stable");
+    }
+    assert.equal(p6SeedForBrief(LEDGER_BRIEF), p6SeedForBrief(LEDGER_BRIEF), "the seed is reproducible");
+    assert.notEqual(p6SeedForBrief(LEDGER_BRIEF), p6SeedForBrief(LEDGER_BRIEF + " x"), "a different brief ⇒ a different seed");
+  });
+
+  it("briefCoverageRatio is 1 for a vocabulary-free brief and tracks the core measurement otherwise", () => {
+    assert.equal(briefCoverageRatio("and the", "export function x() {}"), 1, "nothing to prefer");
+    const brief = "# Ledgerly\n\n## Features\n- **Tenant**, **Lease**, **Payment**.";
+    const faithful =
+      "export function ledgerlyHandler() {}\nexport function tenantHandler() {}\nexport function leaseHandler() {}\nexport function paymentHandler() {}";
+    assert.ok(briefCoverageRatio(brief, faithful, null) >= 0.6, "a faithful source clears the bar");
+    assert.ok(briefCoverageRatio(brief, "export function unrelated() {}", null) < 0.6, "a generic source scores below it");
+  });
+
+  it("a natural-language BULLET page brief plans page renderer modules", () => {
+    const project = {
+      brief:
+        "# Bloedow Bakery — Website\n\n## What to build\n\n### Customer storefront\n- Home page: hero.\n- Menu pages: grouped products.\n- About page: the story.\n- Ordering: the core flow.\n",
+      kind: "app" as const,
+      specGraph: { nodes: [{ id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces" }] },
+      lattice: { jobs: [], entities: ["bakery"] },
+      contracts: { entities: [{ name: "bakery" }] },
+    };
+    const spec = { typeSignatures: [] as string[] };
+    const merged = mergeMinimumPlan([], deriveRequiredModules(project, spec), {
+      minimum: minimumTreeFileCount(project, spec),
+      project,
+    });
+    const pages = merged.filter((c) => /^src\/generated\/render-[a-z0-9-]+-page\.ts$/.test(c.path));
+    assert.ok(pages.some((p) => /renderHomePage/.test(p.signatures.join(" "))), "Home page is planned");
+    assert.ok(pages.some((p) => /renderMenuPage/.test(p.signatures.join(" "))), "Menu page is planned");
+    assert.ok(pages.some((p) => /renderOrderingPage/.test(p.signatures.join(" "))), "Ordering page is planned");
+  });
+});
+
 describe("synthWithBackoff token ledger (194/199)", () => {
   const okWithUsage = (n: number): LlmResult => ({
     ok: true,
@@ -3599,6 +3707,22 @@ describe("216f T-09/T-15 detectors (proseLineHits / nondeterministicPrimitiveHit
     assert.equal(proseLineHits("Should we ship it? Yes: ship.").length, 1);
   });
 
+  it("2026-10-05: an object-literal numeric map line is code, never prose", () => {
+    // The live keyed refusal (chunk 1/15) named exactly this class: a weekday
+    // index table continued on its own line carries no code-significant char,
+    // so the sentence-shape gate refused a legal map.
+    assert.deepEqual(
+      proseLineHits("  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday"),
+      [],
+    );
+    assert.deepEqual(proseLineHits("Monday: 1, Tuesday: 2, Wednesday: 3,"), []);
+    assert.deepEqual(proseLineHits("{ Sunday: 0, Monday: 1 },"), [], "the `{`/`}` veto already applies");
+    // The floor still holds: a lone `key: number` continuation is NOT exempted,
+    // and real deliberation prose is still caught.
+    assert.equal(proseLineHits("Chapter one: 5, Chapter two: 6, Chapter three: 7").length, 1);
+    assert.equal(proseLineHits("I will write the code now and make sure it works.").length, 1);
+  });
+
   it("T-15: flags Math.random in CODE; a literal/comment mention is data (masked contract)", () => {
     assert.equal(
       nondeterministicPrimitiveHit(maskLiteralsAndComments('function f() { return "x" + Math.random(); }')),
@@ -3803,8 +3927,14 @@ describe("W45/331-4 (Finding B) cross-chunk duplicate declarations", () => {
       assert.equal(refused.ok, false, `routed into the duplicate-declaration repair: ${decl}`);
       if (!refused.ok) {
         assert.equal(refused.code, "RT_E_VALIDATION");
-        assert.match(refused.error, /cross-chunk duplicate declaration/);
-        assert.match(refused.error, /already exported by src\/generated\/a\.ts/);
+        // 353: `enum` is now ALSO a forbidden primitive, so the enum forms are
+        // refused earlier and more strongly (never reaching the collision
+        // check) — the class forms still route to the duplicate-declaration
+        // refusal. Both are `RT_E_VALIDATION` refusals; the module never ships.
+        assert.match(refused.error, /cross-chunk duplicate declaration|forbidden primitive/);
+        if (!/forbidden primitive/.test(refused.error)) {
+          assert.match(refused.error, /already exported by src\/generated\/a\.ts/);
+        }
       }
     }
   });
@@ -3911,7 +4041,7 @@ describe("216f e2e refusals through liveP6Synthesis (T-09 / T-15)", () => {
       [
         "const ledgerKit = { property: 1, ledger: 1, rent: 1, collection: 1, tenant: 1, records: 1, lease: 1, renewal: 1, reminders: 1, payment: 1, tracking: 1 };",
         LEAKED_BLOB_PROSE,
-        ...names.map((n) => `function ${n}(input) { return input; }`),
+        ...names.map((n) => `function ${n}(input: unknown): unknown { return input; }`),
         ...names.map((n) => `module.exports.${n} = ${n};`),
       ].join("\n");
     const complete = async (prompt: string): Promise<LlmResult> => {
@@ -5488,14 +5618,15 @@ describe("W46/332-1 (P1) un-awaited async imports", () => {
   it("e2e chunked: a later chunk reading .ok off an async SIBLING export is refused, repaired, then accepted", async () => {
     const base = p6Base(LEDGER_BRIEF);
     const spec = ledgerSpec(20);
+    // fixes/349-P6: chunk fixtures carry typed params (noImplicitAny ⇒ TS7006).
     const withAsyncExport = (names: readonly string[]): string =>
-      `${chunkModule(names)}\nasync function getProperty(id) { return { ok: true, id: id }; }\nmodule.exports.getProperty = getProperty;\n`;
+      `${chunkModule(names)}\nasync function getProperty(id: unknown): Promise<{ ok: boolean; id: unknown }> { return { ok: true, id: id }; }\nmodule.exports.getProperty = getProperty;\n`;
     const asyncCall = (names: readonly string[], awaited: boolean): string => {
       const fn = names[0]!;
       const body = awaited
-        ? `async function ${fn}(input) { const property = await getProperty(input); return { ok: property.ok, value: input }; }`
-        : `function ${fn}(input) { const property = getProperty(input); return { ok: property.ok, value: input }; }`;
-      return chunkModule(names).replace(`function ${fn}(input) { return input; }`, body);
+        ? `async function ${fn}(input: unknown): Promise<{ ok: boolean; value: unknown }> { const property = await getProperty(input); return { ok: property.ok, value: input }; }`
+        : `function ${fn}(input: unknown): { ok: boolean; value: unknown } { const property = getProperty(input); return { ok: property.ok, value: input }; }`;
+      return chunkModule(names).replace(`function ${fn}(input: unknown): unknown { return input; }`, body);
     };
     const envelopeOf = (module: string, names: readonly string[], idx: number): string => {
       const reqTrace: Record<string, string> = {};
@@ -5647,7 +5778,7 @@ describe("W52/338-1 spec-driven plan coverage", () => {
     const p = projectFor(["alpha", "beta"]);
     const out = reconcilePlanTypeSignatures(p, ["collectRent(payment: Payment): Receipt"]);
     assert.deepEqual(out.addedLabels, ["alpha", "beta"]);
-    assert.ok(out.typeSignatures.includes("runAlpha(command: AlphaCommand): Promise<Record>"));
+    assert.ok(out.typeSignatures.includes("runAlpha(command: AlphaCommand): Promise<RecordEntry>"));
     const census = treeChunkPlanCensus(p, out.typeSignatures);
     assert.deepEqual(census.unbound, [], "no declared job is ever unbound after reconciliation");
     assert.ok(census.paths.includes("src/jobs/alpha.ts"));
@@ -5752,6 +5883,50 @@ describe("W48/334-1c tree-run mint evidence folds the declared-script state", ()
     const uh = (unverified.lastTest as { evidenceHash?: string } | null)?.evidenceHash;
     assert.ok(vh && uh, "both states still mint a tested verdict");
     assert.notEqual(vh, uh, "the P6 DoD's proof artifact distinguishes the toolchain states");
+  });
+
+  // A1-E13: `declaredUnverified` only folded into the hash, never gated the
+  // mint — so p6-verified could be minted while the emitted package's declared
+  // toolchain never ran. Exposed on the evidence, and the mint is refused when
+  // the scripts are unverified AND the tree actually carries node_modules.
+  it("A1-E13: exposes the declared-script state on the evidence", () => {
+    assert.equal(treeRunTestedEvidence(outcome({ declaredScriptsVerified: true, unverifiedDeclaredScripts: [] })).declaredScriptsVerified, true);
+    const unverified = treeRunTestedEvidence(outcome({ declaredScriptsVerified: false, unverifiedDeclaredScripts: ["typecheck", "build"] }));
+    assert.equal(unverified.declaredScriptsVerified, false);
+    assert.deepEqual(unverified.unverifiedDeclaredScripts, ["build", "typecheck"]);
+  });
+
+  it("A1-E13: an unverified toolchain on a tree that HAS node_modules refuses the tested mint", () => {
+    const project = (): Project => emptyProject({ name: "A1E13", brief: "A dispatch board for field service." });
+    const withDeps = mkdtempSync(join(tmpdir(), "rt-a1e13-"));
+    try {
+      mkdirSync(join(withDeps, "node_modules"), { recursive: true });
+      const refused = mintTreeRunTested(
+        project(),
+        outcome({ dir: withDeps, declaredScriptsVerified: false, unverifiedDeclaredScripts: ["typecheck", "build"] }),
+      );
+      assert.equal(refused.lastTest, null, "no tested stamp while an installed tree's declared toolchain is unverified");
+      const row = (refused.logs ?? []).find((l) => l.event === "p6.tree.tested.skipped");
+      assert.ok(row, "the refusal is a coded skip row");
+      assert.match(String(row!.detail), /node_modules/);
+      assert.match(String(row!.detail), /build, typecheck/);
+    } finally {
+      rmSync(withDeps, { recursive: true, force: true });
+    }
+    // The fresh-temp-dir case (no node_modules) MUST still mint: the declared
+    // scripts cannot resolve there, so refusing would make the criterion
+    // unsatisfiable for every P6 journey tree.
+    const fresh = join(tmpdir(), "rt-a1e13-absent-does-not-exist");
+    const minted = mintTreeRunTested(
+      project(),
+      outcome({ dir: fresh, declaredScriptsVerified: false, unverifiedDeclaredScripts: ["typecheck", "build"] }),
+    );
+    assert.equal((minted.lastTest as { label?: string } | null)?.label, "tested", "a tree with no install still mints");
+    assert.equal(
+      (minted.lastTest as { declaredScriptsVerified?: boolean }).declaredScriptsVerified,
+      false,
+      "the stamp names the unverified declared toolchain (so dod's p6-verified can weigh it)",
+    );
   });
 
   // 346 E1 · item 2 (L1-F2 residual): a passing spec that is SHAPE-ONLY
@@ -6256,6 +6431,86 @@ describe("W346-A1 brief-driven minimum file set", () => {
     assert.ok(merged.every((m) => typeof m.path === "string" && m.path.length > 0));
   });
 
+  it("fixes/347: a webapp brief's floor fallback carries briefed page renderers, not proper-noun stubs", () => {
+    const project = {
+      brief:
+        "# Golden Crust Bakery — Marketing Website\n\n## Required pages / sections\n1. **Home** — hero.\n2. **Menu** — grouped products.\n3. **Hours & Location** — a weekly table.\n4. **Order form** — a celebration-cake enquiry.\n5. **Contact** — phone and email.\n",
+      kind: "app" as const,
+      specGraph: { nodes: [{ id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces" }] },
+      lattice: { jobs: [], entities: ["bakery"] },
+      contracts: { entities: [{ name: "bakery" }] },
+    };
+    const spec = { typeSignatures: [] as string[] };
+    const min = minimumTreeFileCount(project, spec);
+    assert.ok(min >= 4, `the brief floor reaches the page set (got ${min})`);
+    const merged = mergeMinimumPlan([], deriveRequiredModules(project, spec), { minimum: min, project });
+    const pages = merged.filter((c) => /^src\/generated\/render-[a-z0-9-]+-page\.ts$/.test(c.path));
+    assert.ok(pages.length >= 2, `the floor carries briefed page renderer modules (${pages.map((p) => p.path).join(", ")})`);
+    for (const p of pages) {
+      assert.match(p.signatures.join(" "), /^render[A-Za-z0-9]*Page\(\): string$/, `zero-arg string renderer at ${p.path}`);
+    }
+    // fixes/347: the H1 proper-noun stub ("golden") is NOT the page surface.
+    assert.ok(!merged.some((c) => c.path === "src/generated/golden.ts"), "no H1 proper-noun stub ahead of the pages");
+  });
+
+  it("fixes/347: an undeclared/library kind keeps the legacy noun floor (no page renderers)", () => {
+    const project = {
+      brief:
+        "# Golden Crust Bakery — Marketing Website\n\n## Required pages / sections\n1. **Home** — hero.\n2. **Menu** — products.\n",
+      specGraph: { nodes: [{ id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces" }] },
+      lattice: { jobs: [], entities: ["bakery"] },
+      contracts: { entities: [{ name: "bakery" }] },
+    };
+    const spec = { typeSignatures: [] as string[] };
+    const merged = mergeMinimumPlan([], deriveRequiredModules(project, spec), {
+      minimum: minimumTreeFileCount(project, spec),
+      project,
+    });
+    assert.ok(
+      !merged.some((c) => /^src\/generated\/render-[a-z0-9-]+-page\.ts$/.test(c.path)),
+      "an undeclared kind is byte-parity legacy",
+    );
+    assert.ok(merged.some((c) => c.path.startsWith("src/domain/")), "the legacy domain module still lands");
+  });
+
+  it("fixes/347: a page the model already rendered is not duplicated (avoidNames)", () => {
+    const project = {
+      brief:
+        "# Golden Crust Bakery — Marketing Website\n\n## Required pages / sections\n1. **Home** — hero.\n2. **Menu** — products.\n3. **Hours & Location** — table.\n4. **Order form** — enquiry.\n5. **Contact** — phone and email.\n",
+      kind: "app" as const,
+      specGraph: { nodes: [] },
+      lattice: { jobs: [], entities: ["bakery"] },
+      contracts: { entities: [{ name: "bakery" }] },
+    };
+    const spec = { typeSignatures: [] as string[] };
+    const avoid = new Set(["renderHomePage", "renderMenuPage"]);
+    const merged = mergeMinimumPlan([], deriveRequiredModules(project, spec), {
+      minimum: minimumTreeFileCount(project, spec),
+      project,
+      avoidNames: avoid,
+    });
+    const pages = merged.filter((c) => /^src\/generated\/render-[a-z0-9-]+-page\.ts$/.test(c.path));
+    assert.ok(pages.length >= 1, "the un-rendered pages are added");
+    assert.ok(pages.some((p) => /renderContactPage/.test(p.signatures.join(" "))), "Contact is among them");
+    assert.ok(!merged.some((c) => c.path === "src/generated/render-home-page.ts"), "the model's Home renderer is not duplicated");
+    assert.ok(!merged.some((c) => c.path === "src/generated/render-menu-page.ts"), "the model's Menu renderer is not duplicated");
+  });
+
+  it("fixes/347: underProducedRefusal names a missing briefed page module", () => {
+    const project = {
+      brief:
+        "# Golden Crust Bakery — Marketing Website\n\n## Required pages / sections\n1. **Home** — hero.\n2. **Menu** — products.\n3. **Hours & Location** — table.\n4. **Order form** — enquiry.\n5. **Contact** — phone and email.\n",
+      kind: "app" as const,
+      specGraph: { nodes: [] },
+      lattice: { jobs: [], entities: ["bakery"] },
+      contracts: { entities: [{ name: "bakery" }] },
+    };
+    const spec = { typeSignatures: [] as string[] };
+    const refusal = underProducedRefusal(project, spec, []);
+    assert.ok(refusal, "a below-floor accepted set refuses coded");
+    assert.match(refusal!.detail, /render-[a-z0-9-]+-page\.ts/, "the refusal names the page module the plan demands");
+  });
+
   it("every declared spec-graph job is a required module (planned >= declared)", () => {
     const project = {
       brief: "a ledger with rent, lease and tenant records, payment tracking and property reminders",
@@ -6388,6 +6643,40 @@ describe("PR-28 C1-01/C1-04 — the minimum-file floor fires on the refusal path
       assert.match(refusal.detail, new RegExp(`\\b${label}\\b`), `the missing declared job ${label} is named`);
     }
     assert.match(refusal.detail, /under-produced/);
+  });
+
+  // A1-F6: the deciding code must ride the SYNTHESIS RESULT as a structured
+  // verdict, not only the prose journal row the emit driver re-parses — so the
+  // driver stops being the sole enforcement point.
+  it("A1-F6: an exhausted below-floor synthesis records RT_E_PLAN_UNDERPRODUCED as the deciding code on the result", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const q = await liveP6Synthesis(base, floorRefusalDeps(2).deps);
+    const stamped = (q as Project & { p6Synthesis?: { code?: string; detail?: string } }).p6Synthesis;
+    assert.ok(stamped, "the synthesis result carries a structured deciding verdict");
+    assert.equal(stamped.code, "RT_E_PLAN_UNDERPRODUCED", "the floor code is the DECIDING code, not the proximate validation reason");
+    assert.match(String(stamped.detail), /under-produced/);
+    // The reader returns the structured verdict and stays backward-compatible
+    // with a legacy record (structured field absent) via the journal row.
+    assert.equal(p6SynthesisDeciding(q)?.code, "RT_E_PLAN_UNDERPRODUCED");
+    const legacy: Project = { ...q };
+    delete (legacy as Project & { p6Synthesis?: unknown }).p6Synthesis;
+    assert.equal(p6SynthesisDeciding(legacy)?.code, "RT_E_PLAN_UNDERPRODUCED", "legacy records still resolve from the journal");
+  });
+
+  // A1-F14: the treeUpgraded comment claimed `modelRoute deepseek-pro` while the
+  // code derives the SERVED tier (P6_SYNTH_MODEL is flash). Pin the real behavior.
+  it("A1-F14: the P6 modelRoute is the SERVED tier, not a constant (flash default, pro when served)", async () => {
+    const flash = await liveP6Synthesis(p6Base(LEDGER_BRIEF), chunkedDeps().deps);
+    assert.equal(flash.modelRoute, "deepseek-flash", "the armed-default flash synthesis stamps flash");
+    const baseDeps = chunkedDeps().deps;
+    const complete = baseDeps.complete;
+    const proComplete = async (prompt: string, opts?: DeepSeekCompleteOptions): Promise<LlmResult> => {
+      const r = await complete(prompt, opts);
+      return r.ok ? { ...r, model: "deepseek-v4-pro" } : r;
+    };
+    const pro = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...baseDeps, complete: proComplete });
+    assert.equal(pro.modelRoute, "deepseek-pro", "a served pro id stamps the pro tier (never the flash constant)");
+    assert.notEqual(flash.modelRoute, pro.modelRoute, "the route is DERIVED from the served model");
   });
 
   it("S-3: an RT_E_LLM_REJECTED chunk refusal on a below-floor tree is coded RT_E_PLAN_UNDERPRODUCED", async () => {
@@ -6946,3 +7235,504 @@ describe("I7 � resumeAccepted chunk reuse (O-01)", () => {
     assert.deepEqual(q3.generatedTree, q1.generatedTree, "absent resumeAccepted is byte-identical to legacy");
   });
 });
+
+// ---------------------------------------------------------------------------
+// fixes/349 (P6 convergence) — the deterministic shared interface contract.
+//
+// The defect: a chunk prompt carried only signature TEXT, so a demanded
+// `runFlip(command: FlipCommand): Promise<Property>` named types the model had
+// no definition for; each module re-declared its own copy and the tree's tsc
+// refused on cross-chunk drift. The fix derives the full alias body for every
+// referenced domain type (the plan's floor-added signatures INCLUDED), renders
+// it into every chunk prompt as AUTHORITATIVE, injects the same canonical text
+// into every chunk that references it, and refuses a local redeclaration.
+// ---------------------------------------------------------------------------
+describe("fixes/349 P6 shared interface contract", () => {
+  const CONTRACTS = {
+    entities: [
+      { name: "Property", fields: [{ name: "id", type: "ulid" }, { name: "price", type: "number" }] },
+      { name: "Flip", fields: [{ name: "phase", type: "enum" }] },
+    ],
+    endpoints: [],
+  };
+
+  it("signatureTypeNames extracts PascalCase type refs, strips declaration generics, skips builtins", () => {
+    const names = signatureTypeNames([
+      "runFlip(command: FlipCommand): Promise<Property>",
+      "listFlipRuns(id: string, limit?: number): Promise<FlipRun[]>",
+      "send<TItem>(items: TItem[]): Record<string, unknown>",
+    ]);
+    assert.deepEqual(names, ["FlipCommand", "Property", "FlipRun", "TItem"], "order kept, builtins (Promise/Record/string) skipped");
+    assert.ok(!names.includes("Promise") && !names.includes("Record"), "TS utility globals never become definitions");
+  });
+
+  it("derives entity-backed bodies (exact + suffix) and a permissive fallback; deterministic", () => {
+    const sigs = ["runFlip(command: FlipCommand): Promise<Property>", "listFlipRuns(id: string): Promise<FlipRun[]>", "renderHome(): Widget"];
+    const defs = deriveInterfaceTypeDefinitions(sigs, CONTRACTS);
+    const byName = new Map(defs.map((d) => [d.name, d.declaration]));
+    assert.equal(byName.get("Property"), "type Property = { id?: string; price?: number; [key: string]: unknown; };");
+    assert.equal(byName.get("FlipCommand"), "type FlipCommand = { phase?: string; [key: string]: unknown; };", "suffix binds the Flip entity");
+    assert.equal(byName.get("FlipRun"), "type FlipRun = { phase?: string; [key: string]: unknown; };");
+    assert.equal(byName.get("Widget"), "type Widget = { [key: string]: unknown };", "an unknown name still RESOLVES to one shared identity");
+    assert.deepEqual(deriveInterfaceTypeDefinitions(sigs, CONTRACTS), defs, "pure + deterministic");
+    assert.deepEqual(deriveInterfaceTypeDefinitions(["x(): Promise<Record>"]), [], "a bare TS utility global is never defined");
+  });
+
+  it("interfaceTypeDefinitionLines states the definitions are authoritative; empty ⇒ no block (legacy)", () => {
+    assert.deepEqual(interfaceTypeDefinitionLines([]), []);
+    assert.deepEqual(interfaceTypeDefinitionLines(null), []);
+    const lines = interfaceTypeDefinitionLines(deriveInterfaceTypeDefinitions(["f(): Property"], CONTRACTS));
+    assert.ok(lines.join("\n").includes("TYPE DEFINITIONS (AUTHORITATIVE"));
+    assert.ok(lines.join("\n").includes("type Property = { id?: string;"));
+  });
+
+  it("the chunk prompt renders the full TYPE DEFINITIONS block; absent ⇒ byte-identical legacy", () => {
+    const spec = ledgerSpec(2);
+    const defs = deriveInterfaceTypeDefinitions(spec.typeSignatures, CONTRACTS);
+    const withDefs = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, [], [], CONTRACTS, defs);
+    assert.ok(withDefs.includes("TYPE DEFINITIONS (AUTHORITATIVE"), "the block reaches the chunk prompt");
+    for (const d of defs) assert.ok(withDefs.includes(d.declaration), `the definition ${d.name} is present`);
+    // The block is project-stable, so the cacheable prefix still matches across chunks.
+    const a = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures.slice(0, 8), [], [], CONTRACTS, defs);
+    const b = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures.slice(8), [], [], CONTRACTS, defs);
+    const marker = "TYPE SIGNATURES (must export";
+    assert.equal(a.slice(0, a.indexOf(marker)), b.slice(0, b.indexOf(marker)), "the definitions block is byte-stable across chunks");
+    // Absent ⇒ the legacy bytes (no block).
+    const legacy = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, [], []);
+    assert.ok(!legacy.includes("TYPE DEFINITIONS"), "no definitions ⇒ no block (legacy prompt bytes)");
+    assert.equal(p6SynthesisUserPrompt(LEDGER_BRIEF, spec), legacy, "the ≤8 delegate keeps the legacy byte contract");
+  });
+
+  it("materializeImportableTree injects the canonical aliases ONLY into referencing chunks, with no import and no extra file", () => {
+    const defs = deriveInterfaceTypeDefinitions(["f(): Property"], CONTRACTS);
+    const files = [
+      { path: "src/generated/a.ts", source: "function f(): Property { return { id: 'x' }; }\nmodule.exports.f = f;", exports: ["f"] },
+      { path: "src/generated/b.ts", source: "function g(): number { return 1; }\nmodule.exports.g = g;", exports: ["g"] },
+    ];
+    const m = materializeImportableTree(files, defs);
+    assert.equal(m.files.length, 3, "barrel + the two chunks — the contract adds no file");
+    const a = m.files.find((x) => x.path === "src/generated/a.ts")!;
+    const b = m.files.find((x) => x.path === "src/generated/b.ts")!;
+    assert.ok(a.source.includes("type Property = { id?: string;"), "the referencing chunk gets the alias");
+    assert.ok(!b.source.includes("type Property ="), "a chunk that never references it stays unchanged");
+    assert.ok(!/\bimport\b/.test(a.source), "the aliases are injected WITHOUT an import (forbidden-primitive contract unchanged)");
+    assert.deepEqual(materializeImportableTree(files, defs), m, "deterministic");
+    const legacy = materializeImportableTree(files);
+    const legacyA = legacy.files.find((x) => x.path === "src/generated/a.ts")!;
+    const legacyB = legacy.files.find((x) => x.path === "src/generated/b.ts")!;
+    assert.ok(
+      legacyA.source.includes("type Property = any;"),
+      "fixes/354: with NO plan definitions a referenced-but-undefined type still gets a permissive alias (self-sufficiency)",
+    );
+    assert.ok(!legacyB.source.includes("type Property ="), "a chunk that references nothing stays byte-unchanged");
+  });
+
+  it("the validator refuses a local redeclaration of a contract type and names its line", () => {
+    const module = "type Property = { id?: string };\nfunction f(): void {}\nmodule.exports.f = f;";
+    const withContracts = validateSynthesisModule(module, ["f"], ["f"], null, ["Property"]);
+    assert.equal(withContracts.ok, false, "a local contract-type declaration is refused");
+    if (!withContracts.ok) {
+      assert.match(withContracts.error, /local redeclaration of shared contract type/);
+      assert.match(withContracts.error, /"Property" \(line 1\)/);
+    }
+    assert.equal(validateSynthesisModule(module, ["f"], ["f"]).ok, true, "without the contract list the legacy validation is unchanged");
+    assert.deepEqual(contractTypeRedeclarations(module, ["Property", "Absent"]), [{ name: "Property", line: 1 }]);
+    assert.deepEqual(contractTypeRedeclarations(module, null), []);
+  });
+
+  it("the reconcile repair prompt quotes the authoritative definition and demands deletion", () => {
+    const defs = deriveInterfaceTypeDefinitions(["f(): Property"], CONTRACTS);
+    const prompt = p6SynthesisContractTypeRepairPrompt([{ name: "Property", line: 3 }], defs);
+    assert.match(prompt, /"Property" \(line 3\)/);
+    assert.ok(prompt.includes("type Property = { id?: string;"), "quotes the canonical definition");
+    assert.match(prompt, /DELETE every local declaration/);
+  });
+
+  it("a floor signature the model never authored is demanded WITH its derived definition, not bare", () => {
+    const project = {
+      specGraph: {
+        nodes: [{ id: "job-0", file: "src/jobs/alpha.ts", purpose: "Implement job “alpha” against the contract" }],
+      },
+      lattice: { jobs: ["alpha"], entities: ["record"] },
+    };
+    const out = reconcilePlanTypeSignatures(project, []);
+    // `record` is sanitized to `recordEntry` so the floor never emits the invalid `Promise<Record>`.
+    assert.ok(out.typeSignatures.includes("runAlpha(command: AlphaCommand): Promise<RecordEntry>"));
+    const defs = deriveInterfaceTypeDefinitions(out.typeSignatures, { entities: [{ name: "Alpha", fields: [{ name: "id", type: "ulid" }] }], endpoints: [] });
+    const names = defs.map((d) => d.name);
+    for (const demanded of ["AlphaCommand", "RecordEntry", "AlphaRun"]) {
+      assert.ok(names.includes(demanded), `the floor's demanded type ${demanded} has a definition`);
+    }
+  });
+
+  it("liveP6Synthesis records the shared interface contract it handed the chunks", async () => {
+    const f = chunkedDeps();
+    const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), f.deps);
+    assert.ok(q.logs.some((l) => l.event === "p6.tree.contracts" && /type definition/.test(String(l.detail))), "the contract row is recorded");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/349-P6 — the P6 contract-convergence classes. Each new refusal/repair
+// class is pinned by a unit that shows the class FIRES and an integration that
+// shows it CONVERGES (a repaired tree, never an outright refusal).
+// ---------------------------------------------------------------------------
+
+/** kind "app" + declared job nodes dropped ⇒ the chunked tree, one chunk, with
+ *  the KANBAN signatures (whose `Board`/`Column` demand a shared contract). */
+function convergeBase(): Project {
+  const base = { ...p6Base(), kind: "app" as const };
+  base.specGraph = {
+    nodes: (base.specGraph?.nodes ?? []).filter((n) => !String(n.id).startsWith("job-")),
+  } as Project["specGraph"];
+  return base;
+}
+
+const CONVERGE_DEPS = {
+  expand: async () => ({ ok: true as const, spec: KANBAN_SPEC }),
+  verify: async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", finalSource: "", cases: [] }),
+};
+
+describe("fixes/349-P6 convergence (size / truncation / non-ESM / redeclaration / implicit-any)", () => {
+  const PADDING = Array.from({ length: 9000 }, (_, i) => `// pad line ${i} ${"x".repeat(48)}`).join("\n");
+  const OVERSIZE = `${PADDING}\n${KANBAN_MODULE}`;
+
+  it("Fix 1 unit: compactModuleUnderBound shrinks an over-bound module under the bound, code preserved", () => {
+    assert.ok(OVERSIZE.length > P6_MODULE_MAX_CHARS, "fixture premise: over the bound");
+    const compact = compactModuleUnderBound(OVERSIZE);
+    assert.ok(compact !== null, "compacted");
+    assert.ok(compact!.length <= P6_MODULE_MAX_CHARS, "under the bound");
+    assert.ok(compact!.includes("function createBoard(name: string)"), "code preserved");
+    assert.ok(!compact!.includes("// pad line"), "comments removed");
+    assert.equal(compactModuleUnderBound("function f(): void { return; }"), "function f(): void { return; }", "under-bound input is returned as-is");
+  });
+
+  it("Fix 1 unit: the size repair prompt names the measured size and the bound", () => {
+    const p = p6SynthesisSizeRepairPrompt(63_371, P6_MODULE_MAX_CHARS);
+    assert.match(p, /63371/);
+    assert.match(p, /60000/);
+    assert.match(p, /at most 60000/);
+  });
+
+  it("Fix 1 e2e: an over-size candidate is REPAIRED by deterministic compaction, never refused", async () => {
+    const calls: string[] = [];
+    const complete = async (): Promise<LlmResult> => {
+      calls.push("complete");
+      return { ok: true, text: JSON.stringify({ ...KANBAN_ENVELOPE, module: OVERSIZE }), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(convergeBase(), { complete, ...CONVERGE_DEPS });
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "the over-size candidate is not refused");
+    assert.equal((q.generatedTree ?? []).length, 2, "the repaired tree seals (barrel + chunk)");
+    assert.deepEqual(calls, ["complete"], "the deterministic compaction needed no model repair call");
+  });
+
+  it("Fix 1 e2e: an over-size CODE body (uncompactable) gets the size re-prompt, then converges", async () => {
+    const bloat = Array.from({ length: 2000 }, (_, i) => `function pad${i}(): number { return ${i}; }`).join("\n");
+    const overCode = `${bloat}\n${KANBAN_MODULE}`;
+    assert.ok(overCode.length > P6_MODULE_MAX_CHARS, "fixture premise: over the bound through code");
+    const prompts: string[] = [];
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      prompts.push(prompt);
+      const shrink = prompt.includes("Your previous module was too large");
+      return { ok: true, text: JSON.stringify({ ...KANBAN_ENVELOPE, module: shrink ? KANBAN_MODULE : overCode }), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(convergeBase(), { complete, ...CONVERGE_DEPS });
+    assert.equal(prompts.filter((p) => p.includes("Your previous module was too large")).length, 1, "exactly one size re-prompt");
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "the size repair converged");
+    assert.equal((q.generatedTree ?? []).length, 2, "the repaired tree seals");
+  });
+
+  it("Fix 3 unit: a reply truncated AFTER module+exports is recovered by closing the envelope", () => {
+    const full = JSON.stringify({ module: KANBAN_MODULE, exports: KANBAN_ENVELOPE.exports, reqTrace: { "req-1": "createBoard" } });
+    const e = parseSynthesisEnvelope(full.slice(0, full.length - 5)); // cut inside the last string value
+    assert.ok(e, "recovered");
+    assert.equal(e!.module, KANBAN_MODULE.trim());
+    assert.deepEqual(e!.exports, KANBAN_ENVELOPE.exports);
+  });
+
+  it("Fix 3 unit: a reply truncated INSIDE the module string is reported truncated-json (never a partial module)", () => {
+    const full = JSON.stringify({ module: KANBAN_MODULE, exports: KANBAN_ENVELOPE.exports });
+    const failures: EnvelopeReadFailure[] = [];
+    const e = parseSynthesisEnvelope(full.slice(0, 120), (f) => failures.push(f));
+    assert.equal(e, null, "a partial module is never accepted");
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0]!.reason, "truncated-json");
+  });
+
+  it("Fix 3 e2e: a truncated first reply triggers the budget-aware re-prompt, then the tree seals", async () => {
+    const full = JSON.stringify({ ...KANBAN_ENVELOPE });
+    const cut = full.slice(0, 200); // deep inside the module string
+    const prompts: string[] = [];
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      prompts.push(prompt);
+      const truncRepair = prompt.includes("CUT OFF before its JSON envelope closed");
+      return { ok: true, text: truncRepair ? full : cut, model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(convergeBase(), { complete, ...CONVERGE_DEPS });
+    assert.equal(prompts.filter((p) => p.includes("CUT OFF before its JSON envelope closed")).length, 1, "exactly one truncation re-prompt");
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "the truncation repair converged");
+    assert.equal((q.generatedTree ?? []).length, 2, "the tree seals");
+  });
+
+  it("Fix 5 unit: a module.exports used as a VALUE is refused at validation (unloadable ESM)", () => {
+    const bad = "function f(): number { const m = module.exports; return 1; }";
+    assert.deepEqual(materializedCjsResidueHits(bad, ["f"]), ["module.exports"]);
+    const v = validateSynthesisModule(bad, ["f"], ["f"]);
+    assert.equal(v.ok, false);
+    if (!v.ok) assert.match(v.error, /non-ESM module body/);
+  });
+
+  it("Fix 5 unit: the normal declared-name CJS assign is still converted, never refused", () => {
+    const ok = "function f(): number { return 1; }\nmodule.exports.f = f;";
+    assert.deepEqual(materializedCjsResidueHits(ok, ["f"]), []);
+    assert.equal(validateSynthesisModule(ok, ["f"], ["f"]).ok, true);
+  });
+
+  // A1-F1 (P0): a LEGAL-ESM `typeof module` runtime guard short-circuits under
+  // the emitted `"type":"module"` tenant, so a guarded `module.exports` is not
+  // CommonJS residue — but it was flagged, the chunk refused, and the tree fell
+  // below floor. The guard (with its body) is now stripped/accepted.
+  it("A1-F1: a legal-ESM `typeof module` guard is accepted, not refused as CJS residue", () => {
+    const guarded = [
+      "function f(): number { return 1; }",
+      "if (typeof module !== 'undefined' && module.exports) {",
+      "  module.exports.f = f;",
+      "}",
+    ].join("\n");
+    assert.deepEqual(materializedCjsResidueHits(guarded, ["f"]), [], "a typeof-guarded reference is legal ESM, not residue");
+    const v = validateSynthesisModule(guarded, ["f"], ["f"]);
+    assert.equal(v.ok, true, v.ok ? "accepted" : v.error);
+    // The materializer strips the guard WITH its body: the emitted ESM carries no `module` reference.
+    const tree = materializeImportableTree([{ path: TREE_ENTRY_PATH, source: guarded, exports: ["f"] }]);
+    const chunk = tree.files.find((x) => x.path !== TREE_ENTRY_PATH)!;
+    assert.doesNotMatch(chunk.source, /module\s*\.\s*exports|typeof\s+module/, "the guard is stripped from the emitted ESM");
+    assert.match(chunk.source, /export \{ f \};/, "the declared export survives");
+    // Fix 5's original refusal is preserved for the UNGUARDED value-position read.
+    assert.deepEqual(
+      materializedCjsResidueHits("function f(): number { const m = module.exports; return 1; }", ["f"]),
+      ["module.exports"],
+    );
+  });
+
+  it("A1-F1: a bare `typeof module … && …module…` expression guard is stripped too", () => {
+    const bare = [
+      "function f(): number { return 1; }",
+      "typeof module !== 'undefined' && module.exports && (module.exports.f = f);",
+    ].join("\n");
+    assert.deepEqual(materializedCjsResidueHits(bare, ["f"]), []);
+    assert.doesNotMatch(stripCjsRuntimeGuards(bare), /typeof\s+module/, "the bare expression guard is removed");
+    assert.match(stripCjsRuntimeGuards(bare), /function f\(\): number/, "the real declaration is kept");
+    // A declaration that merely READS the typeof test is not a guard — untouched.
+    const reader = 'const isCjs = typeof module !== "undefined";';
+    assert.equal(stripCjsRuntimeGuards(reader), reader);
+  });
+
+  it("Fix 5 unit: the ESM repair prompt names the residue and the tenant", () => {
+    const p = p6SynthesisEsmRepairPrompt(["module.exports"]);
+    assert.match(p, /module\.exports/);
+    assert.match(p, /type.{0,4}module/);
+  });
+
+  it("Fix 6 unit: implicit-any params are detected; annotated/defaulted params are not", () => {
+    assert.deepEqual(implicitAnyParameters("function f(a) { return a; }").map((h) => h.param), ["a"]);
+    assert.deepEqual(implicitAnyParameters("function f(a: number): number { return a; }"), []);
+    assert.deepEqual(implicitAnyParameters("function f(a = 1): number { return a; }"), []);
+    const on = validateSynthesisModule("function f(a) { return a; }", ["f"], ["f"], null, null, { requireTypedParameters: true });
+    assert.equal(on.ok, false);
+    if (!on.ok) assert.match(on.error, /implicit-any parameter/);
+    assert.equal(validateSynthesisModule("function f(a) { return a; }", ["f"], ["f"]).ok, true, "off by default (library lane)");
+  });
+
+  it("Fix 6 unit: the param-type repair prompt names each function+parameter", () => {
+    const p = p6SynthesisParamTypeRepairPrompt([{ fn: "createBoard", param: "name", line: 2 }]);
+    assert.match(p, /createBoard/);
+    assert.match(p, /name/);
+    assert.match(p, /TS7006/);
+  });
+
+  it("Fix 6 unit: the materializer injects a permissive alias for a missing generic type argument (TS2304)", () => {
+    const src = "function f(x: Promise<Widget>): Promise<Widget> { return x; }\nmodule.exports.f = f;";
+    assert.ok(missingTypeNamesForSource(src).includes("Widget"));
+    assert.deepEqual(missingTypeDefinitionsForSource(src).map((d) => d.name), ["Widget"]);
+    const m = materializeImportableTree([{ path: TREE_ENTRY_PATH, source: src, exports: ["f"] }]);
+    const chunk = m.files.find((f) => f.path !== TREE_ENTRY_PATH)!;
+    assert.ok(chunk.source.includes("type Widget ="), "the missing referenced type is defined in the emitted file");
+  });
+
+  it("Fix 4 unit: stripLocalTypeDeclarations removes the divergent local alias and validation converges", () => {
+    const module = [
+      "type Board = { id: string };",
+      "function createBoard(): Board { return { id: 'b' }; }",
+      "module.exports.createBoard = createBoard;",
+    ].join("\n");
+    const before = validateSynthesisModule(module, ["createBoard"], ["createBoard"], null, ["Board"]);
+    assert.equal(before.ok, false, "the local redeclaration is refused");
+    if (!before.ok) assert.match(before.error, /redeclaration of shared contract type/);
+    const stripped = stripLocalTypeDeclarations(module, ["Board"]);
+    assert.ok(!stripped.includes("type Board ="), "the local alias is deleted");
+    assert.equal(validateSynthesisModule(stripped, ["createBoard"], ["createBoard"], null, ["Board"]).ok, true, "reconciled");
+  });
+
+  it("Fix 4 e2e: a chunk redeclaring a shared contract type converges deterministically (no model repair)", async () => {
+    const redecl = `${KANBAN_MODULE}\ntype Board = { id: string };\nfunction boardName(b: Board): string { return b.id; }`;
+    let repairCalls = 0;
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      if (prompt.includes("TYPE SIGNATURES (must export")) {
+        return { ok: true, text: JSON.stringify({ ...KANBAN_ENVELOPE, module: redecl }), model: "deepseek-v4-flash" };
+      }
+      repairCalls += 1;
+      return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(convergeBase(), { complete, ...CONVERGE_DEPS });
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "the redeclaration did not refuse the tree");
+    assert.equal(repairCalls, 0, "the deterministic strip converged without a model repair");
+    const chunk = (q.generatedTree ?? []).find((f) => f.path === TREE_CHUNK0_RELOCATED_PATH);
+    assert.ok(chunk, "the repaired chunk is on the tree");
+    assert.ok(!chunk!.source.includes("type Board = { id: string }"), "the divergent local alias is gone");
+    assert.ok(chunk!.source.includes("type Board ="), "the canonical contract alias is injected");
+  });
+});
+
+describe("fixes/354 generation-quality hardening (TS2304 / TS7006 / TS2554 / prose / determinism)", () => {
+  it("self-sufficient contract: a bare ANNOTATION type is detected and defined (TS2304)", () => {
+    const src = "function createNote(input: NoteInput): Note { return input; }";
+    const names = missingTypeNamesForSource(src);
+    assert.ok(names.includes("NoteInput"), "the annotation type is a missing name");
+    assert.ok(names.includes("Note"), "the return type is a missing name");
+    assert.deepEqual(missingTypeDefinitionsForSource(src).map((d) => d.name).sort(), ["Note", "NoteInput"]);
+    const m = materializeImportableTree([
+      { path: TREE_ENTRY_PATH, source: `${src}\nmodule.exports.createNote = createNote;`, exports: ["createNote"] },
+    ]);
+    const chunk = m.files.find((f) => f.path !== TREE_ENTRY_PATH)!;
+    assert.ok(
+      chunk.source.includes("type NoteInput = any;"),
+      "the referenced-but-undefined type is defined in the emitted file (permissive `any` so it cannot red the tree)",
+    );
+  });
+
+  it("a name already covered by the injected contract is not re-derived (no duplicate definition)", () => {
+    const defs = deriveInterfaceTypeDefinitions(["createNote(input: NoteInput): Note"]);
+    const out = missingTypeDefinitionsForSource("function createNote(input: NoteInput): Note { return input; }", defs, []);
+    assert.deepEqual(out, [], "covered names are skipped, so the canonical alias is the only definition");
+  });
+
+  it("a lib namespace root is never flattened into a shadowing alias (TS2694 guard)", () => {
+    const src = "function fmt(d: Date): string { return new Intl.DateTimeFormat('en').format(d); }";
+    assert.equal(missingTypeNamesForSource(src).includes("Intl"), false, "the Intl namespace root is skipped");
+  });
+
+  it("TS7006: a MULTI-LINE function declaration with untyped params is detected and refused", () => {
+    const src = "function handleKeyboardSelect(\n  board,\n  keyCode\n): number[][] {\n  return board;\n}";
+    const hits = implicitAnyParameters(src);
+    assert.deepEqual(hits.map((h) => h.param).sort(), ["board", "keyCode"]);
+    const v = validateSynthesisModule(src, ["handleKeyboardSelect"], ["handleKeyboardSelect"], null, null, { requireTypedParameters: true });
+    assert.equal(v.ok, false);
+    if (!v.ok) assert.match(v.error, /implicit-any parameter/);
+    const typed = "function handleKeyboardSelect(\n  board: number[][],\n  keyCode: number\n): number[][] {\n  return board;\n}";
+    assert.deepEqual(implicitAnyParameters(typed), [], "the annotated control is accepted");
+  });
+
+  it("TS2554: a direct sibling call with the wrong arity is refused; legal shapes accepted", () => {
+    const sigs = [
+      "export function watch(input: StreamInput, options: WatchOptions): Promise<void>",
+      "export function ping(): string",
+      "export function opt(a: string, b?: number): void",
+      "export function rest(...xs: number[]): void",
+    ];
+    const bounds = signatureArityBounds(sigs);
+    assert.deepEqual([bounds.get("watch")!.min, bounds.get("watch")!.max], [2, 2]);
+    assert.deepEqual([bounds.get("ping")!.min, bounds.get("ping")!.max], [0, 0]);
+    assert.deepEqual([bounds.get("opt")!.min, bounds.get("opt")!.max], [1, 2], "an optional param lowers min, not max");
+    assert.equal(bounds.get("rest")!.max, Number.POSITIVE_INFINITY, "a rest param makes max unbounded");
+    const mod = "function f(x: unknown): unknown {\n  watch(x);\n  ping();\n  rest(1, 2, 3);\n  opt('a');\n  return x;\n}";
+    assert.deepEqual(siblingCallArityMismatches(mod, sigs).map((m) => `${m.name}:${m.got}`), ["watch:1"]);
+    const v = validateSynthesisModule(mod, ["f"], ["f"], null, null, { siblingSignatures: sigs });
+    assert.equal(v.ok, false);
+    if (!v.ok) assert.match(v.error, /sibling call arity mismatch/);
+    // A member call is never mistaken for a sibling call; over-supply is caught too.
+    assert.deepEqual(siblingCallArityMismatches("function g(o: { watch: (a: unknown) => unknown }): unknown { return o.watch(1); }", sigs), []);
+    assert.deepEqual(siblingCallArityMismatches("function h(x: unknown): unknown { return ping(x); }", sigs).map((m) => `${m.name}:${m.got}`), ["ping:1"]);
+    // Without the sibling signatures the legacy validation is unchanged.
+    assert.equal(validateSynthesisModule(mod, ["f"], ["f"]).ok, true);
+  });
+
+  it("the arity repair prompt names the call and quotes the sibling signature", () => {
+    const sigs = ["export function watch(input: StreamInput, options: WatchOptions): Promise<void>"];
+    const p = p6SynthesisArityRepairPrompt([{ name: "watch", line: 3, got: 1, min: 2, max: 2 }], sigs);
+    assert.match(p, /"watch" at line 3: called with 1 argument/);
+    assert.match(p, /exactly 2/);
+    assert.ok(p.includes("export function watch(input: StreamInput, options: WatchOptions): Promise<void>"));
+  });
+
+  it("prose false positive fixed: a multi-property object continuation is code (gate not disarmed)", () => {
+    assert.deepEqual(proseLineHits("id: note.id, title: note.title, body: note.body,"), []);
+    assert.deepEqual(proseLineHits("  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday"), []);
+    assert.equal(proseLineHits("Given the constraints, I must interpret: the spec wins.").length, 1);
+  });
+
+  it("size bound cannot accept an over-bound module", () => {
+    const over = "const x = 1;\n".repeat(Math.ceil((P6_MODULE_MAX_CHARS + 10) / 11));
+    assert.ok(over.length > P6_MODULE_MAX_CHARS);
+    assert.equal(validateSynthesisModule(over, [], []).ok, false, "the bound is enforced");
+    assert.equal(compactModuleUnderBound(over), null, "an uncompactable over-bound body is refused, never truncated");
+  });
+
+  it("truncation recovery never yields a half-module", () => {
+    const partial = '{"module":"function f(';
+    const sink: EnvelopeReadFailure[] = [];
+    assert.equal(parseSynthesisEnvelope(partial, (f) => sink.push(f)), null, "no half-module is ever returned");
+    assert.equal(sink[0]!.reason, "truncated-json", "the read is reported, never silently accepted");
+  });
+
+  it("redeclaration strip removes EVERY local copy (cannot leave two definitions)", () => {
+    const module = [
+      "type Board = { id: string };",
+      "type Board = { id: number };",
+      "function createBoard(): Board { return { id: 'b' }; }",
+      "module.exports.createBoard = createBoard;",
+    ].join("\n");
+    const stripped = stripLocalTypeDeclarations(module, ["Board"]);
+    assert.equal((stripped.match(/type Board\s*=/g) ?? []).length, 0, "both local declarations are gone");
+    assert.equal(validateSynthesisModule(stripped, ["createBoard"], ["createBoard"], null, ["Board"]).ok, true, "the canonical alias is the only definition left");
+    // fixes/354: a single-line alias with no trailing `;` (ASI) is stripped too.
+    const asi = "type Board = { id: string }\nfunction createBoard(): Board { return { id: 'b' }; }\nmodule.exports.createBoard = createBoard;";
+    const asiStripped = stripLocalTypeDeclarations(asi, ["Board"]);
+    assert.equal((asiStripped.match(/type Board\s*=/g) ?? []).length, 0, "the no-semicolon alias is removed");
+    assert.equal(validateSynthesisModule(asiStripped, ["createBoard"], ["createBoard"], null, ["Board"]).ok, true, "strip converges for the ASI shape");
+  });
+
+  it("materializer strips a LOCAL contract declaration before reinjecting (no TS2300 duplicate)", () => {
+    // The measured keyed shape: a reused/ drifted module declares `type LogSource`
+    // locally while the contract also injects it → two definitions → TS2300.
+    const defs = deriveInterfaceTypeDefinitions(["openLogSource(): LogSource"]);
+    const raw = "type LogSource = any;\nfunction streamLines(src: LogSource): void { return; }\nmodule.exports.streamLines = streamLines;";
+    const m = materializeImportableTree([{ path: TREE_ENTRY_PATH, source: raw, exports: ["streamLines"] }], defs);
+    const chunk = m.files.find((f) => f.path !== TREE_ENTRY_PATH)!;
+    assert.equal((chunk.source.match(/type LogSource\s*=/g) ?? []).length, 1, "exactly one LogSource definition in the emitted file");
+    assert.ok(chunk.source.includes("type LogSource = { [key: string]: unknown };"), "the canonical contract alias is the one kept");
+  });
+
+  it("DETERMINISM: same brief + seed ⇒ same plan, same contract, same files (unit double-run)", async () => {
+    const run = async () => {
+      const base = p6Base(LEDGER_BRIEF);
+      const f = chunkedDeps();
+      const q = await liveP6Synthesis(base, f.deps);
+      return {
+        plan: (q.generatedTree ?? []).map((t) => t.path),
+        files: q.generatedTree ?? [],
+        source: q.generatedSource,
+        contract: q.logs.find((l) => l.event === "p6.tree.contracts")?.detail ?? null,
+        prompts: f.prompts,
+      };
+    };
+    const a = await run();
+    const b = await run();
+    assert.deepEqual(a.plan, b.plan, "identical plan");
+    assert.equal(a.contract, b.contract, "identical contract row");
+    assert.deepEqual(a.files, b.files, "identical files");
+    assert.deepEqual(a.prompts, b.prompts, "identical prompts (same seed ⇒ same plan/contract/files)");
+    assert.equal(a.source, b.source);
+    assert.deepEqual(deriveInterfaceTypeDefinitions(["f(x: Foo): Bar"]), deriveInterfaceTypeDefinitions(["f(x: Foo): Bar"]), "the contract derivation is pure");
+  });
+});
+

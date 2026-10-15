@@ -335,10 +335,13 @@ const E2E_SPEC = {
 /** Deterministic canned chunk module (codegen fixture shape): binds exactly
  *  the chunk's names and carries every brief noun as identifiers. */
 function e2eChunkModule(names: readonly string[]): string {
+  // 353: the synthesis validator now requires (a) every parameter typed and
+  // (b) an ESM body (no CJS residue) — a canned envelope that violates either
+  // is refused, exactly like a real model reply. Keep this fixture compliant.
   return [
-    ...names.map((n) => `/** (216t mock chunk fn) ${n} */\nfunction ${n}(input) { return input; }`),
+    ...names.map((n) => `/** (216t mock chunk fn) ${n} */\nexport function ${n}(input: unknown): unknown { return input; }`),
     "const ledgerKit = { property: 1, ledger: 1, rent: 1, collection: 1, tenant: 1, records: 1, lease: 1, renewal: 1, reminders: 1, payment: 1, tracking: 1 };",
-    ...names.map((n) => `module.exports.${n} = ${n};`),
+    `export const ledgerKitKeys = Object.keys(ledgerKit);`,
   ].join("\n");
 }
 

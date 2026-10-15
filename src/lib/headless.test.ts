@@ -76,10 +76,10 @@ import { PHASES } from "./phases.ts";
 import { ERROR_CODES } from "./errors.ts";
 import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project, WildPlan } from "./types.ts";
-import { applyPhaseResult, emptyProject } from "./engine.ts";
+import { applyPhaseResult, emptyProject, markPhaseDegraded } from "./engine.ts";
 import type { WildReviewer } from "./engine.ts";
 import type { RtEventSeed } from "./rt-events.ts";
-import type { TreeRunOutcome } from "./compile-check.server.ts";
+import type { TreeRunOutcome, TreeSubstanceReading } from "./compile-check.server.ts";
 import {
   liveP6Synthesis,
   materializeImportableTree,
@@ -841,21 +841,26 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
 
   it("W2 · 348: a converged tree-run persists treeRun {ok, verdictHash, verdict} + substance {verdict} on the record (and survives the persisted JSON round-trip)", async () => {
     const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    // W358 (R-8): `jobScoped` / `wholeTree` are REQUIRED on the census shape now,
+    // so this hand-built outcome must publish both. Its tree carries exactly the
+    // two job modules it names, so the job-scoped and whole-tree readings coincide
+    // — one measured reading, published under both required scopes.
+    const census: TreeSubstanceReading = {
+      stubs: 0,
+      reexports: 0,
+      real: 2,
+      files: [
+        { path: "src/jobs/order-total.ts", kind: "real" },
+        { path: "src/jobs/stock-levels.ts", kind: "real" },
+      ],
+      verdict: "real",
+    };
     const verdict: TreeRunOutcome = {
       ...greenVerdict,
       verdictHash: "abc123hash",
-      substance: {
-        stubs: 0,
-        reexports: 0,
-        real: 2,
-        files: [
-          { path: "src/jobs/order-total.ts", kind: "real" },
-          { path: "src/jobs/stock-levels.ts", kind: "real" },
-        ],
-        verdict: "real",
-        greenWhileStubbed: false,
-        oracleStubTrap: false,
-      },
+      // W356: the bare top-level fields ARE the job-scoped reading, so the
+      // required pair spreads the same measured reading into both scopes.
+      substance: { ...census, greenWhileStubbed: false, oracleStubTrap: false, jobScoped: census, wholeTree: census },
     };
     const res = await driveP6Journey(base, {
       deps: { synthesize: async (p) => withTree(p), runTree: async () => verdict, recordGate: greenGateRecord },
@@ -1564,6 +1569,43 @@ describe("PR-16 (I7/O-01) — driveP6Journey activates accepted-chunk reuse", ()
     );
   });
 
+  it("strips the injected shared-contract prelude so a resumed chunk re-materializes idempotently (no TS2300)", async () => {
+    // A raw accepted chunk that references a shared contract type. Materializing
+    // it injects the canonical prelude at the top of the file.
+    const defs = [{ name: "MenuItem", declaration: "type MenuItem = { [key: string]: unknown };" }];
+    const raw = [
+      {
+        path: "src/jobs/a.ts",
+        source: "function a(x: MenuItem): MenuItem { return x; }\nmodule.exports.a = a;\n",
+        exports: ["a"],
+      },
+    ];
+    const accepted = materializeImportableTree(raw, defs);
+    const stored = accepted.files.find((f) => f.path === "src/jobs/a.ts");
+    assert.ok(stored, "the chunk is materialized");
+    assert.match(stored!.source, /Generated shared interface contract/, "the prelude is injected on first materialize");
+    const project = {
+      generatedTree: accepted.files.map((f) => toGeneratedTreeFile(f.path, f.source)),
+    } as unknown as Project;
+
+    const resume = await resumeAcceptedFromTree(project);
+    assert.ok(resume && resume.length > 0, "the persisted tree yields a resume set");
+    const chunk = resume!.find((r) => r.path === "src/jobs/a.ts");
+    assert.ok(chunk, "the chunk is resumed");
+    assert.doesNotMatch(
+      chunk!.source,
+      /Generated shared interface contract/,
+      "the reconstructed source is RAW again — the prelude is stripped, not carried through",
+    );
+
+    // The fix's proof: re-materializing the resumed RAW source with the SAME defs
+    // reproduces the accepted bytes byte-for-byte — one `type MenuItem`, not two.
+    const rematerialized = materializeImportableTree(resume!.map((r) => ({ ...r })), defs);
+    assert.deepEqual(rematerialized.files, accepted.files, "reuse re-materializes idempotently (no duplicate alias)");
+    const menuItemDecls = (rematerialized.files.find((f) => f.path === "src/jobs/a.ts")!.source.match(/^type MenuItem =/gm) ?? []).length;
+    assert.equal(menuItemDecls, 1, "exactly one canonical MenuItem declaration in the re-materialized chunk");
+  });
+
   it("a second cycle issues 0 synthesis calls for the accepted paths and logs p6.synthesis.reused", async () => {
     const savedKey = process.env.DEEPSEEK_API_KEY;
     process.env.DEEPSEEK_API_KEY = "sk-i7-reuse-pin";
@@ -1596,9 +1638,12 @@ describe("PR-16 (I7/O-01) — driveP6Journey activates accepted-chunk reuse", ()
     };
     const chunkModule = (names: readonly string[]): string =>
       [
-        ...names.map((n) => `function ${n}(input) { return input; }`),
+        // 353: typed params + an ESM body — the synthesis validator now refuses
+        // an untyped or CJS-residue module, so a compliant fixture is required
+        // for the accepted-chunk reuse path to have anything to accept.
+        ...names.map((n) => `export function ${n}(input: unknown): unknown { return input; }`),
         "const ledgerKit = { property: 1, ledger: 1, rent: 1, collection: 1, tenant: 1, records: 1, lease: 1, renewal: 1, reminders: 1, payment: 1, tracking: 1 };",
-        ...names.map((n) => `module.exports.${n} = ${n};`),
+        "export const ledgerKitKeys = Object.keys(ledgerKit);",
       ].join("\n");
     const fake = () => {
       const prompts: string[] = [];
@@ -2601,10 +2646,14 @@ describe("342-2 — researchLive runs the keyless research layer for a research 
       const url = String(input);
       calls.push(url);
       if (url.includes("lite.duckduckgo.com")) {
-        const target = encodeURIComponent("https://example.com/breakout-guide");
+        // ON-TOPIC for FIXTURE_BRIEF (field-service/HVAC dispatch): the overlay
+        // now applies the engine's relevance filter, so an unrelated result
+        // (the old "breakout paddle physics") is correctly dropped and this
+        // threading pin would assert on an empty corpus.
+        const target = encodeURIComponent("https://example.com/field-service-dispatch-guide");
         const html =
-          `<a href="//duckduckgo.com/l/?uddg=${target}">Breakout guide</a>` +
-          `<td class='result-snippet'>A real snippet about breakout paddle physics.</td>`;
+          `<a href="//duckduckgo.com/l/?uddg=${target}">Field-service dispatch guide</a>` +
+          `<td class='result-snippet'>A real snippet about field service dispatch, HVAC jobs, techs, parts and market competitors.</td>`;
         return new Response(html, { status: 200 });
       }
       return new Response("", { status: 404 });
@@ -2646,12 +2695,12 @@ describe("342-2 — researchLive runs the keyless research layer for a research 
       assert.equal(after.research?.length ?? 0, 1, "the free-search corpus landed");
       assert.equal(after.research?.[0]?.provider, "duckduckgo");
       assert.equal(after.research?.[0]?.items.length, 1);
-      assert.equal(after.research?.[0]?.items[0]?.url, "https://example.com/breakout-guide");
-      assert.equal(after.research?.[0]?.items[0]?.title, "Breakout guide");
+      assert.equal(after.research?.[0]?.items[0]?.url, "https://example.com/field-service-dispatch-guide");
+      assert.equal(after.research?.[0]?.items[0]?.title, "Field-service dispatch guide");
       const researchArtifacts = after.artifacts.filter((a) => a.kind === "research");
       assert.equal(researchArtifacts.length, 2, "the floor's illustrative artifact + the real fetched finding");
       assert.ok(
-        researchArtifacts.some((a) => a.title === "Breakout guide"),
+        researchArtifacts.some((a) => a.title === "Field-service dispatch guide"),
         "the fetched finding landed as a research artifact",
       );
       assert.ok(
@@ -2684,6 +2733,72 @@ describe("342-2 — researchLive runs the keyless research layer for a research 
       );
     } finally {
       stub.restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-05 — the bare-Node research overlay applies the ENGINE's relevance
+// filter (W61 C9 parity). Before this wiring the overlay persisted a provider's
+// findings verbatim, so an off-intent listing/category page earned the headless
+// corpus and an artifact even though engine.fetchResearch drops it.
+// ---------------------------------------------------------------------------
+describe("W61 C9 parity — the headless research overlay filters off-intent findings", () => {
+  it("drops a rental-listing page from the corpus and artifacts; records the drop", async () => {
+    const savedKey = process.env.TAVILY_API_KEY;
+    const realFetch = globalThis.fetch;
+    const realNow = Date.now;
+    Date.now = () => 1_700_000_000_222;
+    try {
+      process.env.TAVILY_API_KEY = "tvly-348-dummy-not-a-real-key";
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            query: "software api architecture sdk",
+            results: [
+              {
+                title: "Software API architecture guide",
+                url: "https://docs.example.com/api-guide",
+                content: "How to build a typed API SDK for a software tool.",
+              },
+              {
+                title: "Apartments for rent near Winona",
+                url: "https://rent.example.com/listings",
+                content: "Browse rentals, lease terms and tenant listings.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )) as typeof fetch;
+
+      // An engineering-intent brief so the filter's blocklist applies to the
+      // off-intent listing page (a non-engineering brief would keep it).
+      const p = createProject({
+        brief: "Build a software API architecture tool with a typed SDK for developers.",
+        name: "RelevanceFilter",
+      });
+      p.currentPhase = 7;
+      p.phases = Array.from({ length: 13 }, (_, id) => ({
+        id,
+        status: id <= 6 ? ("complete" as const) : id === 7 ? ("ready" as const) : ("locked" as const),
+      })) as Project["phases"];
+
+      const after = await runPhase(p, 7, { researchLive: true });
+
+      const titles = (after.artifacts ?? []).filter((a) => a.kind === "research").map((a) => a.title);
+      assert.ok(titles.some((t) => t.includes("Software API")), "the on-intent finding must land");
+      assert.ok(!titles.some((t) => t.includes("Apartments")), "the off-intent listing page must be filtered");
+      const corpusTitles = (after.research ?? []).flatMap((r) => r.items.map((i) => i.title));
+      assert.ok(!corpusTitles.some((t) => t.includes("Apartments")), "the off-intent item must not earn the corpus");
+      assert.ok(
+        (after.logs ?? []).some((l) => l.event === "p7.live.research.filtered"),
+        "the filter drop must be recorded (never a silent exclusion)",
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+      Date.now = realNow;
+      if (savedKey === undefined) delete process.env.TAVILY_API_KEY;
+      else process.env.TAVILY_API_KEY = savedKey;
     }
   });
 });
@@ -5752,5 +5867,339 @@ describe("Lane F1 (350) — per-phase telemetry", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W352 (R-17/R-19/R-20) — the workflow-driver fixes.
+// ---------------------------------------------------------------------------
+
+/** A REAL-but-below-floor project: generated substance on the record plus the
+ *  coded `RT_E_PLAN_UNDERPRODUCED` refusal as the FINAL synthesis verdict. */
+function belowFloorProject(): ReturnType<typeof createProject> {
+  const base = createProject({ brief: FIXTURE_BRIEF, name: "BelowFloor352" });
+  return {
+    ...base,
+    generatedSource: "export function real(): number {\n  return 1;\n}\n",
+    logs: [
+      ...(Array.isArray(base.logs) ? base.logs : []),
+      {
+        ts: Date.now(),
+        phase: 6,
+        level: "error" as const,
+        event: "p6.synthesis.refused",
+        detail: "RT_E_PLAN_UNDERPRODUCED · missing declared modules: records, service",
+      },
+    ],
+  } as typeof base;
+}
+
+describe("W352 R2-01 - a below-floor partial ships only WITH the banner and the refusal", () => {
+  it("default refuses before writing; underProduced:'banner' lands the partial with the caution banner", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-belowfloor-"));
+    try {
+      const p = belowFloorProject();
+      const refused = await emitProject(p, join(dir, "refused"));
+      assert.equal(refused.ok, false, "the default ship path refuses a below-floor plan");
+      if (!refused.ok) assert.equal(refused.code, "RT_E_PLAN_UNDERPRODUCED");
+      assert.equal(existsSync(join(dir, "refused")), false, "no partial is materialized by default");
+
+      const landed = await emitProject(p, join(dir, "banner"), { redTree: "banner", underProduced: "banner" });
+      assert.equal(landed.ok, true, landed.ok ? "" : landed.error);
+      if (landed.ok) {
+        assert.equal(landed.underProduced?.code, "RT_E_PLAN_UNDERPRODUCED", "the refusal is recorded on the result");
+        assert.match(String(landed.underProduced?.detail), /RT_E_PLAN_UNDERPRODUCED/);
+        const readme = readFileSync(join(dir, "banner", "README.md"), "utf8");
+        assert.match(readme, /BELOW-FLOOR PLAN/, "the unmissable banner is prepended to the emitted README");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("W352 R-19 - a commit is evidence of a verified tree (re-verify before landing)", () => {
+  it("refuses to land when the emitted tree no longer re-verifies green", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-landverify-"));
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF, name: "LandVerify352" });
+      const emitted = await emitProject(p, dir);
+      assert.equal(emitted.ok, true, emitted.ok ? "" : emitted.error);
+      if (!emitted.ok) return;
+      // Corrupt a tree file after the emit: the pre-commit re-verification must
+      // see red and refuse — no commit over unverified bytes.
+      writeFileSync(join(dir, "broken352.ts"), "export const x: = 1;\n", "utf8");
+      const landed = await landEmittedTree(p, dir, { files: emitted.files });
+      assert.equal(landed.ok, false, "a red re-verification must withhold the commit");
+      assert.equal((landed as { code?: string }).code, "RT_E_TREE_RUN_FAILED");
+      assert.equal(existsSync(join(dir, ".git")), false, "no repository/commit was created");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("W352 R-20 - the general keyed edge is threaded into headless wild steps", () => {
+  it("invokes an injected livePhaseEdge for the non-P6/P7 phase", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "WildEdge352" });
+    const seen: number[] = [];
+    const res = await wildStartRun(base, {
+      maxSteps: 1,
+      livePhaseEdge: (phase, proj) => {
+        seen.push(phase);
+        return Promise.resolve(proj);
+      },
+    });
+    assert.equal(res.ok, true, res.ok ? "" : res.error);
+    assert.ok(seen.length >= 1, "the injected general keyed edge must be threaded into the wild step");
+    assert.equal(seen[0], base.currentPhase, "it runs for the phase the step executes");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A4 (354 wave) — engine, Wild Mode & driver honesty.
+//   §A4-E5  the agent seal is threaded INTO `stageWildPlan`, so an approved plan
+//           executes with no false append-only `wild.paused_plan` park row.
+//   §A4-E11 the documented coded machine risk-acceptance path is reachable from
+//           a real driver (declared rule id), not test-only.
+//   §A4-E18 a failed tested-mint lands a coded `p6.tree.tested.mint_failed` row.
+//   §A4-E2  the advisory tail, the packet on ANY stop, and the honest terminal
+//           status (`complete_with_failures`).
+//   §A4-E9  the additive `degraded` phase marker.
+// ---------------------------------------------------------------------------
+
+const a4Plan = (): WildPlan => ({
+  goal: "deliver the brief",
+  steps: [
+    { id: "s1", action: "draft the core module", why: "the brief requires it" },
+    { id: "s2", action: "verify the module", why: "machine verification is the P6 bar" },
+  ],
+  source: "planner",
+  plannedAt: 1,
+  note: "A4 pins",
+});
+
+const a4Approving: WildReviewer = async () => ({
+  ok: true,
+  verdict: "approve",
+  feedback: "The rows name concrete deliverables and a verification step for this phase.",
+  model: "pin",
+});
+
+describe("A4-E5 — the agent seal is threaded into stageWildPlan (no false park row)", () => {
+  it("executes an approved plan with NO wild.paused_plan row", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "SealPlanA4" });
+    const seeded: Project = { ...base, wildPlan: a4Plan() };
+    const res = await wildStartRun(seeded, { maxSteps: 1, agentSeal: true, reviewer: a4Approving });
+    assert.equal(res.ok, true, res.ok ? "" : res.error);
+    if (!res.ok) return;
+    assert.ok(
+      (res.project.logs ?? []).some((l) => l.event === "wild.plan_approved"),
+      "the machine approval is ledgered",
+    );
+    assert.ok(
+      !(res.project.logs ?? []).some((l) => l.event === "wild.paused_plan"),
+      "the seal writes NO spurious review park row into the append-only ledger",
+    );
+    assert.ok(
+      (res.steps ?? 0) >= 1,
+      "`staged` is truthful — the run stepped instead of parking (`steps` is optional by design; an absent count must fail this, not type-error it)",
+    );
+  });
+
+  it("an unsealed caller still parks (opt-in consent, unchanged bytes)", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "SealPlanA4b" });
+    const seeded: Project = { ...base, wildPlan: a4Plan() };
+    const res = await wildStartRun(seeded, { maxSteps: 1, reviewer: a4Approving });
+    assert.equal(res.ok, true, res.ok ? "" : res.error);
+    if (!res.ok) return;
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.steps, 0);
+    assert.ok((res.project.logs ?? []).some((l) => l.event === "wild.paused_plan"));
+  });
+});
+
+describe("A4-E11 — the coded machine risk-acceptance is reachable from a driver", () => {
+  const rejecting: WildReviewer = async () => ({
+    ok: true,
+    verdict: "reject",
+    feedback: "The phase's deliverable is generic boilerplate with no brief evidence behind it.",
+    model: "pin",
+  });
+
+  it("wildStartRun arms acceptRiskUnderSeal and records the declared rule id", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "RiskA4" });
+    const res = await wildStartRun(base, {
+      maxSteps: 1,
+      agentSeal: true,
+      acceptRiskUnderSeal: "A4-E11-pin-rule",
+      reviewer: rejecting,
+    });
+    assert.equal(res.ok, true, res.ok ? "" : res.error);
+    if (!res.ok) return;
+    const row = (res.project.logs ?? []).find((l) => l.event === "wild.risk_accepted");
+    assert.ok(row, "the declared rule armed the coded machine risk acceptance");
+    assert.match(String(row?.detail), /A4-E11-pin-rule/, "the rule id is recorded verbatim");
+    assert.match(String(row?.detail), /decidedBy:autopilot/, "never a human seat");
+    assert.equal(res.project.hitl ?? null, null, "no human gate is minted on the machine path");
+  });
+
+  it("without the declared rule the same sealed reject still parks (opt-in only)", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "RiskA4b" });
+    const res = await wildStartRun(base, { maxSteps: 1, agentSeal: true, reviewer: rejecting });
+    assert.equal(res.ok, true, res.ok ? "" : res.error);
+    if (!res.ok) return;
+    assert.equal(res.outcome, "paused", "no rule ⇒ the pre-fix park");
+    assert.equal(
+      (res.project.logs ?? []).some((l) => l.event === "wild.risk_accepted"),
+      false,
+      "the risk-acceptance path is never implicitly armed",
+    );
+  });
+});
+
+describe("A4-E18 — a tested-mint failure lands a coded row (no silent-skip region)", () => {
+  it("records p6.tree.tested.mint_failed when the mint throws", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-mintfail-"));
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF, name: "MintFailA4" });
+      // Poison ONE spec row so the mint's own evidence reader throws on the
+      // property access (`mintTreeRunTested` → `treeRunTestedEvidence`).
+      const poisoned = {
+        ok: true,
+        dir,
+        compile: { ok: true, dir, checked: 0, passed: 0, failed: 0, skipped: 0, verdicts: [] },
+        tests: [
+          {
+            get run(): string {
+              throw new Error("A4-E18 forced mint failure");
+            },
+          },
+        ],
+        run: null,
+      } as unknown as TreeRunOutcome;
+      const out = await promoteEmittedTreeTested(p, dir, poisoned);
+      const row = (out.project.logs ?? []).find((l) => l.event === "p6.tree.tested.mint_failed");
+      assert.ok(row, "the mint failure is recorded — never swallowed silently");
+      assert.match(String(row?.detail), /A4-E18 forced mint failure/);
+      assert.match(String(row?.detail), /RT_E_/, "the row carries a registered RT_E_* code");
+      assert.equal(
+        (out.project.lastTest as { label?: string } | null)?.label ?? null,
+        null,
+        "no `tested` stamp is fabricated by a failed mint",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("A4-E2(a) — the opt-in advisory tail after a red P6", () => {
+  it("advances P7–P12 after a red P6 and records p6.tail.after-red", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "TailA4" });
+    const seeded: Project = { ...base, enforceDod: true };
+    const res = await runUntilGate(seeded, {
+      autopilot: true,
+      machineGates: true,
+      advisoryTail: true,
+      maxSteps: 40,
+    });
+    assert.ok(
+      (res.project.logs ?? []).some((l) => l.event === "p6.tail.after-red"),
+      "the advisory-tail transition is recorded on the ledger",
+    );
+    assert.equal(res.project.currentPhase, 12, "the tail drove P7–P12");
+    assert.equal(res.project.status, "complete");
+    assert.equal(res.project.enforceDod, true, "the run's own enforcement intent is restored");
+    assert.equal(res.terminalStatus, "complete_with_failures", "the dirty seal is named honestly");
+  });
+
+  it("control — without the flag the same run stops at the P6 hard block", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "TailA4ctl" });
+    const seeded: Project = { ...base, enforceDod: true };
+    const res = await runUntilGate(seeded, { autopilot: true, machineGates: true, maxSteps: 40 });
+    assert.equal(res.outcome, "dod");
+    assert.equal(res.project.currentPhase, 6, "the cursor never leaves the red P6");
+    assert.equal(
+      (res.project.logs ?? []).some((l) => l.event === "p6.tail.after-red"),
+      false,
+      "no tail without the opt-in",
+    );
+    assert.equal(res.terminalStatus, undefined, "a stop is not a complete terminal status");
+  });
+});
+
+describe("A4-E2(b)/A4-E3 — the packet and the terminal status at a stop", () => {
+  it("a P6-hard-blocked run reaches its terminal packet, naming the stop edge", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "StopPacketA4" });
+    const seeded: Project = { ...base, enforceDod: true };
+    const res = await runUntilGate(seeded, { autopilot: true, machineGates: true, maxSteps: 40 });
+    assert.equal(res.outcome, "dod", "precondition: the run stopped on the P6 hard gate");
+    assert.match(
+      res.project.packet,
+      /Blocked at: P6/,
+      "the packet is stamped AT the stop and names the stop edge (A3 packetBlockedAt)",
+    );
+    const packetArtifact = (res.project.artifacts ?? []).find((a) => a.kind === "packet");
+    assert.ok(packetArtifact, "the packet artifact exists on a stopped run");
+    assert.equal(packetArtifact?.body, res.project.packet, "the artifact body IS the stamped packet");
+  });
+
+  it("a dirty seal reads complete_with_failures on both the summary and the RunResult", async () => {
+    const red = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    assert.equal(red.status, "complete", "precondition: the keyless drain seals complete");
+    assert.ok(
+      (summary(red).failedGates ?? []).length > 0,
+      "precondition: the keyless seal carries red DoD gates",
+    );
+    assert.equal(
+      summary(red).status,
+      "complete_with_failures",
+      "a red-gate seal is never a plain green `complete` (A4-E2(c)/E3)",
+    );
+    const res = await runUntilGate(red, { maxSteps: 1 });
+    assert.equal(res.terminalStatus, "complete_with_failures");
+
+    const clean: Project = {
+      ...red,
+      phases: red.phases.map((ph) =>
+        ph.status === "complete"
+          ? { ...ph, gate: { passed: true, unmet: [], evidenceHash: "clean", checkedAt: 1 } }
+          : ph,
+      ),
+    };
+    assert.equal(summary(clean).status, "complete", "a clean seal stays a plain `complete`");
+    const cleanRes = await runUntilGate(clean, { maxSteps: 1 });
+    assert.equal(cleanRes.terminalStatus, "complete");
+  });
+});
+
+describe("A4-E9 — the additive `degraded` phase marker", () => {
+  it("marks one phase record, purely and additively, and touches nothing else", () => {
+    const p = createProject({ brief: FIXTURE_BRIEF, name: "DegradedA4" });
+    const marked = markPhaseDegraded(p, 6);
+    const rec = marked.phases.find((r) => r.id === 6) as (Project["phases"][number] & { degraded?: boolean }) | undefined;
+    assert.equal(rec?.degraded, true, "the phase record carries the marker");
+    assert.equal(
+      (marked.phases.find((r) => r.id === 5) as { degraded?: boolean } | undefined)?.degraded,
+      undefined,
+      "no other phase record is touched",
+    );
+    assert.equal(p.phases.find((r) => r.id === 6)?.status, marked.phases.find((r) => r.id === 6)?.status);
+    assert.equal(p.packet, marked.packet, "pure: no packet rewrite");
+    assert.equal(
+      (p.phases.find((r) => r.id === 6) as { degraded?: boolean } | undefined)?.degraded,
+      undefined,
+      "the input project is not mutated",
+    );
+  });
+
+  it("a plain deterministic run never marks a phase degraded (opt-in to the failure path)", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "NoDegradeA4" });
+    const res = await runUntilGate(base, { maxSteps: 1 });
+    assert.ok(
+      res.project.phases.every((r) => (r as { degraded?: boolean }).degraded === undefined),
+      "no live pass ran ⇒ no degraded marker",
+    );
   });
 });

@@ -5,6 +5,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject } from "./engine.ts";
+import { createHostWildReviewer } from "./wild-review.ts";
+import { generateWildPlanBridge, wildClassifierBridge } from "./wild-bridge.ts";
 import {
   buildWildReviewPrompt,
   parseWildReview,
@@ -584,5 +586,59 @@ describe("R13-f02 (340-5) — stored planner rows reach the production review pr
       prompt.includes("… (3 further step(s) omitted — the prompt shows at most 12)"),
       "the elision names the omitted count and the cap",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-05 wild-console-classifier fix — the browser reachability seam.
+//
+// The browser console cannot import the server-only planner and its
+// runtime-assembled `*.server.` specifiers are the import-protection mock, so
+// Wild Mode used to resolve `unavailableWildReviewer` and log
+// `wild.paused_classifier` / `wild.plan_absent` on EVERY run. The fix routes a
+// denied host through the client-safe bridge (`wild-bridge.ts` → server fn)
+// when the SERVER reports the key. These pins lock the HONEST half: outside a
+// request context (and keyless) the bridge/seam returns null / an error
+// envelope — never an invented plan or a guessed verdict.
+// ---------------------------------------------------------------------------
+describe("wild-console-classifier fix — bridge + host seam honesty (no server transport)", () => {
+  it("generateWildPlanBridge returns null (never an invented plan) with no server transport", async () => {
+    const p = emptyProject({ name: "BridgePlan", brief: "A concrete brief for the bridge honesty pin." });
+    assert.equal(await generateWildPlanBridge(p), null);
+  });
+
+  it("wildClassifierBridge returns an error envelope (never a verdict) with no server transport", async () => {
+    const ctx: WildReviewContext = {
+      project: emptyProject({ name: "BridgeJudge", brief: "A concrete brief for the bridge honesty pin." }),
+      phase: 0,
+      reason: "advance",
+      gate: { pass: false, unmet: [], evidenceHash: "x" },
+    };
+    const res = await wildClassifierBridge(ctx);
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.reason, "error");
+  });
+
+  it("createHostWildReviewer on bare Node keyless returns null (honest not-configured path)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      assert.equal(await createHostWildReviewer(), null);
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("createHostWildReviewer on a denied (browser-shaped) host with no reachable server returns null", async () => {
+    const real = (globalThis as { process?: unknown }).process;
+    (globalThis as { process?: unknown }).process = { env: { DEEPSEEK_API_KEY: "sk-spoofed" }, versions: {} };
+    try {
+      // No Start request context ⇒ the live server probe reports not-configured
+      // ⇒ null ⇒ the engine's honest unavailable reviewer (never a proxy/await).
+      assert.equal(await createHostWildReviewer(), null);
+    } finally {
+      (globalThis as { process?: unknown }).process = real;
+    }
   });
 });

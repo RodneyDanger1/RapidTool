@@ -14,16 +14,23 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  archProductComplete,
   archTrace,
+  briefDeliveryKind,
+  classifyModuleSource,
+  gateArtifact,
   liveResearchAttemptUnavailable,
   missingOracleCaseIds,
   oracleToCaseSeeds,
+  productSurfaceKindOf,
+  productSurfaceTrace,
   recordGateInto,
   runGate,
+  sealedWithFailures,
 } from "./dod.ts";
 import { runUntilGate } from "./headless.ts";
 import { mintTreeRunTested } from "./codegen.server.ts";
-import { emptyProject } from "./engine.ts";
+import { deliveryKindOf, emptyProject } from "./engine.ts";
 import {
   briefFitCoverage,
   briefFitSubstancePasses,
@@ -93,13 +100,21 @@ describe("W48 / 334-3 (T1b) — p6-test / p6-verified vs an unverified declared 
       p6Ids(verified),
       "the declared-toolchain state must not change any P6 DoD outcome — requiring it would be unsatisfiable on a fresh tree and would block the P6 mint",
     );
-    // The field is not even on the stamp the probe reads, so the probe cannot
-    // silently conflate it: the limit rides the emitted README banner + the
-    // tree-run envelope (`declaredScriptsVerified` / `unverifiedDeclaredScripts`).
-    assert.equal(
-      Object.prototype.hasOwnProperty.call(unverified.lastTest ?? {}, "declaredScriptsVerified"),
-      false,
-      "the tested stamp carries no declared-toolchain field for a probe to over-read",
+    // 2026-10-06 correction (concurrent lane A1-E13): the tested stamp NOW
+    // EXPOSES the declared-toolchain state (`declaredScriptsVerified`) so the
+    // limit rides the artifact/envelope loudly. The pin is that it never reaches
+    // a criterion: the identical p6- outcome above holds while the stamp's own
+    // field differs between the two fixtures. The pre-A1-E13 assertion that the
+    // field was absent is therefore superseded — it pinned the old shape, not
+    // the honesty property.
+    const declaredField = (p: Project): unknown =>
+      (p.lastTest as { declaredScriptsVerified?: unknown } | null)?.declaredScriptsVerified;
+    assert.equal(declaredField(unverified), false, "the stamp exposes declaredScriptsVerified=false (A1-E13)");
+    assert.equal(declaredField(verified), true, "…and true for the verified fixture");
+    assert.deepEqual(
+      p6Ids(unverified),
+      p6Ids(verified),
+      "…while the P6 DoD verdict stays blind to it — the limit is carried by the envelope, not a criterion",
     );
   });
 
@@ -753,7 +768,7 @@ describe("Lane G5 — p6-brief-fit fails the stalled trees on GENUINE noun absen
     assert.ok(checked === 0 || checked === 2, "stalled fixtures resolve all-or-none");
   });
 
-  it("the faithful P12 tree passes p6-brief-fit and the whole P6 gate (bar is satisfiable)", () => {
+  it("the faithful P12 tree passes p6-brief-fit and p6-arch but NOT the kind-aware web surface (the product has no UI)", () => {
     const p = loadBuild("default-check/sample1/bakery-florist-orders");
     if (!p) return;
     assert.equal(
@@ -761,7 +776,17 @@ describe("Lane G5 — p6-brief-fit fails the stalled trees on GENUINE noun absen
       true,
       "the genuinely brief-faithful tree clears the core bar",
     );
-    assert.equal(runGate(p, 6).pass, true, "the faithful tree's P6 gate is green");
+    assert.ok(!runGate(p, 6).unmet.some((g) => g.id === "p6-brief-fit"), "p6-brief-fit passes");
+    assert.ok(!runGate(p, 6).unmet.some((g) => g.id === "p6-arch"), "p6-arch passes");
+    // 2026-10-06 (kind-aware, additive): this is an `app` whose brief names a
+    // "low-stock dashboard" and "view reports", yet the emitted bytes carry no
+    // page surface and no router. The old P6 gate read green over exactly that
+    // mismatch; the additive `p6-web-surface` criterion now fails it, so this
+    // pin moved with the bar RISE (nothing was loosened).
+    assert.ok(
+      runGate(p, 6).unmet.some((g) => g.id === "p6-web-surface"),
+      "the UI-less web-kind tree is caught by the new surface criterion",
+    );
   });
 
   it("p6-test / p6-arch miss on the same genuine under-production, not on over-strictness", () => {
@@ -778,5 +803,382 @@ describe("Lane G5 — p6-brief-fit fails the stalled trees on GENUINE noun absen
       assert.equal((faithful.lastTest as { label?: string } | null)?.label, "tested", "…promoted to a tested verdict");
       assert.deepEqual(archTrace(faithful).missing, [], "every demanded capability maps to a real tree file");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-05 product-quality lane — the p6-arch no-tree SKIP, surfaced.
+// ---------------------------------------------------------------------------
+describe("2026-10-05 — p6-arch no-tree SKIP advisory", () => {
+  it("an absent tree still PASSES p6-arch, but the pass is reported as a SKIP advisory", () => {
+    const p = base(); // emptyProject — no generatedTree
+    const r = runGate(p, 6);
+    assert.ok(!r.unmet.some((g) => g.id === "p6-arch"), "the keyless floor is not hard-broken");
+    const adv = r.advisories.find((a) => a.id === "p6-arch");
+    assert.ok(adv, "the vacuous pass is surfaced, not silent");
+    assert.match(adv!.note, /SKIP/);
+    assert.match(adv!.note, /NOT product-complete/);
+    assert.equal(archTrace(p).present, false);
+    assert.equal(archProductComplete(archTrace(p)), false, "skip is not product-complete");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-06 — the ADDITIVE kind-aware product surface criteria. The lexical /
+// structural probes never noticed the emitted product did not match the brief's
+// KIND. Each criterion has a fixture that FAILS it today and a control that
+// passes with the surface the emitter must produce.
+// ---------------------------------------------------------------------------
+const wf = (path: string, source: string) => ({ path, source, hash: `h-${path}`, attempt: 0 });
+
+const surfaceProject = (brief: string, kind: Project["kind"], tree: ReturnType<typeof wf>[]): Project =>
+  ({ ...base(), brief, ...(kind ? { kind } : {}), generatedTree: tree }) as Project;
+
+const unmetIds = (p: Project): string[] => runGate(p, 6).unmet.map((g) => g.id);
+
+describe("2026-10-06 — kind-aware product surface criteria (additive)", () => {
+  it("productSurfaceKindOf: game wins over a stray 'screen'; a bare app with no page noun imposes nothing", () => {
+    assert.equal(productSurfaceKindOf({ brief: "A 2D browser arcade game with a start screen" }), "game");
+    assert.equal(productSurfaceKindOf({ brief: "Build a bakery website with Pages: Home, Menu" }), "web");
+    assert.equal(productSurfaceKindOf({ brief: "A kanban board for dispatch", kind: "app" }), "none");
+    assert.equal(productSurfaceKindOf({ brief: "A webhook delivery service", kind: "library" }), "runnable");
+    assert.equal(productSurfaceKindOf({ brief: "A dispatch board for field service" }), "none");
+  });
+
+  it("briefDeliveryKind mirrors engine.deliveryKindOf (same keyword rules — no silent drift)", () => {
+    const briefs = [
+      "Build an analytics dashboard for Northwind Traders, a wholesale food distributor.",
+      "Build an appointment booking service for Cedar Clinic, a three-provider family practice.",
+      "Build a TypeScript library with a small HTTP API for webhook delivery.",
+      "Build a 2D browser arcade game called Sky Hopper.",
+      "Build a browser puzzle game called Tile Cascade: an 8x8 grid.",
+      "Build logscope, a command-line tool that reads NDJSON log files.",
+      "A kanban board for dispatch teams",
+      "A kanban board library exposing a typed board client",
+      "A mobile app with a bottom tab bar",
+    ];
+    for (const brief of briefs) {
+      const engineKind = deliveryKindOf({ brief, domain: "", lattice: null });
+      assert.equal(
+        briefDeliveryKind(brief),
+        engineKind,
+        `kind classifier drift for ${JSON.stringify(brief.slice(0, 48))}`,
+      );
+    }
+  });
+
+  it("p6-web-surface FAILS a web brief with no page surface (the measured ten-tree shape)", () => {
+    const p = surfaceProject("Build a bakery website. Pages: Home, Menu, Order, Contact.", "app", [
+      wf("src/generated.ts", 'export * from "./generated/bake.ts";'),
+      wf("src/generated/bake.ts", "export function bakeBread() { return 1; }"),
+    ]);
+    assert.ok(unmetIds(p).includes("p6-web-surface"), "no page surface / router ⇒ unmet");
+    const reason = runGate(p, 6).unmet.find((g) => g.id === "p6-web-surface")?.reason ?? "";
+    assert.match(reason, /RT_E_UI_UNWIRED/);
+    assert.match(reason, /page surface=none/);
+  });
+
+  it("p6-web-surface PASSES with a real page surface + navigation path (the fixture the emitter must satisfy)", () => {
+    const p = surfaceProject("Build a bakery website. Pages: Home, Menu.", "app", [
+      wf(
+        "src/App.tsx",
+        "import { createBrowserRouter } from 'react-router';\nexport const router = createBrowserRouter([{ path: '/' }]);",
+      ),
+      wf("src/pages/home.tsx", "export function HomePage() { return <Link to=\"/menu\">Menu</Link>; }"),
+      wf("src/pages/menu.tsx", "export function MenuPage() { return <div>menu</div>; }"),
+    ]);
+    const t = productSurfaceTrace(p);
+    assert.ok(t.pageFiles.length > 0, "page files detected");
+    assert.equal(t.navPath, true, "router/nav detected");
+    assert.ok(!unmetIds(p).includes("p6-web-surface"), "the surface criterion is met");
+  });
+
+  it("p6-game-surface FAILS a game brief with no input/loop/canvas, PASSES with all three", () => {
+    const failing = surfaceProject("A 2D browser arcade game with jumping and coins.", "game", [
+      wf("src/generated/render.ts", "export function scorePoints(n) { return n * 2; }"),
+    ]);
+    assert.ok(unmetIds(failing).includes("p6-game-surface"), "no input/loop/canvas ⇒ unmet");
+
+    const passing = surfaceProject("A 2D browser arcade game with jumping and coins.", "game", [
+      wf(
+        "src/generated/render.ts",
+        [
+          "export function start() {",
+          "  const canvas = document.createElement('canvas');",
+          "  const ctx = canvas.getContext('2d');",
+          "  window.addEventListener('keydown', (e) => jump(e));",
+          "  const loop = () => { requestAnimationFrame(loop); };",
+          "  requestAnimationFrame(loop);",
+          "}",
+        ].join("\n"),
+      ),
+    ]);
+    assert.ok(!unmetIds(passing).includes("p6-game-surface"), "input + loop + canvas ⇒ met");
+  });
+
+  it("p6-runnable-entry FAILS a CLI whose entry throws TODO(E-15), PASSES a real entry exposing the declared surface", () => {
+    const stubEntry = surfaceProject("Build logscope, a command-line tool reading log files.", "tool", [
+      wf("src/generated.ts", 'export * from "./generated/run-cli.ts";'),
+      wf(
+        "src/generated/run-cli.ts",
+        'export function runCli() { throw new Error("TODO(E-15) stub: implement runCli"); }',
+      ),
+    ]);
+    assert.ok(unmetIds(stubEntry).includes("p6-runnable-entry"), "a throw-TODO entry ⇒ unmet");
+    const stubReason = runGate(stubEntry, 6).unmet.find((g) => g.id === "p6-runnable-entry")?.reason ?? "";
+    assert.match(stubReason, /RT_E_PLAN_UNDERPRODUCED/);
+    assert.match(stubReason, /TODO stub/);
+
+    // A declared surface the brief names but the tree does not implement ⇒ unmet.
+    const missingSurface = surfaceProject(
+      "Build a TypeScript library: `subscribe(url)` and `publish(event)`.",
+      "library",
+      [
+        wf("src/index.ts", "export function subscribe(url) { return url; }"),
+      ],
+    );
+    assert.ok(unmetIds(missingSurface).includes("p6-runnable-entry"), "declared-but-missing surface ⇒ unmet");
+    assert.match(
+      runGate(missingSurface, 6).unmet.find((g) => g.id === "p6-runnable-entry")?.reason ?? "",
+      /declared surface not implemented: publish/,
+    );
+
+    const real = surfaceProject(
+      "Build a TypeScript library: `subscribe(url)` and `publish(event)`.",
+      "library",
+      [
+        wf("src/index.ts", "export function subscribe(url) { return url; }\nexport function publish(event) { return event; }"),
+      ],
+    );
+    assert.ok(!unmetIds(real).includes("p6-runnable-entry"), "a real entry exposing the declared surface ⇒ met");
+  });
+
+  it("a non-matching brief imposes nothing — the criterion passes with an N/A advisory, never a silent skip", () => {
+    const p = base(); // dispatch-board brief, no surface contract
+    const r = runGate(p, 6);
+    for (const id of ["p6-web-surface", "p6-game-surface", "p6-runnable-entry"]) {
+      assert.ok(!r.unmet.some((g) => g.id === id), `${id} imposes nothing on a surface-less brief`);
+    }
+    const adv = r.advisories.filter((a) => a.id.startsWith("p6-") && a.note.startsWith("N/A"));
+    assert.equal(adv.length, 3, "all three N/A passes are surfaced, not silent");
+  });
+
+  it("classifyModuleSource is the ONE classifier (the two quality readers agree by construction)", () => {
+    assert.equal(classifyModuleSource(""), "stub");
+    assert.equal(classifyModuleSource('export function x() { throw new Error("TODO(E-15) t"); }'), "stub");
+    assert.equal(classifyModuleSource('export * from "./a.ts";'), "reexport");
+    assert.equal(classifyModuleSource("export function createBoard() { return 1; }"), "real");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-06 — item 1/2/6: the kind-surface reading reads the EMITTER's own
+// emitted surface, the entry barrel is exempted like p6-arch, and vacuous
+// passes carry CODED advisories.
+// ---------------------------------------------------------------------------
+const emittedFile = (path: string, source: string) => ({ path, source });
+
+describe("2026-10-06 — kind-surface reads the emitter's emitted surface (item 1)", () => {
+  it("p6-web-surface: the scaffold's own emitted pages+router satisfy the criterion although generatedTree carries none", () => {
+    const p = {
+      ...surfaceProject("Build a bakery website. Pages: Home, Menu, Order.", "app", [
+        wf("src/generated.ts", 'export * from "./generated/bake.ts";'),
+        wf("src/generated/bake.ts", "export function bakeBread() { return 1; }"),
+      ]),
+      emittedSurface: [
+        emittedFile(
+          "src/ui/router.tsx",
+          "export function SiteRouter() { return <nav><a href=\"/menu\">Menu</a></nav>; }",
+        ),
+        emittedFile("src/ui/pages/HomePage.tsx", "export function HomePage() { return <main>home</main>; }"),
+        emittedFile("src/ui/pages/MenuPage.tsx", "export function MenuPage() { return <main>menu</main>; }"),
+      ],
+    } as Project;
+    const t = productSurfaceTrace(p);
+    assert.ok(t.pageFiles.length >= 2, "the emitter's page files are read");
+    assert.equal(t.navPath, true, "the emitter's router/nav is read");
+    assert.ok(!unmetIds(p).includes("p6-web-surface"), "the emitter's OWN page surface satisfies the criterion");
+  });
+
+  it("without the emitted surface the SAME brief still FAILS (the reading did not lower the bar)", () => {
+    const p = surfaceProject("Build a bakery website. Pages: Home, Menu, Order.", "app", [
+      wf("src/generated.ts", 'export * from "./generated/bake.ts";'),
+      wf("src/generated/bake.ts", "export function bakeBread() { return 1; }"),
+    ]);
+    assert.ok(unmetIds(p).includes("p6-web-surface"), "no page surface anywhere => unmet");
+  });
+
+  it("p6-game-surface: the scaffold's emitted canvas shell satisfies input+loop+canvas", () => {
+    const p = {
+      ...surfaceProject("A 2D browser arcade game with jumping and coins.", "game", [
+        wf("src/generated/render.ts", "export function scorePoints(n) { return n * 2; }"),
+      ]),
+      emittedSurface: [
+        emittedFile(
+          "src/ui/console.tsx",
+          [
+            "export function startGame() {",
+            "  const canvas = document.createElement('canvas');",
+            "  const ctx = canvas.getContext('2d');",
+            "  window.addEventListener('keydown', () => {});",
+            "  const loop = () => requestAnimationFrame(loop);",
+            "  requestAnimationFrame(loop);",
+            "}",
+          ].join("\n"),
+        ),
+      ],
+    } as Project;
+    assert.ok(!unmetIds(p).includes("p6-game-surface"), "the emitted canvas game surface satisfies the criterion");
+  });
+});
+
+describe("2026-10-06 — entry barrel exemption + coded advisories (items 2/6)", () => {
+  it("p6-runnable-entry: a reexport barrel entry whose target is a real in-tree module is NOT a stub", () => {
+    const p = surfaceProject("Build logscope, a command-line tool reading log files.", "tool", [
+      wf("src/generated.ts", 'export * from "./generated/run-cli.ts";'),
+      wf("src/generated/run-cli.ts", "export function runCli(argv) { return 0; }"),
+    ]);
+    assert.ok(!unmetIds(p).includes("p6-runnable-entry"), "the in-tree entry barrel is exempt (not a stub)");
+  });
+
+  it("p6-runnable-entry: a barrel whose target is OUTSIDE the tree stays a stub (fail-closed)", () => {
+    const p = surfaceProject("Build logscope, a command-line tool reading log files.", "tool", [
+      wf("src/generated.ts", 'export * from "./host.ts";'),
+    ]);
+    assert.ok(unmetIds(p).includes("p6-runnable-entry"), "a dead/out-of-tree bridge is still a stub");
+  });
+
+  it("p6-source: whitespace-only generated source is NOT non-empty", () => {
+    const p = { ...base(), generatedSource: "   \n\t  " } as Project;
+    assert.ok(runGate(p, 6).unmet.some((g) => g.id === "p6-source"), "whitespace-only source is empty in substance");
+    const ok = runGate({ ...p, generatedSource: "export const x = 1;" } as Project, 6);
+    assert.ok(!ok.unmet.some((g) => g.id === "p6-source"), "real bytes pass");
+  });
+
+  // A3-E6 (2026-10-06, REPLACES the pre-fix advisory pin): a 0-byte artifact
+  // body used to pass its presence probe with only an advisory (and an advisory
+  // never changes a verdict), so "P8 produced its UI artifact" was literally
+  // true of nothing. The empty body is now a FAILED probe.
+  it("an empty-bodied artifact FAILS its presence probe (0 bytes is not a deliverable)", () => {
+    const p = {
+      ...base(),
+      artifacts: [{ id: "a", phase: 8, kind: "ui", title: "UI", body: "", language: "markdown" }],
+    } as unknown as Project;
+    const r = runGate(p, 8);
+    assert.ok(r.unmet.some((g) => g.id === "p8-ui"), "a 0-byte body is not a produced deliverable");
+    const u = r.unmet.find((g) => g.id === "p8-ui")!;
+    assert.match(u.reason ?? "", /RT_E_SUBSTANCE_EMPTY/);
+    assert.match(u.reason ?? "", /EMPTY/);
+    assert.ok(!r.advisories.some((a) => a.id === "p8-ui"), "a fail is not an advisory");
+  });
+
+  it("a non-empty artifact passes p8-ui with no advisory", () => {
+    const p = {
+      ...base(),
+      artifacts: [{ id: "a", phase: 8, kind: "ui", title: "UI", body: "real ui body", language: "markdown" }],
+    } as unknown as Project;
+    const r = runGate(p, 8);
+    assert.ok(!r.unmet.some((g) => g.id === "p8-ui"), "real bytes pass");
+    assert.ok(!r.advisories.some((a) => a.id === "p8-ui"), "a real body is unqualified");
+  });
+
+  it("A3-E6: an empty-bodied artifact makes the recorded gate red and counts in sealedWithFailures", () => {
+    const p = {
+      ...base(),
+      phases: [{ id: 8 as PhaseId, status: "complete" }],
+      artifacts: [{ id: "a", phase: 8 as PhaseId, kind: "ui", title: "UI", body: "", language: "markdown" }],
+    } as unknown as Project;
+    const recorded = recordGateInto(p, 8 as PhaseId);
+    const rec = recorded.phases.find((r) => r.id === 8)!;
+    assert.equal(rec.gate?.passed, false, "the recorded gate is red");
+    assert.ok(
+      (rec.gate?.unmet ?? []).some((u) => u.includes("RT_E_SUBSTANCE_EMPTY")),
+      "the unmet census names the empty deliverable, coded",
+    );
+    assert.equal(sealedWithFailures(recorded), true, "an empty deliverable is a seal failure, not a green skip");
+  });
+
+  it("a vocabulary-free brief passes p0-brief-grounded but carries a coded SKIP advisory", () => {
+    const p = emptyProject({ name: "Blip", brief: "x" });
+    const r = runGate(p, 0);
+    assert.ok(!r.unmet.some((g) => g.id === "p0-brief-grounded"), "no vocabulary to ground => still passes");
+    const adv = r.advisories.find((a) => a.id === "p0-brief-grounded");
+    assert.ok(adv, "the vacuous pass is surfaced");
+    assert.equal(adv!.code, "RT_E_CLAIM_UNVERIFIED");
+  });
+
+  it("gateArtifact renders an advisory code so the green artifact body is actionable", () => {
+    const art = gateArtifact(3, {
+      pass: true,
+      unmet: [],
+      evidenceHash: "abcdef01",
+      advisories: [{ id: "p8-ui", criterion: "c", note: "SKIP — empty", code: "RT_E_SUBSTANCE_EMPTY" }],
+    });
+    assert.match(art.body, /code: RT_E_SUBSTANCE_EMPTY/);
+  });
+});
+
+describe("2026-10-06 — more coded advisories (item 2): vacuous P6/P7 passes", () => {
+  it("a vocabulary-free brief also qualifies the vacuous p6-brief-fit pass", () => {
+    const p = emptyProject({ name: "Blip", brief: "x" });
+    const r = runGate(p, 6);
+    const adv = r.advisories.find((a) => a.id === "p6-brief-fit");
+    assert.ok(adv, "the vacuous fit pass is surfaced");
+    assert.equal(adv!.code, "RT_E_CLAIM_UNVERIFIED");
+  });
+
+  it("two blank competitor rows pass the count probe but carry a coded SKIP advisory", () => {
+    const p = {
+      ...base(),
+      competitors: [{ name: "", class: "", strength: "", gap: "" }, { name: "   ", class: "", strength: "", gap: "" }],
+    } as unknown as Project;
+    const r = runGate(p, 7);
+    assert.ok(!r.unmet.some((g) => g.id === "p7-competitors"), "the count probe passes");
+    const adv = r.advisories.find((a) => a.id === "p7-competitors");
+    assert.ok(adv, "blank rows are surfaced, not counted as mapped");
+    assert.equal(adv!.code, "RT_E_SUBSTANCE_EMPTY");
+  });
+});
+
+describe("2026-10-06 — coded advisories for the remaining vacuous P0/P2/P7 passes", () => {
+  it("p0-scorecard: five unlabelled axes pass the count probe with a coded SKIP", () => {
+    const p = {
+      ...base(),
+      scorecard: { overall: 0, verdict: "proceed", axes: Array.from({ length: 5 }, () => ({ key: "k", label: "", score: 0, note: "" })), bottlenecks: [], attackVectors: [], libraries: [] },
+    } as unknown as Project;
+    const r = runGate(p, 0);
+    assert.ok(!r.unmet.some((g) => g.id === "p0-scorecard"));
+    assert.equal(r.advisories.find((a) => a.id === "p0-scorecard")?.code, "RT_E_SUBSTANCE_EMPTY");
+  });
+
+  it("p0-lattice: a single blank job row passes with a coded SKIP", () => {
+    const p = {
+      ...base(),
+      lattice: { domain: "d", jobs: ["  "], entities: [], constraints: [], nodes: [], complexity: 0 },
+    } as unknown as Project;
+    const r = runGate(p, 0);
+    assert.ok(!r.unmet.some((g) => g.id === "p0-lattice"));
+    assert.equal(r.advisories.find((a) => a.id === "p0-lattice")?.code, "RT_E_SUBSTANCE_EMPTY");
+  });
+
+  it("p2-memory: three kinds present but every body blank passes with a coded SKIP", () => {
+    const p = {
+      ...base(),
+      memory: [
+        { id: "1", kind: "episodic", phase: 0, text: "", score: 0 },
+        { id: "2", kind: "semantic", phase: 0, text: "  ", score: 0 },
+        { id: "3", kind: "procedural", phase: 0, text: "", score: 0 },
+      ],
+    } as unknown as Project;
+    const r = runGate(p, 2);
+    assert.ok(!r.unmet.some((g) => g.id === "p2-memory"));
+    assert.equal(r.advisories.find((a) => a.id === "p2-memory")?.code, "RT_E_SUBSTANCE_EMPTY");
+  });
+
+  it("p7-research: a corpus row with zero fetched items passes with a coded SKIP", () => {
+    const p = { ...base(), research: [{ query: "q", items: [] }] } as unknown as Project;
+    const r = runGate(p, 7);
+    assert.ok(!r.unmet.some((g) => g.id === "p7-research"));
+    assert.equal(r.advisories.find((a) => a.id === "p7-research")?.code, "RT_E_SUBSTANCE_EMPTY");
   });
 });

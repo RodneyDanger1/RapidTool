@@ -291,4 +291,79 @@ describe("freeWebSearch", () => {
     if (!res.ok) assert.equal(res.code, "RT_E_RESEARCH_UNAVAILABLE");
     assert.equal(ddgCalls, 1, "attempts:1 must mean exactly one fetch");
   });
+
+  it("reranks provider order by query relevance and attaches a score (fixes/347)", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("duckduckgo")) return htmlResponse("<html><body>no results</body></html>");
+      if (u.includes("searx")) {
+        return jsonResponse({
+          results: [
+            // Vendor order puts the off-topic hit first.
+            { title: "Celebration cakes", url: "https://cakes.example/x", content: "luxury celebration cake" },
+            { title: "Invoice tracker guide", url: "https://tools.example/invoice", content: "track invoices" },
+          ],
+        });
+      }
+      return jsonResponse({ query: { search: [] } });
+    }) as SearchFetch;
+
+    const res = await freeWebSearch("invoice tracker", { ...FAST, fetchImpl });
+    assert.equal(res.ok, true);
+    if (res.ok) {
+      assert.equal(res.items[0].title, "Invoice tracker guide", "on-topic hit must outrank vendor order");
+      assert.ok(res.items[0].score! > res.items[1].score!, "relevance must be ordered by score");
+      for (const it of res.items) assert.ok(it.score! >= 0 && it.score! <= 1, "score stays in [0,1]");
+    }
+  });
+
+  it("keeps domain diversity: one site cannot fill the page (fixes/347)", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("duckduckgo")) return htmlResponse("<html><body>no results</body></html>");
+      if (u.includes("searx")) {
+        return jsonResponse({
+          results: [
+            { title: "n1", url: "https://a.example/1", content: "x" },
+            { title: "n2", url: "https://a.example/2", content: "x" },
+            { title: "n3", url: "https://a.example/3", content: "x" },
+            { title: "n4", url: "https://b.example/4", content: "x" },
+          ],
+        });
+      }
+      return jsonResponse({ query: { search: [] } });
+    }) as SearchFetch;
+
+    // Query "zzz" overlaps nothing → all scores tie, so ordering is the
+    // diversity rule (stable by provider order within a domain).
+    const res = await freeWebSearch("zzz", { ...FAST, maxResults: 3, fetchImpl });
+    assert.equal(res.ok, true);
+    if (res.ok) {
+      assert.equal(res.items.length, 3);
+      assert.deepEqual(
+        res.items.map((i) => i.url),
+        ["https://a.example/1", "https://a.example/2", "https://b.example/4"],
+        "the second site must appear before a third hit from the first site",
+      );
+    }
+  });
+
+  it("extracts snippets from double-quoted DDG result cells (fixes/347)", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).includes("duckduckgo")) {
+        return htmlResponse(
+          `<a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fq1&rut=x">Quoted</a>` +
+            `<td class="result-snippet">quoted-cell snippet</td>`,
+        );
+      }
+      return jsonResponse({ query: { search: [] } });
+    }) as SearchFetch;
+
+    const res = await freeWebSearch("quoted", { ...FAST, fetchImpl });
+    assert.equal(res.ok, true);
+    if (res.ok) {
+      assert.equal(res.items[0].url, "https://example.com/q1");
+      assert.equal(res.items[0].content, "quoted-cell snippet");
+    }
+  });
 });

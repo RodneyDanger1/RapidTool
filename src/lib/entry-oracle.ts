@@ -254,6 +254,22 @@ export type EntryContractRecord = {
   ok: boolean;
   complete: boolean;
   note: string | null;
+  /**
+   * fixes/354 (A1-E16): present iff the contract carried ≥1 `entry-runs`
+   * `uiShell` row. The `ui-shell` status is a correct STRUCTURAL pass (the
+   * tree really emitted index.html), but it means the ONE behavioural oracle
+   * (`entry-runs` — a bounded spawn with exit/stdout pins) was bypassed for
+   * exactly the webapp/game kinds the emitter ships. A consumer (treeRun/dod/
+   * packet) surfaces this as a `p6-*` advisory row, so a green tree-run on a
+   * UI kind never reads as product evidence. Absent when no ui-shell row was
+   * evaluated (byte-identical to the legacy record).
+   */
+  advisory?: EntryOracleAdvisory;
+};
+
+export type EntryOracleAdvisory = {
+  event: "p6-oracle-ui-shell-bypassed";
+  detail: string;
 };
 
 /** The manifest `has` rule every emitted-file list has used since fixes/299:
@@ -390,13 +406,14 @@ export function checkEntryContract(
   // (parseGrader rejects a runtime row that names nothing to evaluate), so the
   // counter is structurally 0.
   const pending = rows.filter((r) => (r.status as string) === "pending").length;
+  const uiShellRows = rows.filter((r) => r.status === "ui-shell");
   return {
     declared: rows.length,
     rows,
     passed: rows.filter((r) => r.status === "pass").length,
     failed: rows.filter((r) => r.status === "fail").length,
     pending,
-    uiShell: rows.filter((r) => r.status === "ui-shell").length,
+    uiShell: uiShellRows.length,
     // ok = no row FAILED — a ui-shell structural skip is not a failure (the
     // same reading treeRun's entryGreen applies to a ui-shell entry).
     ok: rows.every((r) => r.status !== "fail"),
@@ -408,6 +425,20 @@ export function checkEntryContract(
     // TERMINAL, so it never keeps `complete` false for a webapp/game tree.
     complete: rows.length > 0 && pending === 0,
     note: rows.length === 0 ? 'no expectedBehavior rows declared (v1 grader — the verification label reads "files+content only")' : null,
+    // fixes/354 (A1-E16): the structural ui-shell pass is correct, but the
+    // behavioural oracle was bypassed for exactly the emitted web kinds — make
+    // that visible under a `p6-*` advisory so "treeRun green" never reads as
+    // product evidence. Absent when no ui-shell row was evaluated.
+    ...(uiShellRows.length > 0
+      ? {
+          advisory: {
+            event: "p6-oracle-ui-shell-bypassed" as const,
+            detail: `${uiShellRows.length} entry-runs row(s) are ui-shell structural skips (${uiShellRows
+              .map((r) => r.id)
+              .join(", ")}) — index.html is present but the behavioural entry oracle was NOT run, so a green tree-run on this UI kind is structural, never product evidence`,
+          },
+        }
+      : {}),
   };
 }
 

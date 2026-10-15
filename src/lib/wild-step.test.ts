@@ -8,14 +8,14 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, applyPhaseResult, wildStep, wildExecEdgeFor, approveHitl, type WildReviewer } from "./engine.ts";
+import { emptyProject, applyPhaseResult, wildLog, wildStep, wildExecEdgeFor, wildGeneralExecEdgeFor, approveHitl, type WildReviewer } from "./engine.ts";
 import { runGate } from "./dod.ts";
 import { mintTreeRunTested } from "./codegen.server.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
-import type { Project } from "./types.ts";
+import type { PhaseStatus, Project } from "./types.ts";
 
 /** An ACTIVE wild-run project pinned to one phase status (no gate open). */
-function wildFixture(status: "locked" | "rejected" | "awaiting_hitl"): Project {
+function wildFixture(status: PhaseStatus): Project {
   const p = emptyProject({ name: "Wild", brief: "A wild brief for the autonomous loop." });
   p.wildMode = true;
   p.wildRun = {
@@ -349,10 +349,21 @@ describe("W-01 (fixes/271 · §R1-f01) — the wild P6 keyed edge seam", () => {
       );
       assert.equal(seamless.outcome, control.outcome);
       assert.equal(seamless.code, control.code);
-      // 308 P-1/P-2: the park record must RIDE the pause on both sides (this was
-      // null before the fix — the parity normalizer above now masks only its clock).
-      assert.equal(seamless.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
-      assert.equal(seamless.project.wildRun?.park?.unlock, "human-gate");
+      // A4-E1 (P0) — old → new, deliberate. The fixture is keyless, so
+      // `emptyProject` leaves `enforceDod` false (advisory). The deterministic
+      // DoD-floor review REJECTS a red P6, but an ADVISORY run must advance
+      // exactly as `advanceOnce` does — the red gate is RECORDED, not enforced.
+      // Pre-fix this pinned a `paused` park advertising unlock "human-gate": a
+      // door the CLI refuses (no `hitl` gate exists on that park), while the
+      // same state advanced in the sequential driver.
+      assert.equal(seamless.outcome, "advanced", "advisory DoD reject advances (A4-E1)");
+      assert.equal(seamless.project.currentPhase, 7, "the cursor left P6");
+      assert.equal(seamless.project.wildRun?.park ?? null, null, "no park on an advisory advance");
+      assert.equal(
+        runGate(seamless.project, 6).pass,
+        false,
+        "the red P6 gate is still RECORDED — advisory advances never hide it",
+      );
       const exec = (seamless.project.logs ?? []).find((l) => l.event === "wild.exec");
       assert.equal(exec?.detail, "P6 executed (deterministic floor)", "the exact pre-seam floor detail bytes");
     } finally {
@@ -625,8 +636,19 @@ describe("316 H1 — the wild P7 live-edge seam (the wire + the keyless floor)",
       assert.equal(seamless.outcome, control.outcome);
       assert.equal(seamless.code, control.code);
       // The park record must RIDE the pause on both sides (308 P-1/P-2).
+      // A4-E1 — old → new, deliberate: this fixture is SEEDED `enforceDod: true`
+      // (p7WildFixture), so a red P7 exit gate hard-blocks the leave with NO
+      // open gate (`hitl` null, status "running"). Pre-fix the park advertised
+      // unlock "human-gate" — "a human must approve or reject the open gate" —
+      // a door the CLI `approve`/`reject` refuse because no gate exists. The
+      // honest class is `human-retry` (repair/retry, then resume).
       assert.equal(seamless.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
-      assert.equal(seamless.project.wildRun?.park?.unlock, "human-gate");
+      assert.equal(seamless.project.wildRun?.park?.unlock, "human-retry");
+      assert.equal(
+        seamless.project.wildRun?.park?.unlockText,
+        "A human decision is required (fix, regenerate or retry), then resume the run.",
+        "the unlock text names the door that actually works",
+      );
       const exec = (seamless.project.logs ?? []).find((l) => l.event === "wild.exec");
       assert.equal(exec?.detail, "P7 executed (deterministic floor)", "the exact keyless floor detail bytes");
     } finally {
@@ -654,7 +676,11 @@ describe("316 H1 — the wild P7 live-edge seam (the wire + the keyless floor)",
       assert.ok(row, "wild.paused_dod row present");
       assert.equal(row!.detail, "P7 DoD unmet — hard gate blocks advance: p7-research");
       assert.equal(res.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
-      assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+      // A4-E1 — old → new: "human-gate" named an open gate that does not exist
+      // on a hard-DoD park (status "running", `hitl` null). "human-retry" is the
+      // door that works: fix/retry the phase (or relax enforcement), then resume.
+      assert.equal(res.project.wildRun?.park?.unlock, "human-retry");
+      assert.equal(res.project.hitl ?? null, null, "no gate is minted by a hard-DoD park");
     } finally {
       if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = savedKey;
@@ -731,6 +757,51 @@ describe("316 H1/H3 — the shared execution-edge picker states (wildExecEdgeFor
 
   it("phases outside 6/7 never resolve an edge (no spillover)", () => {
     assert.equal(wildExecEdgeFor(3, { liveEdge: seam, p6Edge: seam }), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 347 — the GENERAL keyed live edge for phases other than 6/7. Before this, a
+// keyed Wild Mode run executed the deterministic floor for P0–P5/P8–P12, so the
+// Auto-Review classifier judged placeholder artifacts and stalled the run. The
+// injected `livePhaseEdge` is the console driver's server-side live layer.
+// ---------------------------------------------------------------------------
+describe("347 — wildGeneralExecEdgeFor (keyed live layer for every other phase)", () => {
+  // Contextually typed by WildStepOptions.livePhaseEdge, so no import needed.
+  const generalSeam = async (_phase: unknown, p: Project) => p;
+
+  it("routes a non-6/7 phase through the injected seam with the phase bound", () => {
+    const seen: number[] = [];
+    const edge = wildGeneralExecEdgeFor(3, {
+      livePhaseEdge: async (phase, p) => {
+        seen.push(phase);
+        return p;
+      },
+    });
+    assert.equal(typeof edge, "function", "an injected livePhaseEdge resolves for P3");
+    return edge!(emptyProject({ name: "Seam", brief: "a seam brief with enough words" })).then(() => {
+      assert.deepEqual(seen, [3], "the phase is bound into the call");
+    });
+  });
+
+  it("never answers for P6/P7 (their own pickers keep their pins)", () => {
+    assert.equal(wildGeneralExecEdgeFor(6, { livePhaseEdge: generalSeam }), null);
+    assert.equal(wildGeneralExecEdgeFor(7, { livePhaseEdge: generalSeam }), null);
+    // …and wildExecEdgeFor still ignores the general seam for those phases.
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      assert.equal(wildExecEdgeFor(6, { livePhaseEdge: generalSeam }), null);
+      assert.equal(wildExecEdgeFor(7, { livePhaseEdge: generalSeam }), null);
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("absent ⇒ null (the byte-identical keyless floor)", () => {
+    assert.equal(wildGeneralExecEdgeFor(0, undefined), null);
+    assert.equal(wildGeneralExecEdgeFor(11, {}), null);
   });
 });
 
@@ -819,7 +890,8 @@ describe("316 H3 — the seal's repair pass consumes the dodRepair seam", () => 
         `the park names the declined repair: ${row!.detail}`,
       );
       assert.equal(res.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
-      assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+      // A4-E1 — old → new: the hard-DoD park names the repair door.
+      assert.equal(res.project.wildRun?.park?.unlock, "human-retry");
     } finally {
       if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = savedKey;
@@ -1027,7 +1099,8 @@ describe("T6.2(c) — the no-mint ⇒ P6-red walk (W43 canon; fixes/317_j2_prefl
         "the dod.blocked row names the criterion",
       );
       assert.equal(res.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
-      assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+      // A4-E1 — old → new: the hard-DoD park names the repair door.
+      assert.equal(res.project.wildRun?.park?.unlock, "human-retry");
       assert.equal(
         (res.project.logs ?? []).filter((l) => l.event === "p6.tree.tested").length,
         0,
@@ -1184,8 +1257,12 @@ describe("BUG-5 park surface budget 600 + ellipsis (fixes/320)", () => {
   it("a long reject detail lands on both park surfaces at 600 chars + ellipsis", async () => {
     const rejecting: WildReviewer = async () => ({ ok: true, verdict: "reject", feedback: LONG, model: "pin" });
     const res = await wildStep(wildFixture("awaiting_hitl"), { reviewer: rejecting });
-    const expectedReason = `${LONG.slice(0, 600)}…`;
+    // engine.ts `wildPause`/`wildParkInfo` derive BOTH surfaces from the ONE
+    // `detail` it is handed — and the `wild.reject` arm's detail is the prefixed
+    // line `P0 review REJECTED: <feedback>` (engine.ts:5881). So the park reason
+    // and the last-auto log carry the same clipped string, prefix included.
     const expectedLog = `${`P0 review REJECTED: ${LONG}`.slice(0, 600)}…`;
+    const expectedReason = expectedLog;
     assert.equal(res.project.wildRun?.park?.reason, expectedReason, "park.reason: 600 + ellipsis (was a 200 mid-word cut)");
     assert.equal(res.project.wildRun?.lastAutoLog, expectedLog, "lastAutoLog: 600 + ellipsis (was a 300 mid-word cut)");
     assert.ok(!expectedReason.includes("CRITIQUE_TAIL_MARKER"), "the cut is real: the tail marker sits beyond 600");
@@ -1216,5 +1293,198 @@ describe("BUG-5 park surface budget 600 + ellipsis (fixes/320)", () => {
       `${`P0 Auto-Review failed: ${longErr}`.slice(0, 600)}…`,
       "the error arm's lastAutoLog truncation",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W62 · C1-07 remediation — the documented, coded, NON-HUMAN
+// "accept risk under seal" policy path. A sealed classifier REJECT normally
+// mints a forceHuman gate the seal refuses (a dead-end); a MACHINE-declared
+// rule (acceptRiskUnderSeal) instead records a machine risk acceptance and
+// continues — never a human seat, and the gate's own DoD still holds.
+// ---------------------------------------------------------------------------
+describe("W62 — wild.exec names the deterministic floor when the keyed edge fell back", () => {
+  it("an edge that internally appended the fallback row is logged as the floor, not the keyed edge", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      // The keyed P6 edge logs `wild.p6.edge_unavailable` when it falls back to
+      // the floor. The injected seam reproduces that shape so the wild.exec row
+      // is pinned to the truth (pre-fix it claimed "injected edge seam").
+      const fallingBack = (p: Project): Promise<Project> =>
+        Promise.resolve(
+          wildLog(
+            applyPhaseResult(p, 6),
+            6,
+            "warn",
+            "wild.p6.edge_unavailable",
+            "simulated keyed-edge fallback",
+          ),
+        );
+      const res = await wildStep(p6NoMintFixture(), {
+        reviewer: approvingP6Reviewer,
+        p6Edge: fallingBack,
+      });
+      const exec = (res.project.logs ?? []).find((l) => l.event === "wild.exec");
+      assert.ok(exec, "wild.exec row present");
+      assert.ok(
+        String(exec!.detail).includes("deterministic floor — keyed edge unavailable"),
+        `wild.exec must tell the truth (got: ${exec!.detail})`,
+      );
+      assert.ok(
+        !/keyed synthesis edge|injected edge seam/.test(String(exec!.detail)),
+        "wild.exec never claims the keyed edge ran when it fell back",
+      );
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A4-E4 (P1) — a FAILED keyed edge is not a completed floor phase.
+// The production P6/P7 edges used to `catch` any throw and return
+// `applyPhaseResult(project, 6|7)` — a COMPLETED phase plus a warn row — so
+// "the keyed edge blew up" and "the keyless floor ran" produced the SAME record.
+// They now leave the phase running and stamp `wild.p{6,7}.edge.failed`; the
+// execute site turns that into a coded park. The seam below reproduces the real
+// edge's failure shape (the same idiom the W62 floor-label pin above uses).
+// ---------------------------------------------------------------------------
+describe("A4-E4 — a failed keyed edge parks instead of synthesizing a floor completion", () => {
+  it("leaves the phase running and parks RT_E_LLM_REJECTED (no wild.exec, no completion)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const failingEdge = (p: Project): Promise<Project> =>
+        Promise.resolve(
+          wildLog(p, 6, "warn", "wild.p6.edge.failed", "RT_E_LLM_REJECTED · simulated keyed-edge failure"),
+        );
+      const res = await wildStep(p6NoMintFixture(), {
+        reviewer: approvingP6Reviewer,
+        p6Edge: failingEdge,
+      });
+      assert.equal(res.outcome, "paused");
+      assert.equal(res.code, "RT_E_LLM_REJECTED");
+      assert.equal(res.project.currentPhase, 6, "the cursor never advances off a failed edge");
+      assert.equal(
+        res.project.phases.find((r) => r.id === 6)?.status,
+        "running",
+        "the phase is left RUNNING — no floor completion is synthesized",
+      );
+      assert.equal(
+        (res.project.logs ?? []).some((l) => l.event === "wild.exec"),
+        false,
+        "no `wild.exec` row — the step did not complete an execution",
+      );
+      const row = (res.project.logs ?? []).find((l) => l.event === "wild.p6.edge.failed");
+      assert.ok(row, "the failure row is on the ledger");
+      assert.equal(res.project.wildRun?.park?.code, "RT_E_LLM_REJECTED");
+      assert.equal(res.project.wildRun?.park?.unlock, "human-retry", "the repair/retry door is named");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A4-E10 — a MACHINE-CREATED reject gate can never be machine-cleared
+// (`mintReviewGatePark` is forceHuman, refused by the seal under R3/B-03), so
+// the sealed park names the repair-the-phase path. The minted human gate is
+// retained — this lane does NOT open the machine door.
+// ---------------------------------------------------------------------------
+describe("A4-E10 — a sealed classifier reject names the repair path", () => {
+  const CRITIQUE =
+    "P0 artifacts are generic floor boilerplate with no brief evidence; rework before this phase may advance.";
+
+  it("sealed: parks human-retry with a wild.repair_required row, minted gate retained", async () => {
+    const rejecting: WildReviewer = async () => ({ ok: true, verdict: "reject", feedback: CRITIQUE, model: "pin" });
+    const res = await wildStep(wildFixture("complete"), {
+      reviewer: rejecting,
+      agentSeal: true,
+      retryBackoffMs: 5,
+    });
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.project.wildRun?.park?.unlock, "human-retry");
+    assert.ok(
+      (res.project.logs ?? []).some((l) => l.event === "wild.repair_required"),
+      "the sealed reject records the repair path",
+    );
+    assert.ok(res.project.hitl, "the minted human gate is retained (the machine door is NOT opened)");
+  });
+
+  it("unsealed: the same classifier reject keeps the human-gate park (byte-identical)", async () => {
+    const rejecting: WildReviewer = async () => ({ ok: true, verdict: "reject", feedback: CRITIQUE, model: "pin" });
+    const res = await wildStep(wildFixture("complete"), { reviewer: rejecting });
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+    assert.equal(
+      (res.project.logs ?? []).some((l) => l.event === "wild.repair_required"),
+      false,
+      "the repair row is seal-only",
+    );
+  });
+});
+
+describe("W62 — accept-risk-under-seal is machine-only and never lowers the DoD gate", () => {
+  const RULE = "policy:accept-p6-risk@v1";
+  const rejecting: WildReviewer = async () => ({
+    ok: true,
+    verdict: "reject",
+    feedback: "P6 evidence is thin — the plan may only proceed under an explicit, recorded risk policy.",
+    model: "pin",
+  });
+
+  it("a declared rule lets the sealed run advance on a MACHINE risk acceptance (no human seat)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const res = await wildStep(p6NoMintFixture(), {
+        reviewer: rejecting,
+        agentSeal: true,
+        retryBackoffMs: 1,
+        acceptRiskUnderSeal: RULE,
+        p6Edge: p6SeamWith(greenExecutedOutcome()),
+      });
+      assert.equal(res.outcome, "advanced", "the declared rule lets the sealed run continue");
+      assert.equal(res.project.currentPhase, 7, "the cursor leaves P6");
+      assert.equal(res.project.hitl ?? null, null, "no forceHuman gate is minted");
+      const row = (res.project.logs ?? []).find((l) => l.event === "wild.risk_accepted");
+      assert.ok(row, "the coded machine risk-acceptance row is recorded");
+      assert.ok(String(row!.detail).includes(RULE), "the rule identifier is recorded verbatim");
+      assert.ok(!/decidedBy:"human"|seat human/i.test(String(row!.detail)), "never a human seat");
+      assert.equal(
+        res.project.decisions.some((d) => d.decidedBy === "human"),
+        false,
+        "no human decision row is minted by the machine policy path",
+      );
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("the risk acceptance does NOT lower the DoD: a red gate still parks coded", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const res = await wildStep(p6NoMintFixture(), {
+        reviewer: rejecting,
+        agentSeal: true,
+        retryBackoffMs: 1,
+        acceptRiskUnderSeal: RULE,
+        // No executed spec ⇒ p6-verified stays unmet even after the override.
+        p6Edge: p6SeamWith(greenNoSpecOutcome()),
+      });
+      assert.equal(res.outcome, "paused", "a red DoD gate still holds after the risk acceptance");
+      assert.equal(res.code, "RT_E_GATE_PENDING");
+      assert.equal(res.project.currentPhase, 6, "the cursor never leaves P6 on a red gate");
+      assert.ok((res.project.logs ?? []).some((l) => l.event === "wild.paused_dod"), "the DoD park is recorded");
+      assert.equal(res.project.hitl ?? null, null, "still no human gate — the machine parked on the gate");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
   });
 });

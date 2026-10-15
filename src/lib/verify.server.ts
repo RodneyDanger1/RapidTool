@@ -89,6 +89,14 @@ export type VerifyOutcome = {
   code?: ErrorCode;
   finalSource?: string;
   cases?: VerifyCase[];
+  /** 350: the number of machine-oracle assertions that actually EXECUTED and
+   *  passed (runCases' authenticated `results`) — present ONLY on a "passed"
+   *  outcome, where it is always >= 1 because runCases refuses zero cases and
+   *  requires every case to have authenticated and passed. It is the honest
+   *  producer's explicit statement of the executed-assertion floor; the mint
+   *  (verify.ts applyVerifyOutcome) additionally refuses a passed envelope that
+   *  reports zero executed loop iterations. */
+  executedAssertions?: number;
   /** Non-empty only when the final source triggered lintFailures() findings. */
   lint?: LintFailure[];
   /** L3 (failed/error) or L4 (passed) lesson row minted at the outcome point
@@ -982,20 +990,22 @@ export async function runCases(
   source: string,
   cases: VerifyCase[],
   timeoutMs = 15_000,
-): Promise<{ pass: boolean; results: CaseResult[]; compileError?: string }> {
+): Promise<{ pass: boolean; results: CaseResult[]; compileError?: string; code?: ErrorCode }> {
   // Guards run BEFORE any execution. A machine pass may never be minted from
   // zero cases (vacuous truth), and a payload whose expressions can break out
   // of the harness's single-expression context is refused, never executed —
   // hostile expressions could otherwise print forged ORACLE_RESULT lines.
+  // 350: every refusal carries its registered code so a caller can branch on
+  // the class without parsing `compileError` prose.
   if (!Array.isArray(cases) || cases.length === 0) {
-    return { pass: false, results: [], compileError: "no cases to run" };
+    return { pass: false, results: [], compileError: "no cases to run", code: "RT_E_VALIDATION" };
   }
   // 340-3: a module the CommonJS harness cannot compile is refused up front with
   // the real cause (ESM import/export), never the opaque compile-fail marker —
   // the headless seam can hand runCases a materialized ESM tree entry.
   const esmReason = esmModuleUnsupportedReason(source);
   if (esmReason !== null) {
-    return { pass: false, results: [], compileError: esmReason };
+    return { pass: false, results: [], compileError: esmReason, code: "RT_E_RUNNER_FAILED" };
   }
   const validated: { id: string; expression: string }[] = [];
   let rejection: { index: number; reason: string; expression: unknown } | null = null;
@@ -1037,11 +1047,12 @@ export async function runCases(
         };
       }),
       compileError: `one or more case expressions failed the harness safety check: ${rejId} — ${rej.reason}`,
+      code: "RT_E_VALIDATION",
     };
   }
   const { runNodeBounded, runnerAvailable } = await import("./node-runner.server.ts");
   if (!runnerAvailable()) {
-    return { pass: false, results: [], compileError: "local bounded runner unavailable" };
+    return { pass: false, results: [], compileError: "local bounded runner unavailable", code: "RT_E_RUNNER_UNAVAILABLE" };
   }
   const harness = buildHarness(source, validated);
   // fixes/346 lane-1: the machine cases run the UNTRUSTED candidate module
@@ -1056,7 +1067,12 @@ export async function runCases(
     isolation: "strict",
   });
   if (!run.ok) {
-    return { pass: false, results: [], compileError: `${run.reason}${run.error ? `: ${run.error}` : ""}` };
+    return {
+      pass: false,
+      results: [],
+      compileError: `${run.reason}${run.error ? `: ${run.error}` : ""}`,
+      code: run.code,
+    };
   }
   const out = run.stdout;
   // 344 A2-F1: verdicts are read ONLY from the nonce-authenticated fd-3 channel
@@ -1115,13 +1131,13 @@ export async function runCases(
     results.push({ id: m[1], pass: m[2] === "pass", detail: m[3] ?? "" });
   }
   if (compileMarker.startsWith("fail")) {
-    return { pass: false, results, compileError: "source failed to compile in the harness" };
+    return { pass: false, results, compileError: "source failed to compile in the harness", code: "RT_E_RUNNER_FAILED" };
   }
   // 346 E1 (L2-X4): an ENTIRELY empty authenticated channel is a runner/fd-3
   // failure, not a module with no callables — classify it honestly (before the
   // `!callables` check, which would otherwise mislabel it).
   if (verdictChannelFailed(sawExports, sawCompile)) {
-    return { pass: false, results, compileError: VERDICT_CHANNEL_FAILED_REASON };
+    return { pass: false, results, compileError: VERDICT_CHANNEL_FAILED_REASON, code: "RT_E_RUNNER_FAILED" };
   }
   // T-01 (109 C-01): refuse the run when the module exports no callable name.
   // Fail-closed and actionable: the previous shape let a self-contained
@@ -1129,7 +1145,7 @@ export async function runCases(
   // never called, and a `module.exports = { … }` module (T-05) produced a
   // bare ReferenceError with no diagnosis.
   if (!callables) {
-    return { pass: false, results, compileError: NO_CALLABLE_EXPORTS_REASON };
+    return { pass: false, results, compileError: NO_CALLABLE_EXPORTS_REASON, code: "RT_E_VALIDATION" };
   }
   // fixes/328 P3 (109 C-01 intersection half): at least one case must REFERENCE
   // an exported callable name. The inventory above is measured from what really
@@ -1152,7 +1168,7 @@ export async function runCases(
     if (referencesExport) break;
   }
   if (!referencesExport) {
-    return { pass: false, results, compileError: NO_EXPORT_REFERENCE_REASON };
+    return { pass: false, results, compileError: NO_EXPORT_REFERENCE_REASON, code: "RT_E_VALIDATION" };
   }
   const allSeen = [...expected].every((id) => seen.has(id));
   return {
@@ -2191,12 +2207,17 @@ export async function verifyAndFixServer(
     const lintSuffix = lint.length > 0 ? `; lint advisory: ${formatLintSummary(lint)}` : "";
     if (run.pass) {
       const evidence = `${cases.length}/${cases.length} machine-run cases passed on iteration ${i + 1}${lintSuffix}`;
+      // 350: the executed-assertion floor, measured — every case in `cases`
+      // authenticated on the fd-3 channel and passed (runCases guarantees
+      // `results.length === validated.length`), so this equals cases.length.
+      const executedAssertions = run.results.filter((r) => r.pass).length;
       return {
         status: "passed",
         iterations: i + 1,
         evidence,
         finalSource: current,
         cases,
+        executedAssertions,
         ...(lint.length > 0 ? { lint } : {}),
         // L4 verified-procedure on a machine pass (Voyager commit-on-verify).
         // 216i note: a PASS is not a failure record, so the §4.3

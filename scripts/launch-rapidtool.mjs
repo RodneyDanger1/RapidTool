@@ -123,6 +123,63 @@ function readPidFile() {
   }
 }
 
+/**
+ * The command line of a Windows pid, or "" when it cannot be read. Mirrors
+ * preview.mjs's /proc corroboration: the pidfile pid is only a CLAIM, and pids
+ * are reused across hibernate/revive, so a stale claim must be checked before
+ * `taskkill /T` reaps a whole unrelated process tree.
+ */
+export function winProcessCommandLine(pid, { spawn = spawnSync } = {}) {
+  try {
+    const wmic = spawn("wmic", ["process", "where", `ProcessId=${pid}`, "get", "CommandLine", "/value"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5000,
+    });
+    if (wmic.status === 0 && typeof wmic.stdout === "string") {
+      const m = wmic.stdout.match(/^CommandLine=(.*)$/m);
+      if (m) return m[1].trim();
+    }
+  } catch {
+    /* wmic absent/removed — try the CIM fallback */
+  }
+  try {
+    const ps = spawn(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+      { encoding: "utf8", windowsHide: true, timeout: 8000 },
+    );
+    if (ps.status === 0 && typeof ps.stdout === "string") return ps.stdout.trim();
+  } catch {
+    /* unreadable — caller treats "" as "cannot corroborate" */
+  }
+  return "";
+}
+
+/** True when a command line is the preview server THIS launcher spawns
+ *  (`node scripts/with-app-env.mjs vite preview`). Mirrors preview.mjs's
+ *  looksLikePreviewProcess, which refuses its own tooling (preview*.mjs). */
+export function looksLikeLaunchProcess(cmdline) {
+  const argv = String(cmdline ?? "");
+  if (/\bpreview[\w-]*\.mjs\b/.test(argv)) return false;
+  return /\bwith-app-env\.mjs\b/.test(argv) && /\bvite\b\s+preview\b/.test(argv);
+}
+
+/**
+ * LISTEN pids on `port`. `ok:false` means the netstat probe itself failed — the
+ * caller must NOT read that as "the port is free" (a failed probe used to yield
+ * `[]`, so stop could claim a port free while a server still held it).
+ * Exported with an injectable spawn for the failed-probe unit seam.
+ */
+/** @param {number} [port] @param {{ spawn?: any }} [opts] */
+export function winPortPids(port = PORT, { spawn = spawnSync } = {}) {
+  const r = spawn("netstat", ["-ano", "-p", "TCP"], { encoding: "utf8", windowsHide: true });
+  if (r.error || r.status !== 0 || typeof r.stdout !== "string") {
+    return { ok: false, pids: [], error: r.error ? r.error.message : `netstat exited ${r.status}` };
+  }
+  return { ok: true, pids: netstatListenPids(r.stdout, port), error: null };
+}
+
 /** `taskkill /T` on win32 reaches the child tree; POSIX signals the group. */
 function killTree(pid) {
   if (process.platform === "win32") {
@@ -140,26 +197,43 @@ function killTree(pid) {
   }
 }
 
-function winPortPids() {
-  const out = spawnSync("netstat", ["-ano", "-p", "TCP"], {
-    encoding: "utf8",
-    windowsHide: true,
-  }).stdout;
-  return netstatListenPids(out, PORT);
-}
-
 /** Windows stop: the recorded tree plus whoever owns the port, verified free. */
 async function stopWin(announce) {
-  const pids = new Set();
+  const first = winPortPids();
+  if (!first.ok) {
+    // A failed netstat probe is NOT a free port: never claim one we could not
+    // read (a server may be holding it).
+    console.error(`[launch] cannot inspect port ${PORT} (netstat failed: ${first.error}) — refusing to claim it free`);
+    return false;
+  }
+  const pids = new Set(first.pids);
+  // The pidfile pid is only a claim: pids are reused across hibernate/revive, so
+  // signal it ONLY when its command line still looks like the preview we spawn
+  // (preview.mjs's corroboration contract). Without this, a stale pidfile could
+  // `taskkill /T` an unrelated process tree.
   const pidFilePid = readPidFile();
-  if (pidFilePid !== null && isAlive(pidFilePid)) pids.add(pidFilePid);
-  for (const pid of winPortPids()) pids.add(pid);
+  if (
+    pidFilePid !== null &&
+    !pids.has(pidFilePid) &&
+    isAlive(pidFilePid) &&
+    looksLikeLaunchProcess(winProcessCommandLine(pidFilePid))
+  ) {
+    pids.add(pidFilePid);
+  }
   const signalled = [...pids];
   for (const pid of signalled) killTree(pid);
-  for (let waited = 0; waited < 5000 && winPortPids().length > 0; waited += 100) await sleep(100);
+  for (let waited = 0; waited < 5000; waited += 100) {
+    const scan = winPortPids();
+    if (!scan.ok || scan.pids.length === 0) break;
+    await sleep(100);
+  }
   const held = winPortPids();
-  if (held.length > 0) {
-    console.error(`[launch] port ${PORT} is still held by pid(s) ${held.join(", ")}`);
+  if (!held.ok) {
+    console.error(`[launch] cannot verify port ${PORT} is free (netstat failed: ${held.error})`);
+    return false;
+  }
+  if (held.pids.length > 0) {
+    console.error(`[launch] port ${PORT} is still held by pid(s) ${held.pids.join(", ")}`);
     return false;
   }
   rmSync(PID_FILE, { force: true });

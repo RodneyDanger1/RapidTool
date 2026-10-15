@@ -232,19 +232,40 @@ export type PhaseCoverage = {
  *  - records are matched by id (like `priorsSealed`, never by array
  *    position), so an unsorted/sparse status array can not mis-count;
  *  - foreign or non-integer phase ids never inflate the artifact census;
- *  - the two BOOKKEEPING rows are not phase deliverables: the packet's own row
+ *  - the BOOKKEEPING rows are not phase deliverables: the packet's own row
  *    (kind "packet" — `sealPacketArtifact` re-stamps it at whatever phase the
  *    run stopped at) and each phase's recorded DoD verdict (kind "gate" — the
  *    driver records it, so counting it would make the same 13-phase run report
  *    a different total under a different driver). The packet's "## Artifacts
  *    (trimmed)" section hides it for the same reason; the census stays
  *    consistent with what is shown;
+ *  - (A3-E16) an ingested external AGENT REPORT (kind "docs", `report-` id /
+ *    "[agent report] " title — `report-intake.ts`) is agent-origin input, not a
+ *    deliverable: for P12 the declared kind IS `docs`, so counting it would let
+ *    a phase that produced nothing pass the census;
  *  - a complete phase with NO deliverable row is reported in `emptyPhases`
  *    (a silent no-op is named, never hidden behind the tail total).
  */
+/**
+ * A3-E16: an ingested external agent report (`report-intake.ts`) lands as a
+ * `docs` artifact marked by its `report-` id prefix and `[agent report] ` title
+ * prefix — an engine-never-emits marker. Such a row is AGENT-ORIGIN INPUT, not
+ * a phase DELIVERABLE: for P12 the declared deliverable kind IS `docs`, so
+ * counting a report row would let a phase that produced nothing look like it
+ * produced its deliverable. Both census readers exclude it.
+ */
+const REPORT_ID_PREFIX = "report-";
+const REPORT_TITLE_PREFIX = "[agent report] ";
+function isReportArtifact(row: { id?: unknown; title?: unknown } | null | undefined): boolean {
+  if (!row) return false;
+  const id = typeof row.id === "string" ? row.id : "";
+  const title = typeof row.title === "string" ? row.title : "";
+  return id.startsWith(REPORT_ID_PREFIX) || title.startsWith(REPORT_TITLE_PREFIX);
+}
+
 export function phaseCoverage(
   phases: readonly { id: number; status: string }[],
-  artifacts: readonly { phase: number; kind?: string }[],
+  artifacts: readonly { phase: number; kind?: string; id?: unknown; title?: unknown }[],
 ): PhaseCoverage {
   const records = Array.isArray(phases) ? phases : [];
   const rows = Array.isArray(artifacts) ? artifacts : [];
@@ -257,12 +278,13 @@ export function phaseCoverage(
   for (const def of PHASES) {
     if (statusById.get(def.id) === "complete") executed += 1;
   }
-  const isBookkeeping = (kind: string | undefined): boolean => kind === "packet" || kind === "gate";
+  const isBookkeeping = (a: { kind?: string; id?: unknown; title?: unknown }): boolean =>
+    a.kind === "packet" || a.kind === "gate" || isReportArtifact(a);
   const deliverableByPhase = new Map<number, number>();
   let tailArtifacts = 0;
   for (const a of rows) {
     if (!a || typeof a.phase !== "number" || !Number.isInteger(a.phase)) continue;
-    if (isBookkeeping(a.kind)) continue;
+    if (isBookkeeping(a)) continue;
     deliverableByPhase.set(a.phase, (deliverableByPhase.get(a.phase) ?? 0) + 1);
     if (a.phase < PHASE_TAIL_START || a.phase >= PHASES.length) continue;
     tailArtifacts += 1;
@@ -301,4 +323,198 @@ export function phaseCoverageLine(coverage: PhaseCoverage): string {
     .map((id) => PHASE_BY_ID.get(id)?.code ?? `P${id}`)
     .join(", ");
   return empty ? `${base} — silent no-op phase(s): ${empty}` : base;
+}
+
+// ---------------------------------------------------------------------------
+// Stage wiring — every phase's claimed deliverable is present, non-empty, and
+// flows forward (additive; item 4).
+//
+// The pipeline wired inconsistently: a COMPLETE phase that emitted nothing read
+// as a silent skip, and the tail produced thin artifacts no surface named. This
+// pure reading asserts, per phase P0..P12, that the deliverable artifact a phase
+// claims exists AND carries non-empty bytes, and records whether the stage's
+// output reached the next phase. A stage that produced nothing is a CODED
+// failure — never a silent skip. Bookkeeping rows (kind "gate" / "packet") are
+// not deliverables.
+// ---------------------------------------------------------------------------
+
+/** The deliverable artifact kind(s) each phase's producer writes (measured on a
+ *  full 13-phase run: P0 scorecard, P1 graph, … P12 docs). Bookkeeping rows are
+ *  excluded from the census. */
+export const PHASE_DELIVERABLE_KINDS: Readonly<Record<PhaseId, readonly string[]>> = {
+  0: ["scorecard"],
+  1: ["graph"],
+  2: ["memory"],
+  3: ["mcp"],
+  4: ["security"],
+  5: ["validation"],
+  6: ["code"],
+  7: ["research"],
+  8: ["ui"],
+  9: ["cicd"],
+  10: ["edge"],
+  11: ["tools"],
+  12: ["docs"],
+};
+
+const BOOKKEEPING_ARTIFACT_KINDS: ReadonlySet<string> = new Set(["gate", "packet"]);
+
+export type StageWiringRow = {
+  phase: PhaseId;
+  code: string;
+  status: string;
+  /** The deliverable kind(s) this phase's producer claims. */
+  expectedKinds: readonly string[];
+  /** Deliverable rows (bookkeeping excluded). */
+  deliverables: number;
+  /** Σ non-empty body bytes across deliverables. */
+  bodyBytes: number;
+  /** ≥1 deliverable row exists. */
+  present: boolean;
+  /** ≥1 deliverable row carries non-empty body bytes. */
+  nonEmpty: boolean;
+  /** One expected kind is present among the deliverables. */
+  kindPresent: boolean;
+  /** ≥1 expected-kind deliverable carries non-empty body bytes (2026-10-06):
+   *  a NON-expected kind's bytes must never mask an empty declared deliverable. */
+  kindNonEmpty: boolean;
+  /** null when the next phase was never reached (a legitimate stop, e.g. an
+   *  enforceDod park or a lock); otherwise the next stage carried a non-empty
+   *  deliverable. */
+  flowsForward: boolean | null;
+  /** Coded failures for THIS phase (empty ⇒ wired). */
+  reasons: Array<{ code: string; reason: string }>;
+};
+
+export type StageWiringReading = {
+  rows: StageWiringRow[];
+  /** Every coded failure across the graph (empty ⇒ ok). */
+  failures: Array<{ phase: PhaseId; code: string; reason: string }>;
+  ok: boolean;
+  note: string;
+};
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+/**
+ * Pure stage-wiring census over a persisted project record. `unknown` input is
+ * read defensively (absent phases/artifacts ⇒ zeroed census, never a throw). A
+ * COMPLETE phase with no deliverable, or with only empty-bodied deliverables, or
+ * missing its declared kind, is a coded failure — a stage that produced nothing
+ * is NEVER a green skip.
+ */
+export function stageWiringReading(project: unknown): StageWiringReading {
+  const p = asRecord(project);
+  const records = Array.isArray(p?.phases) ? (p!.phases as unknown[]) : [];
+  const artifacts = Array.isArray(p?.artifacts) ? (p!.artifacts as unknown[]) : [];
+
+  const statusById = new Map<number, string>();
+  for (const r of records) {
+    const row = asRecord(r);
+    const id = typeof row?.id === "number" ? row.id : Number(row?.id);
+    if (!Number.isInteger(id) || statusById.has(id)) continue;
+    statusById.set(id, typeof row?.status === "string" ? row.status : "absent");
+  }
+
+  const byPhase = new Map<number, Array<{ kind: string; bodyBytes: number }>>();
+  for (const a of artifacts) {
+    const row = asRecord(a);
+    const phase = typeof row?.phase === "number" ? row.phase : Number(row?.phase);
+    if (!Number.isInteger(phase)) continue;
+    const kind = typeof row?.kind === "string" ? row.kind : "";
+    if (BOOKKEEPING_ARTIFACT_KINDS.has(kind)) continue;
+    // A3-E16: an ingested external agent report is agent-origin input, not a
+    // phase deliverable (it would otherwise satisfy P12's declared `docs` kind).
+    if (isReportArtifact(row)) continue;
+    const bodyBytes = typeof row?.body === "string" ? row.body.length : 0;
+    const list = byPhase.get(phase) ?? [];
+    list.push({ kind, bodyBytes });
+    byPhase.set(phase, list);
+  }
+
+  const rows: StageWiringRow[] = PHASES.map((def) => {
+    const status = statusById.get(def.id) ?? "absent";
+    const deliverables = byPhase.get(def.id) ?? [];
+    const expectedKinds = PHASE_DELIVERABLE_KINDS[def.id] ?? [];
+    const present = deliverables.length > 0;
+    const nonEmpty = deliverables.some((d) => d.bodyBytes > 0);
+    const kindPresent = expectedKinds.length === 0 || deliverables.some((d) => expectedKinds.includes(d.kind));
+    const kindNonEmpty =
+      expectedKinds.length === 0 || deliverables.some((d) => expectedKinds.includes(d.kind) && d.bodyBytes > 0);
+    const reasons: Array<{ code: string; reason: string }> = [];
+    if (status === "complete") {
+      if (!present) {
+        reasons.push({
+          code: "RT_E_PLAN_UNDERPRODUCED",
+          reason: `${def.code} completed with NO deliverable artifact — a stage that produces nothing is a silent no-op, never a pass`,
+        });
+      } else if (!nonEmpty) {
+        reasons.push({
+          code: "RT_E_SUBSTANCE_EMPTY",
+          reason: `${def.code} produced ${deliverables.length} deliverable(s) but every body is empty (0 bytes)`,
+        });
+      } else if (kindPresent && !kindNonEmpty) {
+        // The phase wrote SOME non-empty bytes, and its DECLARED kind is
+        // present but EMPTY: another kind's bytes must never mask it. (An
+        // entirely ABSENT declared kind is the `!kindPresent` branch below.)
+        reasons.push({
+          code: "RT_E_SUBSTANCE_EMPTY",
+          reason: `${def.code}'s declared ${expectedKinds.join("/")} artifact is present but EMPTY (other deliverables carried the bytes)`,
+        });
+      }
+      if (!kindPresent) {
+        const produced = [...new Set(deliverables.map((d) => d.kind))].join(", ") || "none";
+        reasons.push({
+          code: "RT_E_PLAN_UNDERPRODUCED",
+          reason: `${def.code} produced no ${expectedKinds.join("/")} artifact (produced: ${produced})`,
+        });
+      }
+    }
+    return {
+      phase: def.id,
+      code: def.code,
+      status,
+      expectedKinds,
+      deliverables: deliverables.length,
+      bodyBytes: deliverables.reduce((n, d) => n + d.bodyBytes, 0),
+      present,
+      nonEmpty,
+      kindPresent,
+      kindNonEmpty,
+      flowsForward: null,
+      reasons,
+    };
+  });
+
+  // Flow: a COMPLETE stage's output must be visible in the next stage when that
+  // stage also completed. A null (next never reached) is a legitimate stop.
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.status !== "complete") continue;
+    const next = rows[i + 1];
+    if (!next) continue;
+    if (next.status !== "complete") continue;
+    const flows = next.present && next.nonEmpty;
+    row.flowsForward = flows;
+    if (!flows) {
+      row.reasons.push({
+        code: "RT_E_PLAN_UNDERPRODUCED",
+        reason: `${row.code} outputs did not flow: ${next.code} completed with no non-empty deliverable`,
+      });
+    }
+  }
+
+  const failures: Array<{ phase: PhaseId; code: string; reason: string }> = [];
+  for (const row of rows) {
+    for (const r of row.reasons) failures.push({ phase: row.phase, code: r.code, reason: r.reason });
+  }
+  const completeCount = rows.filter((r) => r.status === "complete").length;
+  return {
+    rows,
+    failures,
+    ok: failures.length === 0,
+    note: `${completeCount} of ${rows.length} phase(s) complete · ${failures.length} wiring failure(s)`,
+  };
 }

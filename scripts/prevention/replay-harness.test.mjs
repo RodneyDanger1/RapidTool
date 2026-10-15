@@ -20,6 +20,7 @@ import {
   loadCassettes,
   loadHeldOutCassettes,
   loadGuardRegistry,
+  loadGuardFloor,
   scanDuplicateExports,
   scanEagerTdz,
   scanMoneySemantics,
@@ -29,6 +30,12 @@ import {
   loadSeams,
   runAll,
   finalize,
+  evaluateCanaries,
+  validateCanary,
+  KEY_FIELD_CANARIES,
+  synthesisRowCount,
+  withoutSynthesisRows,
+  projectFixture,
 } from "./replay-harness.mjs";
 
 const RUN_ROOT = resolveRunRoot();
@@ -94,6 +101,73 @@ test("C-14 real seam: archProductComplete fails closed on the 2-file historical 
   assert.deepEqual(at.missing.slice().sort(), ["approve", "scan", "show", "test"], "the historical tree is missing capabilities");
   assert.equal(dod.archProductComplete(at), false, "p6-arch must fail closed on the attempted keyed synthesis");
   assert.equal(dod.archProductComplete({ present: true, skipped: false, rows: [{ capability: "a", files: ["x"] }], missing: [], stubFiles: [], note: "" }), true, "a complete tree passes (control)");
+});
+
+test("C-14 seam control: the keyless floor is genuinely keyless, so mutationRed is reachable", async () => {
+  const dod = await import("../../src/lib/dod.ts");
+  const item = dod.DOD[6].find((c) => c.id === "p6-arch");
+  assert.ok(item, "the real p6-arch criterion must exist");
+  assert.equal(typeof item.probe, "function", "the p6-arch criterion must carry a probe");
+  const base = JSON.parse(readFileSync(join(RUN_ROOT, "office-stock-tracker", "build.json"), "utf8").replace(/^\uFEFF/, ""));
+  // The fixture's OWN logs carry the keyed attempt (the reason `{...base,
+  // generatedTree: []}` returned false and C-14 could never leave `pending`).
+  assert.ok(synthesisRowCount(base) > 0, `the real fixture carries ${synthesisRowCount(base)} p6.synthesis.* rows`);
+  const keyless = projectFixture({ ...withoutSynthesisRows(base), generatedTree: [] });
+  assert.equal(synthesisRowCount(keyless), 0, "the derived control carries ZERO keyed-synthesis rows");
+  assert.equal(item.probe(keyless), true, "the keyless floor still passes (the legacy single-module branch)");
+  assert.equal(item.probe({ ...keyless, logs: [...keyless.logs, { event: "p6.synthesis.refused" }] }), false, "a keyed refusal with no tree fails closed (mutation control)");
+  const verdict = finalize(await runAll({ runRoot: RUN_ROOT, cassettes: loadCassettes(), registry: loadGuardRegistry() }));
+  const c14 = verdict.detail.find((r) => r.id === "C-14");
+  assert.equal(c14.fixPresence.present, true, "the p6-arch probe seam is present");
+  assert.equal(c14.fixPresence.wired, true, "the fail-closed sentinel is refused");
+  assert.equal(c14.fixPresence.mutationRed, true, "the keyless-floor control flips the check, so C-14 is provable");
+  assert.equal(c14.fixPresence.evidence.controlSynthesisRows, 0, "the control the harness uses is the keyless floor");
+  assert.ok(c14.fixPresence.evidence.fixtureSynthesisRows > 0, "the sentinel is built from the real (keyed) fixture");
+  assert.ok(!verdict.pending.includes("C-14"), "C-14 leaves the pending set");
+});
+
+test("canary: a guard's key field disappearing or being reshaped fails LOUDLY with a coded envelope", async () => {
+  const seams = await loadSeams();
+  const real = (dir, opts) => seams.treeSubstanceOf(dir, opts);
+  const trees = loadCassettes().flatMap((c) => c.trees.map((t) => ({ slug: c.slug, tree: t, dir: join(RUN_ROOT, c.slug, t) })));
+
+  // 1. The live seam satisfies every declared key-field contract.
+  const live = await evaluateCanaries({ trees });
+  assert.deepEqual(live.violations, [], "every declared key field is intact on the real seam");
+  assert.deepEqual(live.checked.sort(), ["C-06", "C-14"], "both declared canaries are checked");
+
+  // 2. PLANTED SHAPE CHANGE: the field C-06 keys on is renamed away. Before the
+  //    canary the driver simply reported `fired:false` (a rename-away disarming);
+  //    now the harness must fail with the coded envelope and name the field.
+  const renamed = { ...seams, treeSubstanceOf: (dir, opts) => { const r = real(dir, opts); const { jobScoped: _omitted, ...rest } = r; return rest; } };
+  const planted = finalize(await runAll({ runRoot: RUN_ROOT, cassettes: loadCassettes(), registry: loadGuardRegistry(), seams: renamed }));
+  assert.equal(planted.ok, false, "a renamed key field must NOT read as a green harness");
+  assert.ok(planted.missed.includes("<canary:C-06:RT_E_VALIDATION>"), `the coded envelope must be in missed: ${JSON.stringify(planted.missed)}`);
+  assert.equal(planted.canaries.ok, false, "the canaries signal is red");
+  const violation = planted.canaries.violations.find((v) => v.guard === "C-06");
+  assert.equal(violation.code, "RT_E_VALIDATION", "the violation carries a registered RT_E_* code");
+  assert.equal(violation.field, "jobScoped.verdict", "the violation names the field that vanished");
+  assert.equal(violation.problem, "key-field-missing", "the problem class is named");
+  // ...and the guard still FIRED on the historical trees it can still read, i.e.
+  // the failure is attributable to the field, not to a fixture change.
+  assert.equal(planted.detail.find((r) => r.id === "C-06").fixtureIntegrity.fired, false, "the disarmed reading is visible as fired:false");
+
+  // 3. PLANTED RE-POINT: the documented top-level alias returns to the WHOLE-tree
+  //    census (the A2-F3 defect). The guard's key field still resolves, so only the
+  //    alias contract catches it - which is why it is declared, not assumed.
+  const repointed = { ...seams, treeSubstanceOf: (dir, opts) => { const r = real(dir, opts); return { ...r, verdict: r.wholeTree.verdict }; } };
+  const aliasVerdict = await evaluateCanaries({ trees, seams: repointed });
+  assert.deepEqual(aliasVerdict.violations.map((v) => v.problem), ["key-field-alias-repointed"], "the re-pointed alias is caught");
+  assert.match(aliasVerdict.violations[0].actual, /verdict=mixed != jobScoped\.verdict=empty/, "the violation names both readings");
+
+  // 4. The pure validator is the unit under test: a reshaped domain and a missing
+  //    required shape flag are both violations, never a silent pass.
+  const entry = KEY_FIELD_CANARIES.find((e) => e.id === "C-06");
+  assert.equal(validateCanary(entry, { jobScoped: { verdict: "empty" }, verdict: "empty" }), null, "an intact reading passes");
+  assert.equal(validateCanary(entry, { jobScoped: { verdict: "hollow" }, verdict: "hollow" }).problem, "key-field-reshaped", "an out-of-domain value is caught");
+  assert.equal(validateCanary(entry, null).problem, "key-reading-unavailable", "an unavailable reading is caught");
+  const c14 = KEY_FIELD_CANARIES.find((e) => e.id === "C-14");
+  assert.equal(validateCanary(c14, { phase6IsArray: true, itemFound: false, probe: "function" }).problem, "key-reading-shape-changed:itemFound", "a reshaped DOD registry is caught");
 });
 
 test("C-02 scan: duplicate exported identifiers fire on bakery-florist-orders/emitted only", () => {
@@ -240,6 +314,24 @@ test("fix-presence classification: disjoint + total, and `ok` is FALSE on any pe
   assert.equal(uncovered.ok, false, "an unclassified guard fails closed");
   assert.deepEqual(uncovered.fixPresenceInvariant.uncovered, ["B"], "the uncovered id is named");
   assert.ok(uncovered.missed.includes("<fix-presence-classification>"), "the uncovered guard is named");
+});
+
+test("guard-count floor: pinned OUTSIDE the mutable registry, so deleting a guard AND lowering the registry floor still fails", async () => {
+  // The reviewed floor is a cassettes/ fixture, independent of guard-registry.json.
+  const floor = loadGuardFloor();
+  assert.equal(floor.present, true, "the reviewed guard-floor.json is present");
+  assert.equal(floor.countFloor, 34, "the pinned floor is 34");
+  assert.equal(floor.guardIds.length, 34, "the pinned guard-id set names all 34 guards");
+  // The hole this closes: dropping a guard id and lowering the registry's own
+  // countFloor in one edit used to pass (the floor rode the mutable registry).
+  const registry = loadGuardRegistry();
+  const forged = { ...registry, countFloor: 1, guards: registry.guards.filter((g) => g.id !== "C-01") };
+  const verdict = finalize(await runAll({ runRoot: RUN_ROOT, cassettes: loadCassettes(), registry: forged }));
+  assert.equal(verdict.ok, false, "deleting a guard + lowering the registry floor must still be red");
+  assert.ok(verdict.countFloor >= 34, `the effective floor stays pinned (${verdict.countFloor})`);
+  assert.ok(verdict.floorViolations.some((v) => v.startsWith("registry-count-floor-lowered")), "the lowered registry floor is named");
+  assert.ok(verdict.floorViolations.includes("guard-id-missing:C-01"), "the deleted guard id is named");
+  assert.ok(verdict.missed.some((m) => m.startsWith("<floor:")), "the floor violation is folded into missed");
 });
 
 test("fix-presence: a status:pending entry always fails the gate of record", async () => {

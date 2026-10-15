@@ -12,7 +12,7 @@ import {
   stripTypeAnnotationsForHarness,
 } from "./verify.server.ts";
 import { runnerAvailable } from "./node-runner.server.ts";
-import { applyVerifyOutcome, withCommonJsExports } from "./verify.ts";
+import { applyVerifyOutcome, verifyAndFix, withCommonJsExports } from "./verify.ts";
 import { seedProject } from "./testing/fixtures.ts";
 
 const available = runnerAvailable();
@@ -352,6 +352,19 @@ describe("runCases safety guards (no runner needed)", () => {
     const res = await runCases("exports.x = 1;", "nope" as unknown as never[]);
     assert.equal(res.pass, false);
     assert.match(res.compileError ?? "", /no cases/i);
+  });
+
+  it("350: every runCases refusal carries its registered code (never a bare compileError)", async () => {
+    const noCases = await runCases("exports.x = 1;", []);
+    assert.equal(noCases.code, "RT_E_VALIDATION");
+    const esm = await runCases('export * from "./generated/chunk-0.ts";\n', [
+      { id: "c1", expression: "x === 1" },
+    ]);
+    assert.equal(esm.code, "RT_E_RUNNER_FAILED");
+    const rejection = await runCases("exports.add = (a, b) => a + b;", [
+      { id: "evil", expression: 'add(2,3) === 5); console.log("x"); (true' },
+    ]);
+    assert.equal(rejection.code, "RT_E_VALIDATION");
   });
 });
 
@@ -717,6 +730,78 @@ describe("341-3 — a junk-but-non-empty case set cannot mint tested", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 350 — the EXECUTED-ASSERTION floor on the `tested` mint. A passed envelope
+// must describe a run that actually happened: `iterations` counts the machine
+// loop passes the runner executed, so zero iterations is an unexecuted claim,
+// and a passed envelope carrying an error `code` contradicts itself (codes are
+// minted on failure only). Both are refused on the no-state-change path — never
+// a `tested` label for a run that did not execute.
+// ---------------------------------------------------------------------------
+describe("350 — a passed outcome must prove an executed run", () => {
+  const testedLabel = (p: ReturnType<typeof seedProject>): string | null =>
+    (p.lastTest as { label?: string } | null)?.label ?? null;
+
+  it("refuses a passed envelope that reports zero executed iterations", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      status: "passed",
+      iterations: 0,
+      evidence: "1/1 machine-run cases passed",
+      finalSource: "exports.add = (a, b) => a + b;",
+      cases: [{ id: "c1", expression: "add(2,3) === 5" }],
+    });
+    assert.equal(testedLabel(q), null, "an unexecuted run must not mint tested");
+    assert.equal(q, p, "a refused unexecuted verdict changes no state");
+  });
+
+  it("refuses a self-contradictory passed envelope that also carries an error code", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      status: "passed",
+      iterations: 1,
+      evidence: "1/1 machine-run cases passed",
+      finalSource: "exports.add = (a, b) => a + b;",
+      cases: [{ id: "c1", expression: "add(2,3) === 5" }],
+      code: "RT_E_RUNNER_FAILED",
+    });
+    assert.equal(testedLabel(q), null, "a passed-with-code envelope is dual-channel and refused");
+    assert.equal(q, p);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 350 — the client verify shim's surfaced failures carry a registered code.
+// Before this, an empty source and a transport throw returned a bare
+// `status:"error"` (no code) and the unavailable-injected-server path a
+// statusless `not-configured` — a caller could only flatten them to
+// RT_E_UNKNOWN. All three are pinned here (no network: the injected-server and
+// empty-source paths never dispatch).
+// ---------------------------------------------------------------------------
+describe("350 — verifyAndFix surfaces coded failures", () => {
+  it("empty source → RT_E_VALIDATION", async () => {
+    const res = await verifyAndFix("   ", "brief");
+    assert.equal(res.status, "error");
+    assert.equal(res.code, "RT_E_VALIDATION");
+  });
+
+  it("unavailable injected transport → not-configured with RT_E_RUNNER_UNAVAILABLE", async () => {
+    const res = await verifyAndFix("exports.x = 1;", "brief", { server: null });
+    assert.equal(res.status, "not-configured");
+    assert.equal(res.code, "RT_E_RUNNER_UNAVAILABLE");
+  });
+
+  it("a throwing injected transport is classified, never left codeless", async () => {
+    const res = await verifyAndFix("exports.x = 1;", "brief", {
+      server: async () => {
+        throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), { code: "ECONNREFUSED" });
+      },
+    });
+    assert.equal(res.status, "error");
+    assert.equal(res.code, "RT_E_NETWORK_UNREACHABLE");
+  });
+});
+
 describe("341-3 — the produced `lint` field reaches the delivered verify artifact", () => {
   it("renders the structured findings into the artifact body (advisory — the pass still mints)", () => {
     const p = seedProject();
@@ -802,5 +887,41 @@ describe("applyVerifyOutcome — the case set is part of the verdict commitment 
       ],
     });
     assert.equal(replay, second, "an exact replay is a no-op (dedupe preserved)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 350 (knowledge read-back, end to end for the lessons these files own): a
+// failed machine run mints an L3 row at the verify seam, applyVerifyOutcome
+// appends it to project memory, and the next run's lesson read-back
+// (knowledge.selectLessons -> lessonLinesForBrief) surfaces it. This is the
+// full writer->memory->reader path; if any link drops the row the lesson can
+// never change the next run.
+// ---------------------------------------------------------------------------
+describe("350 — a failed run's lesson reaches the next run's prompt lines", () => {
+  it("verify failure → applyVerifyOutcome → selectLessons → lessonLinesForBrief", async () => {
+    const { lessonLinesForBrief, selectLessons, verifyOutcomeLesson } = await import("./knowledge.ts");
+    const p = seedProject();
+    const evidence = "machine-run cases still failing after 2 iterations: c1: add(2,3) === 99";
+    const lesson = verifyOutcomeLesson("failed", 6, evidence, 2, ["c1"]);
+    const outcome = {
+      status: "failed" as const,
+      iterations: 2,
+      evidence,
+      lesson,
+    };
+    const q = applyVerifyOutcome(p, outcome);
+    assert.ok(q.memory.some((m) => m.id === lesson.id), "the L3 lesson lands in project memory");
+
+    const selected = selectLessons(q.memory ?? [], 6, 5);
+    assert.ok(
+      selected.some((m) => m.id === lesson.id),
+      "selectLessons (phase-6) surfaces the row for injection",
+    );
+    const lines = lessonLinesForBrief(p.brief, selected, { limit: 5 });
+    assert.ok(
+      lines.some((l) => l.includes("verify-failure")),
+      `the next run's lesson lines carry the failed run's lesson: ${JSON.stringify(lines)}`,
+    );
   });
 });

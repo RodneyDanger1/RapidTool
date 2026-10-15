@@ -34,6 +34,12 @@ export const ERROR_CODES = [
   "RT_E_LLM_REJECTED",
   "RT_E_RESEARCH_UNAVAILABLE",
   "RT_E_VALIDATION",
+  // W358 lane `close-taxonomy` (fixes/358_close_taxonomy.md): the quality ratchet's
+  // OWN cause — a pinned floor whose producer ran but produced no usable reading
+  // (a reader's shape changed under a live producer, or the reading cannot be
+  // formed at all). Armed by W356 lane `ratchet` and left documented in
+  // fixes/357_fix_gates.md §5; landed here because W357 owned no `src/**` file.
+  "RT_E_RATCHET_METRIC_UNAVAILABLE",
   "RT_E_INTERNAL",
   "RT_E_GATES_FAILED",
   // fixes/150 wave (tree-run/repair/verify-kind verbs): pre-registered by the
@@ -170,6 +176,15 @@ export const ERROR_CODES = [
   //   - DEFAULT_CHECK_BASELINE_LOST: a default-check baseline dropped the weaker sample (S4-05).
   "RT_E_UI_UNWIRED",
   "RT_E_SPEC_SKIP_VACUOUS",
+  // 350 (runner/declared-script honesty): a spec that RUNS green under
+  // `node --test` but carries NO behavioural assertion (load-only or only
+  // shape/presence probes) is vacuity, not behaviour — the same class as the
+  // skip-dominated refusal, but a distinct trigger. The bounded spec leg
+  // refuses it, so this code rides the red spec verdict; before this the
+  // refusal surfaced bare (`run:"fail"`, `0 pass / 0 fail`, no code) and
+  // disagreed silently with the tree's own `npm run test` exit 0. Append-only;
+  // consumers match string literals, never array position.
+  "RT_E_SPEC_VACUOUS",
   "RT_E_CLAIM_UNVERIFIED",
   "RT_E_GIT_CODE_INCONSISTENT",
   "RT_E_SYNTH_DEFAULT_DISARMED",
@@ -555,6 +570,11 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
     agentAction:
       "Reject the payload, state the concrete validation rule that failed, and ask for corrected input instead of guessing.",
   },
+  RT_E_RATCHET_METRIC_UNAVAILABLE: {
+    meaning: "A pinned quality-ratchet floor could not be measured — the producer ran but produced no usable reading.",
+    agentAction:
+      "Re-run the named producer and read its output; if the artifact is genuinely absent say so with RT_E_PROJECT_MISSING, and if a reader's shape changed fix the reader instead of the floor.",
+  },
   RT_E_INTERNAL: {
     meaning: "Unexpected internal failure (transport, serialization, server).",
     agentAction:
@@ -713,6 +733,12 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "An emitted behavioural oracle is skip-dominated (mostly `test.skip` rows against a handful of live rows), so `npm test` exit 0 is vacuity, not behaviour.",
     agentAction:
       "Emit an oracle whose live assertions dominate and tie a module read to a concrete value; never count a skip-dominated green as tested or as behaviour.",
+  },
+  RT_E_SPEC_VACUOUS: {
+    meaning:
+      "An emitted spec runs green under `node --test` but carries no behavioural assertion (load-only, or only shape/presence probes such as `typeof x === 'function'` / `x !== null`), so its exit 0 is vacuity — the bounded spec leg refuses it even though the tree's own `npm test` reports pass.",
+    agentAction:
+      "Emit a spec with at least one assertion that ties a call/return (or a property of it) to a concrete expected value; never read the declared `npm test` exit 0 as behaviour when the spec leg refused it for vacuity — the disagreement between the two executions is the finding.",
   },
   RT_E_CLAIM_UNVERIFIED: {
     meaning:

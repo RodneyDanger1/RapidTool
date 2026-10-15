@@ -50,6 +50,25 @@ describe("checkEntryContract - completeness is falsifiable (337-3)", () => {
     assert.equal(rec.ok, true);
   });
 
+  // A1-E16: the ui-shell status is a correct STRUCTURAL pass, but it bypasses
+  // the only behavioural oracle (`entry-runs`) for exactly the emitted webapp/
+  // game kinds — so a `p6-*` advisory makes that visible and "treeRun green"
+  // never reads as product evidence.
+  it("A1-E16: a ui-shell row is a structural pass that carries a p6-* advisory", () => {
+    const rec = checkEntryContract([{ id: "u", check: "entry-runs", uiShell: true }], DIR, (p) => p === "index.html");
+    assert.equal(rec.ok, true, "the structural status is kept (it is correct)");
+    assert.ok(rec.advisory, "the bypassed behavioural oracle is made visible");
+    assert.equal(rec.advisory!.event, "p6-oracle-ui-shell-bypassed");
+    assert.match(rec.advisory!.detail, /\bu\b/, "the skipped row id is named");
+    assert.match(rec.advisory!.detail, /behavioural entry oracle was NOT run/);
+    assert.match(rec.advisory!.detail, /never product evidence/);
+  });
+
+  it("A1-E16: no advisory when no ui-shell row was evaluated (legacy record unchanged)", () => {
+    const rec = checkEntryContract([{ id: "a", check: "file-exists", path: "x.ts" }], DIR, () => true);
+    assert.equal(rec.advisory, undefined);
+  });
+
   it("a declared uiShell whose tree carries no index.html FAILS (never a free pass)", () => {
     const rec = checkEntryContract([{ id: "u", check: "entry-runs", uiShell: true }], DIR, () => false);
     assert.equal(rec.failed, 1);

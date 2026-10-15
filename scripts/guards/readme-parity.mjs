@@ -147,19 +147,27 @@ export function discoverTrees(root) {
   return out.sort();
 }
 
-/** Default testruns root: the sibling `testruns/` next to the repo, else in-repo. */
+/**
+ * Default run root: the IN-REPO `testruns/` (the tracked fixture subset the repo
+ * ships), else the sibling `../testruns`. Returns `null` when neither exists —
+ * never a path that does not exist, so a caller cannot mistake an unresolvable
+ * root for an empty (and therefore "clean") scan.
+ * @returns {string|null}
+ */
 export function defaultTestrunsRoot() {
   const root = projectRoot();
-  for (const candidate of [resolve(root, "..", "testruns"), join(root, "testruns")]) {
+  for (const candidate of [join(root, "testruns"), resolve(root, "..", "testruns")]) {
     if (existsSync(candidate)) return candidate;
   }
-  return resolve(root, "..", "testruns");
+  return null;
 }
 
-/** Resolve a registry fixture spec against the repo and the testruns root. */
+/** Resolve a registry fixture spec against the repo and the (nullable) run root. */
 export function resolveFixture(spec, repoRoot, testrunsRoot) {
   if (isAbsolute(spec)) return existsSync(spec) ? spec : null;
-  for (const candidate of [join(repoRoot, spec), join(testrunsRoot, spec)]) {
+  const roots = [join(repoRoot, spec)];
+  if (testrunsRoot) roots.push(join(testrunsRoot, spec));
+  for (const candidate of roots) {
     if (existsSync(candidate)) return candidate;
   }
   return null;
@@ -270,9 +278,22 @@ function main(argv) {
     if (!root) usage("--root needs a directory");
     trees = discoverTrees(resolve(repoRoot, root));
   }
-  if (trees.length === 0 && treesAt < 0 && rootAt < 0) trees = discoverTrees(defaultTestrunsRoot());
+  if (trees.length === 0 && treesAt < 0 && rootAt < 0) {
+    const fallback = defaultTestrunsRoot();
+    if (fallback === null) {
+      usage("no run root resolved (<repo>/testruns and its sibling are both absent) — set RAPIDTOOL_TESTRUNS; a scan of nothing never certifies parity");
+    }
+    trees = discoverTrees(fallback);
+  }
   const unreadable = trees.filter((t) => !existsSync(t));
   if (unreadable.length > 0) usage(`unreadable tree(s): ${unreadable.join(", ")}`);
+  // B1-F6 (fail closed): a scan of ZERO trees is not a clean bill of health. An
+  // unresolved root, an empty --root/--trees dir, or a run root that holds no
+  // emitted/emitted.v2 dir all used to fall through to `findings: 0` and exit 0
+  // — a vacuous green that certifies nothing. Refuse coded instead.
+  if (trees.length === 0) {
+    usage("no emitted tree found to scan — a scan of 0 trees can never certify parity (refusing a vacuous clean exit)");
+  }
 
   const reports = trees.map((t) => ({ dir: t, ...checkReadmeParity(t) }));
   const total = reports.reduce((n, r) => n + r.findings.length, 0);

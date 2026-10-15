@@ -12,12 +12,17 @@
  *
  * Honesty contract: when the key is absent this returns
  * `{ ok: false, reason: "not-configured", code: "RT_E_RESEARCH_UNAVAILABLE" }`
- * and NEVER fabricates research. Result entries without a usable http(s) URL
- * are dropped (an entry with no anchor cannot be cited honestly). Transient
+ * and NEVER fabricates research; a rejected key (HTTP 401) is its own coded
+ * refusal (`RT_E_LLM_KEY_REJECTED`). Result entries without a usable http(s)
+ * URL are dropped (an entry with no anchor cannot be cited honestly). Transient
  * network failures are retried once; timeout aborts are reported immediately.
+ * Results are reranked/deduped/scored against the query before return.
  */
 
-import type { ResearchResult } from "./research.ts";
+// fixes/347 R1: Tavily is a first-class provider — results are reranked,
+// deduped and scored with the SAME pure helpers the keyless path uses, so a
+// caller gets comparable relevance regardless of which backend served.
+import { rankResearchItems, type ResearchResult } from "./research.ts";
 // W40·N4: the shared knob sanitizer (this file used to carry its own copy —
 // byte-identical to websearch.server.ts's, one shape with two homes).
 import { boundedInt } from "./bounded-int.ts";
@@ -30,11 +35,16 @@ import { oneShotFetch } from "./llm/providers/one-shot-fetch.server.ts";
 
 export const TAVILY_BASE_URL = "https://api.tavily.com";
 
+/** Tavily retrieval depth. `advanced` is deeper (and costs more credits). */
+export type TavilySearchDepth = "basic" | "advanced";
+/** Tavily topic axis. `news` biases to recency (P7 market/competitor intel). */
+export type TavilyTopic = "general" | "news";
+
 const DEFAULT_MAX_RESULTS = 5;
 const TIMEOUT_MS = 20_000;
 // Transient statuses get a bounded retry (runtime-integration.md §1.3: "retry
 // once" for 500). 401/432/433 are config/billing and are NOT retried.
-const RETRYABLE_STATUS = new Set([429, 500, 503]);
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS = 2;
 
 /** setTimeout's overflow ceiling — Node fires longer delays immediately and
@@ -79,6 +89,10 @@ export type TavilySearchOptions = {
   maxResults?: number;
   /** Test/dev hook; defaults to TIMEOUT_MS. */
   timeoutMs?: number;
+  /** Retrieval depth (`basic` default; `advanced` is deeper + costlier). */
+  searchDepth?: TavilySearchDepth;
+  /** Topic axis (`general` default; `news` biases to recency). */
+  topic?: TavilyTopic;
 };
 
 async function postWithRetry(url: string, init: RequestInit): Promise<Response> {
@@ -116,7 +130,7 @@ async function describeError(res: Response): Promise<string> {
     case 400:
       return `Tavily rejected the request (HTTP 400${detail})`;
     case 401:
-      return `Tavily API key is invalid (HTTP 401${detail})`;
+      return `Tavily rejected TAVILY_API_KEY (HTTP 401${detail}) — the key at its source (working-directory .env or the process environment) is invalid or revoked; fix it and re-run`;
     case 429:
       return `Tavily rate limit reached (HTTP 429${detail})`;
     case 432:
@@ -168,6 +182,10 @@ export async function tavilySearch(
   // first tick (a "timeout" the caller never asked for).
   const maxResults = boundedInt(opts.maxResults, DEFAULT_MAX_RESULTS, 1, MAX_RESULTS_CEILING);
   const timeoutMs = boundedInt(opts.timeoutMs, TIMEOUT_MS, 1, MAX_TIMER_MS);
+  // Only the documented enum values reach the wire; anything else falls back to
+  // the vendor default (an unvalidated value would 400 the request, §1.3).
+  const searchDepth: TavilySearchDepth = opts.searchDepth === "advanced" ? "advanced" : "basic";
+  const topic: TavilyTopic = opts.topic === "news" ? "news" : "general";
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -180,9 +198,9 @@ export async function tavilySearch(
       },
       body: JSON.stringify({
         query: q.slice(0, 400),
-        search_depth: "basic",
+        search_depth: searchDepth,
         max_results: maxResults,
-        topic: "general",
+        topic,
         include_answer: false,
         include_raw_content: false,
       }),
@@ -190,10 +208,13 @@ export async function tavilySearch(
     });
 
     if (!res.ok) {
+      // A rejected credential (401) is its own coded refusal — the keyed-path
+      // credentials class — so a caller can tell "wrong key" from "unreachable".
+      // Every other status stays the research-unavailable family.
       return {
         ok: false,
         reason: "error",
-        code: "RT_E_RESEARCH_UNAVAILABLE",
+        code: res.status === 401 ? "RT_E_LLM_KEY_REJECTED" : "RT_E_RESEARCH_UNAVAILABLE",
         error: await describeError(res),
       };
     }
@@ -214,17 +235,19 @@ export async function tavilySearch(
     // W40·K4: non-object entries (e.g. a stray `null` in the results array)
     // are dropped BEFORE the field reads — one malformed entry used to throw
     // a TypeError that failed the whole search instead of being filtered.
-    const items = (body.results as Array<Record<string, unknown>>)
+    const mapped = (body.results as Array<Record<string, unknown>>)
       .filter((r) => r !== null && typeof r === "object")
       .map((r) => ({
         title: typeof r.title === "string" ? r.title : "",
         url: typeof r.url === "string" ? r.url : "",
         content: typeof r.content === "string" ? r.content : "",
-        ...(typeof r.score === "number" ? { score: r.score } : {}),
       }))
       .filter((it) => /^https?:\/\//i.test(it.url));
 
-    return { ok: true, query: q, items, provider: "tavily" };
+    // Rerank + dedupe + score against the query. Tavily's own `score` is dropped
+    // in favour of RapidTool's comparable term-overlap score, so a caller reads
+    // the same `score` semantics on every provider (see `relevanceScore`).
+    return { ok: true, query: q, items: rankResearchItems(q, mapped, maxResults), provider: "tavily" };
   } catch (err) {
     return {
       ok: false,

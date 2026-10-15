@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import ts from "typescript";
 import {
   buildPhase6Module,
+  FORBIDDEN_PRIMITIVES,
   healSource,
   identifierHits,
   maskLiteralsAndComments,
@@ -10,6 +11,7 @@ import {
   runSandboxed,
   sandboxWorkerSource,
 } from "./sandbox.ts";
+import { briefFitCoverage, briefFitSubstancePasses, briefNounCore } from "./sandbox.ts";
 import type { SandboxWorker } from "./sandbox.ts";
 
 // ---------------------------------------------------------------------------
@@ -188,6 +190,69 @@ describe("runGenerated (sync template gate)", () => {
       assert.equal(res.ok, false, `must refuse: ${code.split("\n")[2]}`);
       assert.equal(res.detail, "Forbidden primitive in generated module.");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 350 — forbidden-primitive filter hardening: BOTH error classes are pinned.
+//   FALSE NEGATIVE (a bad primitive was ACCEPTED): TS `enum` (a runtime
+//   construct type-stripping cannot erase -> ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX)
+//   and a primitive that lived only inside a template `${…}` interpolation
+//   (real code the legacy masker blanked with the template text).
+//   FALSE POSITIVE (legit code was REFUSED): a regex literal as an if/while
+//   body whose PATTERN mentions a banned word was read as division, leaving the
+//   pattern visible. Closing the hole must not mask a genuine division.
+// ---------------------------------------------------------------------------
+describe("350 — forbidden-primitive filter hardening", () => {
+  it("FALSE NEGATIVE: refuses a TS `enum` (strip-types cannot erase it)", () => {
+    const code = 'const JOBS = ["a"];\nfunction test_no_skip() {}\nenum Color { Red }\n';
+    const res = runGenerated(code);
+    assert.equal(res.ok, false, "an enum-bearing module must be refused, never shipped to a red tree");
+    assert.equal(res.detail, "Forbidden primitive in generated module.");
+    assert.equal(res.code, "RT_E_VALIDATION");
+  });
+
+  it("FALSE NEGATIVE: a template `${…}` interpolation body is CODE, scrutinized like code", () => {
+    for (const expr of ["`${globalThis.a}`", "`${window.location.href}`", "`${fetch('/x')}`"]) {
+      const masked = maskLiteralsAndComments(`const v = ${expr};`);
+      assert.ok(
+        FORBIDDEN_PRIMITIVES.test(masked),
+        `an interpolation body must stay visible to the scan: ${expr} -> ${masked}`,
+      );
+    }
+    // The template TEXT is still masked (a prose "window process fetch" is data).
+    assert.equal(
+      FORBIDDEN_PRIMITIVES.test(maskLiteralsAndComments("const s = `window process fetch`;")),
+      false,
+      "literal text inside a template is still masked",
+    );
+  });
+
+  it("FALSE NEGATIVE: runGenerated refuses a template-shaped module escaping only via an interpolation", () => {
+    const code = 'const JOBS = ["a"];\nfunction test_no_skip() {}\nconst u = `${globalThis.x}`;';
+    const res = runGenerated(code);
+    assert.equal(res.ok, false);
+    assert.equal(res.detail, "Forbidden primitive in generated module.");
+  });
+
+  it("FALSE POSITIVE: a regex literal as a control-statement body is not read as division", () => {
+    const sources = [
+      'const JOBS = ["a"];\nfunction test_no_skip() {}\nif (1) /window/i.test("x");',
+      'const JOBS = ["a"];\nfunction test_no_skip() {}\nfor (var i = 0; i < 1; i++) /globalThis/.test("x");',
+    ];
+    for (const code of sources) {
+      assert.equal(
+        FORBIDDEN_PRIMITIVES.test(maskLiteralsAndComments(code)),
+        false,
+        `a regex pattern naming a banned word is masked, not refused: ${code.split("\n")[2]}`,
+      );
+      assert.equal(runGenerated(code).ok, true, `legit code must be accepted: ${code.split("\n")[2]}`);
+    }
+  });
+
+  it("FALSE-POSITIVE guard: a genuine division after `)` stays code (no over-masking)", () => {
+    const division = "const a = (b + c) / 2; const y = total / 3;";
+    assert.equal(maskLiteralsAndComments(division), division, "division is never masked as a regex");
   });
 });
 
@@ -597,5 +662,95 @@ describe("sandbox failure envelopes carry an RT_E code (346 C3)", () => {
     });
     assert.equal(passed.ok, true);
     assert.equal(passed.code, undefined, "success carries no code");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/348 — the p6-brief-fit CORE-noun MEASUREMENT (not the bar): the core is
+// the brief's REAL product vocabulary plus the project's declared capabilities.
+// Scaffold-owned file stems, URL/email host tokens, sub-3-char tokens and bold
+// SENTENCE FRAGMENTS are excluded. The bar (0.6) and the requirement of real
+// product nouns are unchanged — a generic tree still fails.
+// ---------------------------------------------------------------------------
+describe("fixes/348 briefNounCore core measurement", () => {
+  const BAKERY_BRIEF =
+    "# Bloedow Bakery — Winona, MN — Full Website Redesign + Ordering Platform\n\n" +
+    "Build a website for **Bloedow Bakery**. Replace the current WordPress/Elementor site at https://www.bloedows.com/.\n" +
+    "The current website publishes **no prices anywhere** (verified).\n";
+
+  it("drops scaffold-owned file stems, URL/host tokens, sub-3-char tokens and bold sentence fragments", () => {
+    const context = {
+      lattice: { jobs: ["show", "close"], entities: ["home", "page"] },
+      contracts: { entities: [{ name: "Text" }, { name: "Home" }] },
+      specGraph: {
+        nodes: [
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces" },
+          { id: "tests", file: "tests/oracle.spec.ts", purpose: "Acceptance tests" },
+          { id: "job-0", file: "src/jobs/show.ts", purpose: "Implement job \u201cshow\u201d" },
+        ],
+      },
+    };
+    const { core } = briefNounCore(BAKERY_BRIEF, context);
+    for (const bad of ["console", "oracle", "spec", "www", "bloedows", "com", "no", "anywhere", "prices", "full", "wordpress", "elementor", "replace", "build"]) {
+      assert.ok(!core.includes(bad), `pollution "${bad}" is not core (got ${core.join(",")})`);
+    }
+    for (const good of ["bakery", "bloedow", "website", "winona", "home", "show", "close", "text"]) {
+      assert.ok(core.includes(good), `real product noun "${good}" stays core (got ${core.join(",")})`);
+    }
+    // H1 title only: a competitor named in the intro PROSE is not a core noun.
+    assert.ok(!core.includes("crumbl"), "a prose competitor is not core");
+  });
+
+  it("a URL PATH noun is preserved (only the authority is stripped)", () => {
+    const brief = "# Shop\n\nSee https://example.com/menu/ here.\n";
+    const { core } = briefNounCore(brief, { lattice: { jobs: [], entities: [] } });
+    assert.ok(core.includes("menu"), "a path noun survives (menu)");
+    assert.ok(!core.includes("example") && !core.includes("com"), "the host tokens are excluded");
+  });
+
+  it("a bold SENTENCE FRAGMENT contributes nothing; a bold LABEL does", () => {
+    const frag = "# Shop\n\nWe publish **no prices anywhere** here.\n";
+    const label = "# Shop\n\nSee **Purchase requests** and **Staff**.\n";
+    const f = briefNounCore(frag, { lattice: { jobs: [], entities: [] } });
+    const l = briefNounCore(label, { lattice: { jobs: [], entities: [] } });
+    for (const t of ["no", "prices", "anywhere"]) assert.ok(!f.core.includes(t), `fragment token ${t} excluded`);
+    assert.ok(l.core.includes("purchaserequests") || l.core.includes("purchase"), "a bold label is core");
+    assert.ok(l.core.includes("staff"), "a bold label is core");
+  });
+});
+
+describe("fixes/348 p6-brief-fit still fails a generic tree, passes a faithful one", () => {
+  // The exact predicate the p6-brief-fit DoD probe calls (sandbox.briefFitSubstancePasses).
+  const BRIEF =
+    "# Ledgerly - Rent Ledger\n\n## Core domain\n- **Lease**, **Tenant**, **Payment**.\n\n## Features\n- **RentCollection** and **RenewalReminder**.";
+  const CONTEXT = {
+    lattice: { jobs: ["collect", "remind"], entities: ["lease", "tenant", "payment"] },
+    contracts: { entities: [{ name: "Lease" }, { name: "Tenant" }, { name: "Payment" }] },
+    specGraph: { nodes: [{ id: "job-0", file: "src/jobs/collect.ts", purpose: "Implement job \u201ccollect\u201d" }] },
+  };
+
+  it("a generic tree that implements none of the brief's nouns FAILS the core bar", () => {
+    const generic = [
+      "export function genericHandler(): number { return 1; }",
+      "export function doThing(): string { return \"x\"; }",
+      "export function placeholder(): void {}",
+    ].join("\n");
+    const cov = briefFitCoverage(BRIEF, generic, CONTEXT);
+    assert.ok(cov.core.length > 0, "the brief grounds a measured core");
+    assert.ok(cov.missingCore.length > 0, "the generic tree misses the core nouns");
+    assert.equal(briefFitSubstancePasses(BRIEF, generic, CONTEXT), false, "p6-brief-fit fails the generic tree");
+  });
+
+  it("a brief-faithful tree that implements the core nouns PASSES", () => {
+    const { core } = briefNounCore(BRIEF, CONTEXT);
+    const faithful = core.map((n) => `export function ${n}Handler(): number { return 1; }`).join("\n");
+    const cov = briefFitCoverage(BRIEF, faithful, CONTEXT);
+    assert.ok(cov.coreHits.length >= Math.max(1, Math.ceil(cov.core.length * 0.6)), `faithful coverage ${cov.coreHits.length}/${cov.core.length} clears 0.6`);
+    assert.equal(briefFitSubstancePasses(BRIEF, faithful, CONTEXT), true, "p6-brief-fit passes the faithful tree");
+  });
+
+  it("the bar itself is unchanged at 0.6 and the need scales with the measured core", () => {
+    const cov = briefFitCoverage(BRIEF, "export function unrelated(): void {}", CONTEXT);
+    assert.equal(cov.need, Math.max(1, Math.ceil(cov.core.length * 0.6)), "ceil(core x 0.6)");
   });
 });

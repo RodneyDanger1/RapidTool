@@ -30,12 +30,47 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const GATE_SH = path.join(HERE, "gate.sh");
 
-const GATE_IDS = ["typecheck", "lint", "assertionGaps", "prevention", "testsScripts", "testsLib", "build"];
+const GATE_IDS = ["typecheck", "lint", "assertionGaps", "prevention", "moduleCoverage", "testsScripts", "testsLib", "build", "ratchet"];
+
+// The W356 lane `ratchet` stage's shape, exactly as `quality-ratchet.mjs` prints
+// it (one JSON object on the last stdout line; gate.sh folds `ratchet.exit` into
+// `gates.ratchet.ok` and parses the named causes). A fixture that omits the
+// stage spells its exit as 1 (missing ⇒ red, fail-closed) and stops describing a
+// green run — the same rule the header states for every real stage.
+const RATCHET_GREEN = JSON.stringify({
+  ok: true,
+  tool: "quality-ratchet",
+  schema: 1,
+  mode: "gate",
+  regressions: [],
+  canaryFailures: [],
+  unavailableEnforced: [],
+  pendingFirstGreen: [],
+  uncovered: [],
+  estimatedCostUsd: null,
+});
 
 // The PR-26 prevention stage's two shapes, exactly as `verify-prevention.mjs`
 // prints them (one JSON object on the last stdout line).
 const PREVENTION_GREEN = JSON.stringify({ ok: true, guards: 15, count: 15, countFloor: 15, missed: [], pending: [], skipped: [] });
 const PREVENTION_RED = JSON.stringify({ ok: false, guards: 15, count: 15, countFloor: 15, missed: [], pending: ["C-04"], skipped: [] });
+
+// The module-coverage stage's shape, exactly as `check-module-coverage.mjs
+// --json` prints it (one pretty-printed JSON object, the whole log).
+const MODULE_COVERAGE_GREEN = JSON.stringify({ total: 120, covered: 108, gaps: [], allowlisted: [], unallowlisted: [], stale: [] }, null, 2);
+const MODULE_COVERAGE_RED = JSON.stringify(
+  { total: 120, covered: 107, gaps: ["src/lib/orphan.ts"], allowlisted: [], unallowlisted: ["src/lib/orphan.ts"], stale: [] },
+  null,
+  2,
+);
+
+// The reviewed skip registry the verdict program reads. The fixture writes a
+// small one so a case can exercise both a registered and an unregistered skip.
+const SKIP_REGISTRY_FIXTURE = JSON.stringify({
+  schema_version: 1,
+  skips: [{ name: "216z opt-in: the REAL npm install leg runs (RT_VERIFYKIND_INSTALL=1)", file: "src/lib/compile-check.server.test.ts", reason: "opt-in real-npm leg" }],
+});
+const REAL_SKIP_REGISTRY = path.join(HERE, "skip-registry.json");
 
 // ---------------------------------------------------------------------------
 // gate.sh program extraction — the heredoc between `<<'NODE'` and a line `NODE`.
@@ -69,14 +104,31 @@ function extractVerdictProgram() {
 // (the program defaults a MISSING exit to 1, so a partial results file would
 // silently pin a red pre-state).
 // ---------------------------------------------------------------------------
-function runVerdict({ exits, double = false, logs = {}, quarantine = false, env = {} }) {
+/**
+ * Run the extracted verdict program against one fixture.
+ * @param {{ exits?: Record<string, number>, exits2?: Record<string, number>, double?: boolean, logs?: Record<string, string>, quarantine?: boolean, env?: Record<string, string>, skipRegistry?: string }} [opts]
+ */
+function runVerdict(opts = {}) {
+  const {
+    exits = {},
+    exits2 = {},
+    double = false,
+    logs = {},
+    quarantine = false,
+    env = {},
+    skipRegistry,
+  } = opts;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-verdict-"));
   const row = (id, code) => `${id}.exit\t${code}\n${id}.ms\t1`;
   const resultsPath = path.join(dir, "results");
-  fs.writeFileSync(
-    resultsPath,
-    `${GATE_IDS.map((id) => row(id, exits[id] ?? 0)).join("\n")}\n`,
-  );
+  const rows = GATE_IDS.map((id) => row(id, exits[id] ?? 0));
+  // --double writes the run-2 exit keys too (the program folds them). When a
+  // case does not name a run-2 exit, it defaults to run 1's — the "same leg,
+  // same exit" fallback that keeps the pre-existing cases' intent.
+  if (double) {
+    for (const id of ["testsScripts", "testsLib"]) rows.push(row(`${id}2`, exits2[id] ?? exits[id] ?? 0));
+  }
+  fs.writeFileSync(resultsPath, `${rows.join("\n")}\n`);
   const logPath = (name, fallbackText) => {
     const p = path.join(dir, name);
     fs.writeFileSync(p, logs[name] ?? fallbackText);
@@ -89,13 +141,26 @@ function runVerdict({ exits, double = false, logs = {}, quarantine = false, env 
   // a case only speaks about the legs it names — every other leg ran green.
   const s1 = logPath("testsScripts.log", TAP_GREEN);
   const l1 = logPath("testsLib.log", TAP_GREEN);
-  const s2 = double ? logPath("testsScripts2.log", "") : "";
-  const l2 = double ? logPath("testsLib2.log", "") : "";
+  // Run-2 legs default GREEN for the same reason run 1 does: a case only speaks
+  // about the legs it names, and an empty run-2 log would (correctly) trip the
+  // run-2 zero-`# pass` guard now that run 2's exit is folded.
+  const s2 = double ? logPath("testsScripts2.log", TAP_GREEN) : "";
+  const l2 = double ? logPath("testsLib2.log", TAP_GREEN) : "";
   const buildLog = logPath("build.log", "");
   // PR-26: the prevention stage runs for real in gate.sh; a case that does not
   // name it defaults to the legitimately-green 15/15 JSON, so an "all green"
   // simulation is genuinely all-green.
   const preventionLog = logPath("prevention.log", PREVENTION_GREEN);
+  // Module coverage: a case that does not name it is genuinely covered.
+  const moduleCoverageLog = logPath("moduleCoverage.log", MODULE_COVERAGE_GREEN);
+  // The ADDITIVE `ratchet` stage (W356) belongs to the real stage set too: a
+  // case that does not name it defaults to a green ratchet verdict.
+  const ratchetLog = logPath("ratchet.log", RATCHET_GREEN);
+  // The skip registry: a small fixture in the temp dir (so a case can exercise
+  // an unregistered skip) unless the case points at the real reviewed one.
+  let skipRegistryPath = skipRegistry || path.join(dir, "skip-registry.json");
+  if (!skipRegistry) fs.writeFileSync(skipRegistryPath, SKIP_REGISTRY_FIXTURE);
+  else if (skipRegistry === "__real__") skipRegistryPath = REAL_SKIP_REGISTRY;
 
   const program = extractVerdictProgram();
   const startMs = String(Date.now());
@@ -114,7 +179,10 @@ function runVerdict({ exits, double = false, logs = {}, quarantine = false, env 
       l2,
       buildLog,
       preventionLog,
+      moduleCoverageLog,
+      skipRegistryPath,
       quarantine ? "1" : "0",
+      ratchetLog,
     ],
     { input: program, encoding: "utf8", env: { ...process.env, ...env } },
   );
@@ -189,6 +257,16 @@ test("C: all gates green → ok:true, exit 0", () => {
   assert.deepEqual(verdict.gates.prevention.skipped, []);
   assert.equal(verdict.gates.prevention.count, 15);
   assert.equal(verdict.gates.prevention.countFloor, 15);
+  // The ADDITIVE module-coverage stage is part of the all-green simulation.
+  assert.equal(verdict.gates.moduleCoverage.ok, true, "the module-coverage stage is green");
+  assert.deepEqual(verdict.gates.moduleCoverage.unallowlisted, []);
+  assert.deepEqual(verdict.gates.moduleCoverage.stale, []);
+  // W356's ADDITIVE `ratchet` stage is part of the all-green simulation: its
+  // exit folds into `nonTestGatesOk`, so a fixture that omits it reads red.
+  assert.equal(verdict.gates.ratchet.ok, true, "the ratchet stage is green");
+  assert.deepEqual(verdict.gates.ratchet.regressions, []);
+  assert.deepEqual(verdict.gates.ratchet.canaryFailures, []);
+  assert.deepEqual(verdict.gates.ratchet.unavailableEnforced, []);
 });
 
 // ---------------------------------------------------------------------------
@@ -197,6 +275,7 @@ test("C: all gates green → ok:true, exit 0", () => {
 test("D: --double run-1/run-2 disagreement → exit 3 with both names as flakes", () => {
   const { status, verdict } = runVerdict({
     exits: { testsScripts: 1 },
+    exits2: { testsScripts: 1 },
     double: true,
     logs: {
       "testsScripts.log": "TAP version 13\nnot ok 1 - flakey X\n# fail 1\n",
@@ -218,6 +297,7 @@ test("D: --double run-1/run-2 disagreement → exit 3 with both names as flakes"
 test("J: --double flake + red typecheck → exit 1 (hard gate dominates the flake, never 3)", () => {
   const { status, verdict } = runVerdict({
     exits: { typecheck: 1, testsScripts: 1 },
+    exits2: { testsScripts: 0 },
     double: true,
     logs: {
       "testsScripts.log": "TAP version 13\nnot ok 1 - flakey X\n# fail 1\n",
@@ -233,6 +313,7 @@ test("J: --double flake + red typecheck → exit 1 (hard gate dominates the flak
 test("J2: --double flake + red build → exit 1 (a red gate cannot be masked by a flake)", () => {
   const { status, verdict } = runVerdict({
     exits: { build: 1, testsScripts: 1 },
+    exits2: { testsScripts: 0 },
     double: true,
     logs: {
       "testsScripts.log": "TAP version 13\nnot ok 1 - flakey X\n# fail 1\n",
@@ -251,12 +332,17 @@ test("J2: --double flake + red build → exit 1 (a red gate cannot be masked by 
 test("E: --double, leg crashed in run 1 with no TAP names → exit 1 (never 3)", () => {
   const { status, verdict } = runVerdict({
     exits: { testsScripts: 1 },
+    exits2: { testsScripts: 1 },
     double: true,
-    logs: { "testsScripts.log": CRASH_NO_TAP },
+    logs: { "testsScripts.log": CRASH_NO_TAP, "testsScripts2.log": CRASH_NO_TAP },
   });
   assert.equal(status, 1, "a crash with no test names must read as a hard fail, never a flake");
   assert.equal(verdict.ok, false);
   assert.equal(verdict.flakes.length, 0);
+  assert.ok(
+    verdict.hardFails.some((n) => n.startsWith("testsScripts run 2 (exit 1")),
+    "the run-2 crash is named too; got " + JSON.stringify(verdict.hardFails),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -411,4 +497,78 @@ test("L2: a prevention stage with no parseable verdict line is still red (never 
   assert.equal(status, 1, "an unparseable prevention log cannot read green");
   assert.equal(verdict.ok, false);
   assert.equal(verdict.gates.prevention.ok, false);
+});
+
+// ---------------------------------------------------------------------------
+// M · the module-coverage stage is wired in (ADDITIVE gate). A gap is red and
+// the unallowlisted module is named; the gate can no longer pass while a
+// src/lib module is reached by no test.
+// ---------------------------------------------------------------------------
+test("M: a red module-coverage stage → ok:false, exit 1, the unallowlisted module named", () => {
+  const { status, verdict } = runVerdict({
+    exits: { moduleCoverage: 1 },
+    logs: { "moduleCoverage.log": MODULE_COVERAGE_RED },
+  });
+  assert.equal(status, 1, "a red module-coverage stage fails the whole gate");
+  assert.equal(verdict.ok, false, "the verdict is red");
+  assert.equal(verdict.gates.moduleCoverage.ok, false, "the red stage is recorded");
+  assert.deepEqual(verdict.gates.moduleCoverage.unallowlisted, ["src/lib/orphan.ts"], "the orphan is named");
+});
+
+// ---------------------------------------------------------------------------
+// N/O · the skipped-test registry (ADDITIVE). A skipped test must be an
+// explicitly registered, justified skip; an unregistered one is a hard failure,
+// and a registered one passes.
+// ---------------------------------------------------------------------------
+const SKIP_TAP = (name) => `TAP version 13\nok 1 - ${name} # SKIP because reasons\n# pass 0\n# fail 0\n# skipped 1\n`;
+
+test("N: an unregistered skipped test → ok:false, exit 1, the skip named", () => {
+  const { status, verdict } = runVerdict({
+    exits: {},
+    logs: { "testsLib.log": SKIP_TAP("a brand new skip nobody justified") },
+  });
+  assert.equal(status, 1, "an unregistered skip must fail the gate");
+  assert.equal(verdict.ok, false, "the verdict is red");
+  assert.deepEqual(verdict.unregisteredSkips, [{ leg: "testsLib", name: "a brand new skip nobody justified" }]);
+  assert.ok(
+    verdict.hardFails.some((n) => n.startsWith("a brand new skip nobody justified (unregistered skip")),
+    `hardFails must name the unregistered skip; got ${JSON.stringify(verdict.hardFails)}`,
+  );
+});
+
+test("O: a registered, justified skipped test passes (registry keyed on the exact leaf name)", () => {
+  const registered = "216z opt-in: the REAL npm install leg runs (RT_VERIFYKIND_INSTALL=1)";
+  const { status, verdict } = runVerdict({
+    exits: {},
+    logs: { "testsLib.log": SKIP_TAP(registered) },
+  });
+  assert.equal(status, 0, "a registered skip is allowed");
+  assert.equal(verdict.ok, true, "the gate stays green");
+  assert.deepEqual(verdict.registeredSkips, [registered]);
+  assert.deepEqual(verdict.unregisteredSkips, []);
+});
+
+// ---------------------------------------------------------------------------
+// P · --double run-2 exit folding (the defect this lane fixes). Run 1 green,
+// run 2 runner-level crash (non-zero exit, no TAP failure lines) must read red
+// — NOT ok:true/exit 0 as it did before the fix.
+// ---------------------------------------------------------------------------
+test("P: --double run-1-green / run-2 runner-crash → ok:false, exit 1 (run 2's exit is folded)", () => {
+  const { status, verdict } = runVerdict({
+    exits: { testsScripts: 0 },
+    exits2: { testsScripts: 1 },
+    double: true,
+    logs: {
+      "testsScripts.log": TAP_GREEN,
+      "testsScripts2.log": CRASH_NO_TAP,
+    },
+  });
+  assert.equal(status, 1, "a run-2 runner crash must not read green behind a green run 1");
+  assert.equal(verdict.ok, false, "verdict.ok must be false");
+  assert.equal(verdict.gates.testsScripts.exit2, 1, "run 2's exit is recorded");
+  assert.equal(verdict.gates.testsScripts.ok, false, "the leg is red once run 2 is folded");
+  assert.ok(
+    verdict.hardFails.some((n) => n.startsWith("testsScripts run 2 (exit 1")),
+    `hardFails must name the run-2 crash; got ${JSON.stringify(verdict.hardFails)}`,
+  );
 });
