@@ -1,0 +1,229 @@
+﻿{
+  "schema_version": 1,
+  "cmd": "repair",
+  "ok": false,
+  "outcome": "failed",
+  "error": "repair budget exhausted after 3/3 cycle(s) over C:\\Users\\mnril\\Desktop\\testruns\\bakery-florist-orders\\emitted ΓÇö the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö \"./generated/remove-order-line.ts\" has already exported a member named 'getDailyRevenueByCategory'. Consider explicitly re-exporting to resolve the ambiguity.\r\nsrc/generated.ts(3,1): error TS2308: Module \"./generated/remove-order-line.ts\" has already exported a member named 'getTopSellingProducts'. ; the emitted project's own `npm run test` fail (exit 1) ΓÇö file:///C:/Users/mnril/AppData/Local/Temp/rt-treerun-mvB6jh/src/generated/get-daily-revenue-by.ts:26\nasync function getDailyRevenueByCategory(range           )                          {\n^\n\nSyntaxError: Identifier 'getDailyRevenueByCategory' has already been declared\n    at compileSourceTextModule ( ┬╖ the emitted product's generated core module failed to LOAD (src/jobs/search.ts): SyntaxError: Identifier 'getDailyRevenueByCategory' has already been declared\n    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)\n    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:90:18)\n    at ModuleLoader.<anonymous> (node:internal/modules/esm/translator",
+  "code": "RT_E_REPAIR_FAILED",
+  "path": "C:\\Users\\mnril\\Desktop\\testruns\\bakery-florist-orders\\build.json",
+  "dir": "C:\\Users\\mnril\\Desktop\\testruns\\bakery-florist-orders\\emitted",
+  "cycles": 3,
+  "budget": 3,
+  "treeTail": "the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö \"./generated/remove-order-line.ts\" has already exported a member named 'getDailyRevenueByCategory'. Consider explicitly re-exporting to resolve the ambiguity.\r\nsrc/generated.ts(3,1): error TS2308: Module \"./generated/remove-order-line.ts\" has already exported a member named 'getTopSellingProducts'. ; the emitted project's own `npm run test` fail (exit 1) ΓÇö file:///C:/Users/mnril/AppData/Local/Temp/rt-treerun-mvB6jh/src/generated/get-daily-revenue-by.ts:26\nasync function getDailyRevenueByCategory(range           )                          {\n^\n\nSyntaxError: Identifier 'getDailyRevenueByCategory' has already been declared\n    at compileSourceTextModule ( ┬╖ the emitted product's generated core module failed to LOAD (src/jobs/search.ts): SyntaxError: Identifier 'getDailyRevenueByCategory' has already been declared\n    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)\n    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:90:18)\n    at ModuleLoader.<anonymous> (node:internal/modules/esm/translator",
+  "treeRun": {
+    "ok": false,
+    "dir": "C:\\Users\\mnril\\Desktop\\testruns\\bakery-florist-orders\\emitted",
+    "sandbox": false,
+    "compile": {
+      "ok": true,
+      "dir": "C:\\Users\\mnril\\Desktop\\testruns\\bakery-florist-orders\\emitted",
+      "checked": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 10,
+      "verdicts": [
+        {
+          "file": "src/api/routes.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/domain/real_estate.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/create-product.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/get-daily-revenue-by.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/remove-order-line.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/aggregate.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/format.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/record.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/scan.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/search.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/main.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/state/store.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/ui/console.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "tests/oracle.spec.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "vite.config.ts",
+          "verdict": "pass"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "file": "tests/oracle.spec.ts",
+        "compile": "pass",
+        "tests": {
+          "pass": 0,
+          "fail": 1
+        },
+        "run": "fail",
+        "durationMs": 386,
+        "detail": "test \"C:\\\\Users\\\\mnril\\\\AppData\\\\Local\\\\Temp\\\\rt-treerun-mvB6jh\\\\tests\\\\oracle.spec.ts\" failed"
+      }
+    ],
+    "run": {
+      "kind": "ui-shell",
+      "run": "skip",
+      "detail": "UI shell ΓÇö not executable headless"
+    },
+    "core": {
+      "kind": "generated-core",
+      "entry": "src/jobs/search.ts",
+      "run": "fail",
+      "durationMs": 158,
+      "detail": "SyntaxError: Identifier 'getDailyRevenueByCategory' has already been declared\n    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)\n    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:90:18)\n    at ModuleLoader.<anonymous> (node:internal/modules/esm/translators:642:10)\n    at #translate (node:internal/modules/esm/loader:451:20)\n    at afterLoad (node:internal/modules/esm/loader:507:29)\n    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:512:12)\n    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:555:36)\n    at afterResolve (node:internal/modules/esm/loader:603:52)\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:609:12)\n    at node:internal/modules/esm/loader:628:32"
+    },
+    "project": {
+      "ok": false,
+      "typecheck": {
+        "script": "typecheck",
+        "run": "fail",
+        "durationMs": 2428,
+        "command": "tsc --noEmit",
+        "scriptPolicy": "argv-only ┬╖ tsc.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 2,
+        "detail": "\"./generated/remove-order-line.ts\" has already exported a member named 'getDailyRevenueByCategory'. Consider explicitly re-exporting to resolve the ambiguity.\r\nsrc/generated.ts(3,1): error TS2308: Module \"./generated/remove-order-line.ts\" has already exported a member named 'getTopSellingProducts'. Consider explicitly re-exporting to resolve the ambiguity.\r\nsrc/generated.ts(3,1): error TS2308: Module \"./generated/remove-order-line.ts\" has already exported a member named 'getTotalWaste'. Consider explicitly re-exporting to resolve the ambiguity.\r\nsrc/generated.ts(3,1): error TS2308: Module \"./generated/remove-order-line.ts\" has already exported a member named 'reconstructStockCount'. Consider explicitly re-exporting to resolve the ambiguity.\r\nsrc/generated.ts(3,1): error TS2308: Module \"./generated/remove-order-line.ts\" has already exported a member named 'transitionOrderStatus'. Consider explicitly re-exporting to resolve the ambiguity.\r\nsrc/generated/get-daily-revenue-by.ts(2,133): error TS2440: Import declaration conflicts with local declaration of 'transitionOrderStatus'.\r\nsrc/generated/get-daily-revenue-by.ts(2,156): error TS2440: Import declaration conflicts with local declaration of 'getDailyRevenueByCategory'.\r\nsrc/generated/get-daily-revenue-by.ts(2,183): error TS2440: Import declaration conflicts with local declaration of 'getTopSellingProducts'.\r\nsrc/generated/get-daily-revenue-by.ts(2,206): error TS2440: Import declaration conflicts with local declaration of 'getTo"
+      },
+      "test": {
+        "script": "test",
+        "run": "fail",
+        "durationMs": 378,
+        "command": "node --experimental-strip-types --test tests/oracle.spec.ts",
+        "scriptPolicy": "argv-only ┬╖ node (no shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 1,
+        "detail": "file:///C:/Users/mnril/AppData/Local/Temp/rt-treerun-mvB6jh/src/generated/get-daily-revenue-by.ts:26\nasync function getDailyRevenueByCategory(range           )                          {\n^\n\nSyntaxError: Identifier 'getDailyRevenueByCategory' has already been declared\n    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)\n    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:90:18)\n    at ModuleLoader.<anonymous> (node:internal/modules/esm/translators:642:10)\n    at #translate (node:internal/modules/esm/loader:451:20)\n    at afterLoad (node:internal/modules/esm/loader:507:29)\n    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:512:12)\n    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:555:36)\n    at afterResolve (node:internal/modules/esm/loader:603:52)\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:609:12)\n    at ModuleJob.syncLink (node:internal/modules/esm/module_job:162:33)\n\nNode.js v24.15.0\nΓ£û tests\\oracle.spec.ts (171.8692ms)\nΓä╣ tests 1\nΓä╣ suites 0\nΓä╣ pass 0\nΓä╣ fail 1\nΓä╣ cancelled 0\nΓä╣ skipped 0\nΓä╣ todo 0\nΓä╣ duration_ms 182.9438\n\nΓ£û failing tests:\n\ntest at tests\\oracle.spec.ts:1:1\nΓ£û tests\\oracle.spec.ts (171.8692ms)\n  'test failed'"
+      },
+      "build": {
+        "script": "build",
+        "run": "pass",
+        "durationMs": 1003,
+        "command": "vite build",
+        "scriptPolicy": "argv-only ┬╖ vite.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "declaredScriptsVerified": true
+    },
+    "error": "the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö \"./generated/remove-order-line.ts\" has already exported a member named 'getDailyRevenueByCategory'. Consider explicitly re-exporting to resolve the ambiguity.\r\nsrc/generated.ts(3,1): error TS2308: Module \"./generated/remove-order-line.ts\" has already exported a member named 'getTopSellingProducts'. ; the emitted project's own `npm run test` fail (exit 1) ΓÇö file:///C:/Users/mnril/AppData/Local/Temp/rt-treerun-mvB6jh/src/generated/get-daily-revenue-by.ts:26\nasync function getDailyRevenueByCategory(range           )                          {\n^\n\nSyntaxError: Identifier 'getDailyRevenueByCategory' has already been declared\n    at compileSourceTextModule ( ┬╖ the emitted product's generated core module failed to LOAD (src/jobs/search.ts): SyntaxError: Identifier 'getDailyRevenueByCategory' has already been declared\n    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)\n    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:90:18)\n    at ModuleLoader.<anonymous> (node:internal/modules/esm/translator",
+    "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed",
+    "declaredScriptsVerified": false,
+    "unverifiedEntry": "UI shell ΓÇö not executable headless",
+    "substance": {
+      "stubs": 0,
+      "reexports": 0,
+      "real": 5,
+      "files": [
+        {
+          "path": "src/jobs/aggregate.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/format.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/record.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/scan.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/search.ts",
+          "kind": "real"
+        }
+      ],
+      "verdict": "real",
+      "greenWhileStubbed": false,
+      "oracleStubTrap": false
+    },
+    "verdictHash": "3214505838"
+  },
+  "import": {
+    "imported": 3,
+    "changed": [],
+    "unchanged": 3,
+    "missing": [],
+    "refused": [],
+    "warnings": []
+  },
+  "applied": {
+    "written": [
+      "src/generated/create-product.ts",
+      "src/generated/remove-order-line.ts",
+      "src/generated.ts",
+      "src/generated/get-daily-revenue-by.ts",
+      "src/jobs/aggregate.ts",
+      "src/jobs/record.ts",
+      "src/jobs/format.ts",
+      "src/jobs/scan.ts",
+      "src/jobs/search.ts"
+    ],
+    "unchanged": [],
+    "refused": [
+      "src/jobs/format.ts"
+    ],
+    "warnings": [
+      "repair:apply:refused:\"src/jobs/format.ts\":the tree-run failure names this file but the cycle produced no tree row for it ΓÇö the repair did not target it"
+    ],
+    "deltas": [],
+    "patchRefusals": [
+      "src/generated/get-daily-revenue-by.ts ┬╖ patched module still fails validation ΓÇö RT_E_VALIDATION ┬╖ forbidden primitive in generated module code (globalThis)"
+    ]
+  },
+  "events": [
+    "import: 3 file(s) re-read from C:\\Users\\mnril\\Desktop\\testruns\\bakery-florist-orders\\emitted (0 changed, 3 unchanged)",
+    "tree-run fail (pre-cycle): the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö src/jobs/format.ts(46,3): error TS2322: Type 'Record<string, unknown>' is not ",
+    "cycle 1: failure-named file not addressed by the repair: src/jobs/format.ts",
+    "cycle 1: tree-run fail ΓÇö the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö src/jobs/format.ts(46,3): error TS2322: Type 'Record<string, unknown>' is not ",
+    "cycle 2: failure-named file not addressed by the repair: src/jobs/format.ts",
+    "cycle 2: tree-run fail ΓÇö the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö src/jobs/format.ts(46,3): error TS2322: Type 'Record<string, unknown>' is not ",
+    "cycle 3: tree-run fail ΓÇö the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö \"./generated/remove-order-line.ts\" has already exported a member named 'getDai",
+    "budget exhausted after 3 repair cycle(s) ΓÇö repair FAILED, the edited dir stands as-is"
+  ],
+  "remedy": "Read the last tree-failure tail and the repair attempts' evidence, adjust the repair directive or generator, and re-run repair ΓÇö never mint a green verdict on a red tree.",
+  "exit_code": 1
+}

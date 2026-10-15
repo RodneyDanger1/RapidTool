@@ -31,15 +31,41 @@ npx tsc -p tsconfig.scripts.json --noEmit     # this file is inside the scripts 
 
 ## Run root
 
-The frozen evidence lives at `C:\Users\mnril\Desktop\testruns\` (the repo's sibling),
-not inside the repo. Resolution order, first hit wins:
+The frozen evidence is **tracked in the repo** at `<repo>/testruns/` — a MINIMAL
+fixture subset (the 7 historical projects' 13 emitted trees, their `brief.md` /
+`build.json` / `packet.md`, the repair/approve records and the campaign2
+below-floor projects the CLI legs consume). It was vendored from the developer
+box's larger run root (B1-F1); the absolute `C:/Users/mnril/Desktop/testruns`
+fallback is gone, so the harness is green on a clean checkout. Resolution order,
+first hit wins:
 
-1. `$env:RAPIDTOOL_TESTRUNS`
-2. `<repo>/testruns`
-3. `<repo>/../testruns`  ← the real run root this wave produced
-4. `C:/Users/mnril/Desktop/testruns`
+1. `$env:RAPIDTOOL_TESTRUNS`  ← the highest-priority override (a host with a
+   larger run root)
+2. `<repo>/testruns`  ← the tracked fixture subset this repo ships
+3. `<repo>/../testruns`  ← a sibling run root, when one exists
 
 A missing run root is a named failure (`<run-root-missing>`), never a silent skip.
+
+### Vendoring rule — strip the emitted trees' nested git metadata
+
+Most fixture trees were produced by `emit --git`, so each carried its own `.git`
+directory. Committing a nested repository records a **gitlink**, not the tree's
+files, so a clone would silently not contain the fixture the guard reads. The
+vendoring step therefore removes that metadata; every consumer already skips it
+(`replay-harness.mjs:187` and the campaign invariants both exclude `.git` when
+walking a tree). The rule `testruns/**/.git/` in `.gitignore` is the guard so a
+future re-vendor cannot silently reintroduce the hazard.
+
+**CORRECTION — 2026-10-15 (W355 audit → W357).** The paragraph above was **false
+when written**: `git ls-files testruns` returned **0** while `testruns/` held 325
+files on disk, and the guard-count floor at
+`scripts/prevention/cassettes/guard-floor.json` was likewise untracked — so a
+clean checkout could neither run the harness nor read its floor. The W355 audit
+recorded it (`fixes/355_0_audit_wave.md` §2.3 L8/L9, register `AW355-f05`), the
+fixtures and the floor were then tracked, and the nested `.git` directories were
+stripped as described above. The "green on a clean checkout" claim is now
+supported by the tracked corpus + floor; it was **not** re-verified in a fresh
+clone on this host, and that remains the honest residual.
 
 ## What is real (and the one thing that may be cassetted)
 

@@ -1,0 +1,6 @@
+# RapidTool scaffold .gitignore — keeps this emitted tree a reviewable unit.
+# Ignore only what a real install/build/verify run leaves behind (T4.1/T4.2);
+# the generated source, .rapidtool/project.json and the notes stay tracked.
+node_modules/
+dist/
+.rapidtool/logs/

@@ -30,6 +30,14 @@ logs/trajectory.db*
 # so emitted trees (research/eval-out/<slug>/.rapidtool/logs/*.ndjson) escaped it — B3 W24 gap-fill:
 **/.rapidtool/logs/
 
+# Fixture vendoring guard (W355/W357, 2026-10-15). The pinned prevention corpus under `testruns/`
+# holds emitted trees produced by `emit --git`, so 14 of them carried their own `.git`. Committing
+# a nested repo yields a GITLINK, not the tree's files — a clone would silently not contain the
+# fixture the guard reads. Stripping the nested metadata is the vendoring step; this rule is the
+# guard so a future re-vendor cannot silently reintroduce it. Nothing reads those repos:
+# `scripts/prevention/replay-harness.mjs:187` and the campaign invariants both skip `.git`.
+testruns/**/.git/
+
 # Hermes local verify manifest (contains the auto-detected recipe; see taskuniverselog §6.7)
 .hermes/
 

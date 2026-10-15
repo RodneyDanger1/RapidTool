@@ -1,0 +1,34 @@
+/* ---------------------------------------------------------------------------
+ * styles.css — emitted by the RapidTool scaffold (W52 / 338-5).
+ * Tailwind v4 CSS-first entry: package.json declares `tailwindcss` +
+ * `@tailwindcss/vite`, vite.config.ts registers the plugin, and this import
+ * is what the plugin compiles. Base rules style the contract-level Console
+ * shell (unclassed markup); no project-derived text ever reaches this CSS.
+ * --------------------------------------------------------------------------- */
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+    background: #0b0f14;
+    color: #e6edf3;
+  }
+
+  main {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: 2rem 1.25rem;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+  }
+}

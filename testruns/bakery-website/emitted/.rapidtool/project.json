@@ -1,0 +1,2149 @@
+{
+  "id": "729ce422-bcaa-4b79-9ec6-4840b61a458e",
+  "name": "# Golden Crust Bakery",
+  "brief": "# Golden Crust Bakery — Marketing Website\n\n## What this is\nA marketing website for a neighbourhood bakery called Golden Crust. The site is\npublic, read-mostly, and exists to get a hungry visitor to walk in or place an\norder. It must be fast on a phone, work without JavaScript for the core content,\nand be trivially editable by the owner.\n\n## Audience\n- Local residents deciding where to buy bread and pastries today.\n- People ordering a celebration cake or a catering box ahead of time.\n- Tourists searching \"bakery near me\" on a phone.\n\n## Required pages / sections\n1. **Home** — hero with today's fresh-bake highlights, opening-hours badge that\n   shows Open/Closed computed from the current time and the hours table, and a\n   short story block.\n2. **Menu** — grouped products (Breads, Pastries, Cakes, Drinks). Each item has a\n   name, short description, price, and allergen tags (gluten, dairy, nuts, egg,\n   vegan). Filter by dietary tag and by category, plus a text search box.\n3. **Hours & Location** — a weekly table of opening hours, a holiday-closures\n   list, an embedded static map image, and a \"Get directions\" link.\n4. **Order form** — a celebration-cake / catering enquiry form: name, phone,\n   email, pickup date, product, quantity, and free-text notes. Must validate the\n   pickup date is at least 48 hours in the future, require either phone or email,\n   and show a clear confirmation with an order reference.\n5. **Contact** — phone, email, address, social links, and a short FAQ.\n\n## Functional requirements\n- Opening-hours logic must be a single source of truth reused by the Home badge\n  and the Hours page (compute Open/Closed from the same table).\n- The menu filter must combine category, dietary tag, and free-text query with\n  AND semantics, and show a friendly empty state when nothing matches.\n- The order form must reject a missing contact method, a pickup date under 48\n  hours away, and a quantity below 1; on success it generates a human-readable\n  order reference (e.g. GC-2026-0007) and echoes the full order back.\n- Prices are shown in GBP with two decimals; totals for quantity > 1 are\n  computed.\n- All form validation errors are field-level and accessible (associated with the\n  input, announced to screen readers).\n\n## Non-functional requirements\n- Responsive from 320px to 1440px; mobile-first.\n- Core content (menu, hours, contact) readable with JS disabled.\n- Semantic HTML landmarks, one h1 per page, alt text on every image.\n- Colour contrast at least WCAG AA.\n- No third-party trackers.\n\n## Explicitly out of scope\n- Online payment / card processing.\n- User accounts or login.\n- A real database or CMS backend — content is static data in the app.\n- Multi-language support.",
+  "domain": "real-estate",
+  "createdAt": 1791165283028,
+  "status": "complete",
+  "currentPhase": 12,
+  "phases": [
+    {
+      "id": 0,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3269632901",
+        "checkedAt": 1791165296137
+      },
+      "startedAt": 1791165291917,
+      "completedAt": 1791165292060
+    },
+    {
+      "id": 1,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1050713914",
+        "checkedAt": 1791165296170
+      },
+      "startedAt": 1791165296147,
+      "completedAt": 1791165296153
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1845537766",
+        "checkedAt": 1791165296255
+      },
+      "startedAt": 1791165296179,
+      "completedAt": 1791165296184
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1638292844",
+        "checkedAt": 1791165296395
+      },
+      "startedAt": 1791165296375,
+      "completedAt": 1791165296380
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3527188654",
+        "checkedAt": 1791165296456
+      },
+      "startedAt": 1791165296403,
+      "completedAt": 1791165296450
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "2951452883",
+        "checkedAt": 1791165296495
+      },
+      "startedAt": 1791165296464,
+      "completedAt": 1791165296487
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3047279992",
+        "checkedAt": 1791165374711
+      },
+      "startedAt": 1791165296508,
+      "completedAt": 1791165296519
+    },
+    {
+      "id": 7,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1119028455",
+        "checkedAt": 1791165377158
+      },
+      "startedAt": 1791165374821,
+      "completedAt": 1791165374832
+    },
+    {
+      "id": 8,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "606175358",
+        "checkedAt": 1791165377236
+      },
+      "startedAt": 1791165377172,
+      "completedAt": 1791165377228
+    },
+    {
+      "id": 9,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3030540723",
+        "checkedAt": 1791165377316
+      },
+      "startedAt": 1791165377253,
+      "completedAt": 1791165377306
+    },
+    {
+      "id": 10,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3218462335",
+        "checkedAt": 1791165377374
+      },
+      "startedAt": 1791165377332,
+      "completedAt": 1791165377343
+    },
+    {
+      "id": 11,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1663625674",
+        "checkedAt": 1791165380615
+      },
+      "startedAt": 1791165377392,
+      "completedAt": 1791165377405
+    },
+    {
+      "id": 12,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3530055408",
+        "checkedAt": 1791165380658
+      },
+      "startedAt": 1791165380627,
+      "completedAt": 1791165380636
+    }
+  ],
+  "scorecard": {
+    "overall": 7.2,
+    "verdict": "proceed-with-guards",
+    "axes": [
+      {
+        "key": "feasibility",
+        "label": "Technical feasibility",
+        "score": 3,
+        "note": "Typed contracts + sequential graph."
+      },
+      {
+        "key": "scale",
+        "label": "Scale headroom",
+        "score": 9,
+        "note": "Stateless workers + durable checkpoints."
+      },
+      {
+        "key": "security",
+        "label": "Security posture",
+        "score": 9,
+        "note": "Scheduler Δ1."
+      },
+      {
+        "key": "api",
+        "label": "API / rate-limit risk",
+        "score": 7,
+        "note": "Live-tool Δ1."
+      },
+      {
+        "key": "delivery",
+        "label": "Delivery confidence",
+        "score": 8,
+        "note": "Phased graph prevents skipped work."
+      }
+    ],
+    "bottlenecks": [
+      "Long-running tools must stream over WebSocket MCP.",
+      "HITL rejection without a qualitative note is illegal.",
+      "Constraint: local-first"
+    ],
+    "attackVectors": [
+      "Prompt injection via ingested competitor pages.",
+      "Tool-call privilege escalation if OAuth scopes are inherited.",
+      "Sandbox escape if generated exec has network."
+    ],
+    "libraries": [
+      {
+        "name": "TanStack Start",
+        "role": "Typed app shell and file routes"
+      },
+      {
+        "name": "Zod",
+        "role": "Schema lock on generated artifacts"
+      },
+      {
+        "name": "MLS / property-data API",
+        "role": "Listings, comps, and ARV inputs"
+      }
+    ]
+  },
+  "competitors": [
+    {
+      "name": "DealMachine / PropStream",
+      "class": "REI deal flow",
+      "strength": "Driving-for-dollars + comps",
+      "gap": "No flip/renovation lifecycle or ARV grounding",
+      "source": "illustrative"
+    },
+    {
+      "name": "Follow Up Boss",
+      "class": "Agent CRM",
+      "strength": "Lead nurture",
+      "gap": "Not a governed delivery graph; no escrow/title handoff",
+      "source": "illustrative"
+    },
+    {
+      "name": "Cursor",
+      "class": "IDE-attached agent",
+      "strength": "Repo-aware multi-file edits",
+      "gap": "No agency lifecycle or HITL graph",
+      "source": "illustrative"
+    },
+    {
+      "name": "v0 / Bolt / Lovable",
+      "class": "Prompt-to-app",
+      "strength": "Fast UI scaffolds",
+      "gap": "Skips isolation policy and ADR trail",
+      "source": "illustrative"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "0-scorecard-feasibility-architecture-scoreca",
+      "phase": 0,
+      "kind": "scorecard",
+      "title": "Feasibility & Architecture Scorecard",
+      "body": "# # Golden Crust Bakery — Phase 0 scorecard\n\nDomain: real-estate\nOverall: 7.2 / 10 — proceed-with-guards\nLattice jobs: show, search, close, track, query, validate, generate\nEntities: text, table, page, image, link, home, user, visitor, item, card, account, database, site, work-order\nConstraints: local-first\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n- Constraint: local-first\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- MLS / property-data API: Listings, comps, and ARV inputs"
+    },
+    {
+      "id": "0-algorithm-intent-lattice-a1",
+      "phase": 0,
+      "kind": "algorithm",
+      "title": "Intent Lattice (A1)",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"jobs\": [\n    \"show\",\n    \"search\",\n    \"close\",\n    \"track\",\n    \"query\",\n    \"validate\",\n    \"generate\"\n  ],\n  \"entities\": [\n    \"text\",\n    \"table\",\n    \"page\",\n    \"image\",\n    \"link\",\n    \"home\",\n    \"user\",\n    \"visitor\",\n    \"item\",\n    \"card\",\n    \"account\",\n    \"database\",\n    \"site\",\n    \"work-order\"\n  ],\n  \"constraints\": [\n    \"local-first\"\n  ],\n  \"nodes\": [\n    {\n      \"kind\": \"object\",\n      \"label\": \"text\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"show\",\n      \"weight\": 0.9500000000000001\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"table\",\n      \"weight\": 0.9500000000000001\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"page\",\n      \"weight\": 0.9500000000000001\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"search\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"close\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"image\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"link\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"home\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"user\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"visitor\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"track\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"query\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"validate\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"generate\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"item\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"card\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"account\",\n      \"weight\": 0.55\n    }\n  ],\n  \"complexity\": 10,\n  \"vague\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "research-0-0-1791165296135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Free Rental / Lease Agreement Templates | PDF | Word",
+      "body": "# Free Rental / Lease Agreement Templates | PDF | Word\n\nA lease agreement allows a tenant to legally occupy space in exchange for paying rent to a landlord. Before authorizing a lease , the landlord may request the tenant&#x27;s credit and background information to ensure they can afford the rent amount. All details regarding the tenancy are recorded within the document to confirm that there is an understanding between both parties.\n\nSource: https://freeforms.com/lease/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-1-1791165296135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Real Estate Documents - LawDistrict",
+      "body": "# Real Estate Documents - LawDistrict\n\nTake advantage of our PDF templates to create free Legal Real Estate Forms . Make the renting, owning, or selling real estate process simple and quick.\n\nSource: https://www.lawdistrict.com/real-estate-documents/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-2-1791165296135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Free Landlord Forms for Rentals: Template Library (30+)",
+      "body": "# Free Landlord Forms for Rentals: Template Library (30+)\n\nCheck out our comprehensive list of rental forms and templates for both landlord and tenant use. Includes lease agreements and more.\n\nSource: https://ipropertymanagement.com/templates",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-3-1791165296135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Free Rental / Lease Agreement Templates (15) - PDF - eForms",
+      "body": "# Free Rental / Lease Agreement Templates (15) - PDF - eForms\n\nA lease agreement is a legal document between a landlord and a tenant who rents property to a tenant , for a fixed or periodic tenancy, in exchange for payment.[1] Both parties must fulfill their responsibilities under the lease until the end of the rental period.\n\nSource: https://eforms.com/rental/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-4-1791165296135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Free Residential Lease Agreement Template (2026 Legal Sample)",
+      "body": "# Free Residential Lease Agreement Template (2026 Legal Sample)\n\nWhether you&#x27;re a realtor or homeowner use this free residential lease agreement template to legally lease out the property .\n\nSource: https://www.pandadoc.com/residential-lease-agreement-template/",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-0-1791165296135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "For the Golden Crust Bakery project's P0 deep research and feasibility phase, the investigation focused on the legal and operational groundwork required before any marketing site build could meaningfully proceed—specifically, how a neighbourhood bakery would secure and formalize its physical location. Research surfaced a consistent landscape of free, template-driven lease and rental agreement resources (eForms, LawDistrict, and various landlord form libraries), all converging on the same core mechanics: a lease is a legal document granting a tenant the right to occupy space in exchange for rent, contingent on landlord verification of credit and background information, with both parties bound to fixed or periodic terms. This finding confirms that lease execution is a well-templated, low-cost step, but it also flags a feasibility dependency—the bakery's physical address, foot-traffic assumptions, and local-search positioning cannot be validated until a rental agreement is actually authorized, meaning the marketing website's audience targeting (\"local residents deciding where to buy bread\") remains theoretical until the storefront is legally secured. Consequently, the phase concludes that the project is feasible from a content and legal-forms standpoint, but the website's local-SEO and walk-in strategy should be treated as blocked pending confirmation of a signed lease and a verified physical location.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p0-32696329",
+      "phase": 0,
+      "kind": "gate",
+      "title": "DoD gate — P0",
+      "body": "# DoD gate — P0\n\n**Result: PASS**\n\nAll criteria met for phase 0.\n\nEvidence hash: 3269632901",
+      "language": "markdown"
+    },
+    {
+      "id": "1-graph-execution-topology-this-build",
+      "phase": 1,
+      "kind": "graph",
+      "title": "Execution topology (this build)",
+      "body": "Sequential pipeline: show → search → close → track → query → validate\nState entities: text, table, page, image, link, home, user, visitor, item, card, account, database, site, work-order\n\nEach step advances a text through its lifecycle in the real estate domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over texts; no parallel, event, or failover topology is claimed beyond what the brief states.",
+      "language": "text"
+    },
+    {
+      "id": "gate-p1-10507139",
+      "phase": 1,
+      "kind": "gate",
+      "title": "DoD gate — P1",
+      "body": "# DoD gate — P1\n\n**Result: PASS**\n\nAll criteria met for phase 1.\n\nEvidence hash: 1050713914",
+      "language": "markdown"
+    },
+    {
+      "id": "2-memory-data-model-retrieval",
+      "phase": 2,
+      "kind": "memory",
+      "title": "Data model & retrieval",
+      "body": "Records: text, table, page, image, link, home, user, visitor, item, card, account, database, site, work-order\nOperations: show, search, close, track, query, validate, generate\n\nEach text is the unit of state; show steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
+    },
+    {
+      "id": "gate-p2-18455377",
+      "phase": 2,
+      "kind": "gate",
+      "title": "DoD gate — P2",
+      "body": "# DoD gate — P2\n\n**Result: PASS**\n\nAll criteria met for phase 2.\n\nEvidence hash: 1845537766",
+      "language": "markdown"
+    },
+    {
+      "id": "3-mcp-integration-surface-declared",
+      "phase": 3,
+      "kind": "mcp",
+      "title": "Integration surface (declared)",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"surface\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p3-16382928",
+      "phase": 3,
+      "kind": "gate",
+      "title": "DoD gate — P3",
+      "body": "# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844",
+      "language": "markdown"
+    },
+    {
+      "id": "4-security-security-authorization-policy",
+      "phase": 4,
+      "kind": "security",
+      "title": "Security & authorization policy",
+      "body": "Protected data: text, table, page, image, link, home (the brief's own entities).\nAccess model: user, visitor — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the texts its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive text data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
+    },
+    {
+      "id": "gate-p4-35271886",
+      "phase": 4,
+      "kind": "gate",
+      "title": "DoD gate — P4",
+      "body": "# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654",
+      "language": "markdown"
+    },
+    {
+      "id": "5-validation-validation-hitl-contract",
+      "phase": 5,
+      "kind": "validation",
+      "title": "Validation + HITL contract",
+      "body": "Validation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap."
+    },
+    {
+      "id": "gate-p5-29514528",
+      "phase": 5,
+      "kind": "gate",
+      "title": "DoD gate — P5",
+      "body": "# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883",
+      "language": "markdown"
+    },
+    {
+      "id": "6-code-tree-63107583",
+      "phase": 6,
+      "kind": "code",
+      "title": "Generated source tree (LLM — 8 files, chunked synthesis)",
+      "body": "// src/generated.ts · fnv1a 631075834 · 8 lines · attempt 0\n// src/generated/render-home.ts · fnv1a 545679720 · 438 lines · attempt 0\n// src/generated/format-gbp.ts · fnv1a 2085111458 · 373 lines · attempt 0\n// src/jobs/query.ts · fnv1a 3927689137 · 135 lines · attempt 0\n// src/jobs/track.ts · fnv1a 3288555753 · 242 lines · attempt 0\n// src/jobs/close.ts · fnv1a 1468744585 · 113 lines · attempt 0\n// src/jobs/search.ts · fnv1a 2700949728 · 153 lines · attempt 0\n// src/jobs/show.ts · fnv1a 2804058183 · 128 lines · attempt 0\n\nexport * from \"./generated/render-home.ts\";\nexport * from \"./generated/format-gbp.ts\";\nexport * from \"./jobs/query.ts\";\nexport * from \"./jobs/track.ts\";\nexport * from \"./jobs/close.ts\";\nexport * from \"./jobs/search.ts\";\nexport * from \"./jobs/show.ts\";\n",
+      "language": "javascript",
+      "provenance": {
+        "producer": "model",
+        "model": "deepseek-flash",
+        "timestamp": 1791165369746,
+        "inputHash": "224299774"
+      }
+    },
+    {
+      "id": "6-docs-p6-architecture-trace-reqtrace",
+      "phase": 6,
+      "kind": "docs",
+      "title": "P6 architecture trace (reqTrace)",
+      "body": "# P6 architecture trace (reqTrace)\n\n**p6-arch: PASS** · tree (8 files)\n\n- renderHome(badge: OpenStatus, highlights: MenuItem[], story: string): string → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- computeOpenStatus(now: Date, hours: WeeklyHours, closures: HolidayClosure[]): OpenStatus → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- getWeeklyHours(): WeeklyHours → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- getHolidayClosures(): HolidayClosure[] → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- renderHoursPage(hours: WeeklyHours, closures: HolidayClosure[], mapImage: { src: string; alt: string }, directionsUrl: string): string → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- getMenuItems(): MenuItem[] → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- filterMenu(items: MenuItem[], filters: MenuFilters): MenuItem[] → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- renderMenu(items: MenuItem[], filters: MenuFilters): string → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- formatGbp(amount: number): string → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- computeLineTotal(unitPrice: number, quantity: number): number → src/generated/render-home.ts, src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- validateOrder(input: OrderInput): OrderValidationResult → src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- submitOrder(input: OrderInput, now: Date): OrderResult → src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- generateOrderReference(now: Date, sequence: number): string → src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- renderOrderConfirmation(order: Order, reference: string): string → src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- renderContactPage(contact: ContactInfo, faq: FAQEntry[]): string → src/generated/format-gbp.ts, src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- runShow(command: ShowCommand): Promise<Text> → src/jobs/show.ts\n- listShowRuns(id: string, limit?: number): Promise<ShowRun[]> → src/jobs/show.ts\n- runSearch(command: SearchCommand): Promise<Table> → src/jobs/search.ts, src/jobs/show.ts\n- listSearchRuns(id: string, limit?: number): Promise<SearchRun[]> → src/jobs/search.ts, src/jobs/show.ts\n- runClose(command: CloseCommand): Promise<Page> → src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- listCloseRuns(id: string, limit?: number): Promise<CloseRun[]> → src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- runTrack(command: TrackCommand): Promise<Image> → src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- listTrackRuns(id: string, limit?: number): Promise<TrackRun[]> → src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- runQuery(command: QueryCommand): Promise<Link> → src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n- listQueryRuns(id: string, limit?: number): Promise<QueryRun[]> → src/jobs/query.ts, src/jobs/track.ts, src/jobs/close.ts, src/jobs/search.ts, src/jobs/show.ts\n\n> reqTrace: capability → tree file(s), computed by p6-arch over generatedTree code identifiers (stemmed; literals/comments masked).",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p6-30472799",
+      "phase": 6,
+      "kind": "gate",
+      "title": "DoD gate — P6",
+      "body": "# DoD gate — P6\n\n**Result: PASS**\n\nAll criteria met for phase 6.\n\nEvidence hash: 3047279992",
+      "language": "markdown"
+    },
+    {
+      "id": "7-research-competitive-analysis-matrix",
+      "phase": 7,
+      "kind": "research",
+      "title": "Competitive analysis matrix",
+      "body": "# Market position — # Golden Crust Bakery\n\n> Illustrative competitor templates (source: illustrative — NOT live research). Verify before citing.\n\n## DealMachine / PropStream (REI deal flow)\nSource: illustrative template\nStrength: Driving-for-dollars + comps\nGap RapidTool exploits: No flip/renovation lifecycle or ARV grounding\n## Follow Up Boss (Agent CRM)\nSource: illustrative template\nStrength: Lead nurture\nGap RapidTool exploits: Not a governed delivery graph; no escrow/title handoff\n## Cursor (IDE-attached agent)\nSource: illustrative template\nStrength: Repo-aware multi-file edits\nGap RapidTool exploits: No agency lifecycle or HITL graph\n## v0 / Bolt / Lovable (Prompt-to-app)\nSource: illustrative template\nStrength: Fast UI scaffolds\nGap RapidTool exploits: Skips isolation policy and ADR trail\n\nArchitectural advantage: deterministic 0–12 graph with HITL and ADRs — generators skip this; IDEs leave it to the human.\nMCP/A2A server contracts are roadmap declarations, not runtime (B-18)."
+    },
+    {
+      "id": "research-7-0-1791165377158",
+      "phase": 7,
+      "kind": "research",
+      "title": "iPropertyManagement: Free Resources for Landlords & Tenants",
+      "body": "# iPropertyManagement: Free Resources for Landlords & Tenants\n\nWe provide landlords, tenants , and real estate investors with clear, reliable resources on property management, rental housing, and real estate law. Our goal is to be the go-to source for accurate, up-to-date information and practical tools that support smarter rental decisions.\n\nSource: https://ipropertymanagement.com/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-7-1-1791165377158",
+      "phase": 7,
+      "kind": "research",
+      "title": "Free Rental / Lease Agreement Templates | PDF | Word",
+      "body": "# Free Rental / Lease Agreement Templates | PDF | Word\n\nA lease agreement allows a tenant to legally occupy space in exchange for paying rent to a landlord. Before authorizing a lease , the landlord may request the tenant&#x27;s credit and background information to ensure they can afford the rent amount. All details regarding the tenancy are recorded within the document to confirm that there is an understanding between both parties.\n\nSource: https://freeforms.com/lease/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-7-2-1791165377158",
+      "phase": 7,
+      "kind": "research",
+      "title": "Free Landlord Forms for Rentals: Template Library (30+)",
+      "body": "# Free Landlord Forms for Rentals: Template Library (30+)\n\nCheck out our comprehensive list of rental forms and templates for both landlord and tenant use. Includes lease agreements and more.\n\nSource: https://ipropertymanagement.com/templates",
+      "language": "markdown"
+    },
+    {
+      "id": "research-7-3-1791165377158",
+      "phase": 7,
+      "kind": "research",
+      "title": "Free Rental / Lease Agreement Templates (15) - PDF - eForms",
+      "body": "# Free Rental / Lease Agreement Templates (15) - PDF - eForms\n\nA lease agreement is a legal document between a landlord and a tenant who rents property to a tenant , for a fixed or periodic tenancy, in exchange for payment.[1] Both parties must fulfill their responsibilities under the lease until the end of the rental period.\n\nSource: https://eforms.com/rental/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-7-4-1791165377158",
+      "phase": 7,
+      "kind": "research",
+      "title": "80+ Rental and Lease Agreement PDF Templates | Jotform",
+      "body": "# 80+ Rental and Lease Agreement PDF Templates | Jotform\n\nRental agreement templates are pre-designed documents used by landlords, property managers, and tenants to outline lease terms, responsibilities, payment details, and property rules in a clear, customizable, and structured format.\n\nSource: https://www.jotform.com/pdf-templates/lease-agreement",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-7-1791165377158",
+      "phase": 7,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "Phase 7 (Domain & Market Research) surfaced a clear gap: while the search landscape for landlord/tenant resources is saturated with high-authority template libraries (iPropertyManagement, eForms, Jotform, and 30+ form repositories), Golden Crust Bakery's audience—local residents deciding where to buy bread—operates in a fundamentally different information domain, meaning these competitors offer little strategic overlap and instead confirm that the bakery's marketing site should avoid generic, template-driven content and instead lean into fast, phone-first, JavaScript-optional local discovery.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p7-11190284",
+      "phase": 7,
+      "kind": "gate",
+      "title": "DoD gate — P7",
+      "body": "# DoD gate — P7\n\n**Result: PASS**\n\nAll criteria met for phase 7.\n\nEvidence hash: 1119028455",
+      "language": "markdown"
+    },
+    {
+      "id": "8-ui-interface-contract-client-ui",
+      "phase": 8,
+      "kind": "ui",
+      "title": "Interface contract (client UI)",
+      "body": "Screens derived from the briefed requirements:\nScreen: The site renders five public pages (Home, Menu, Hours & Location, Order form, Contact) as static content with one h1 per page and semantic HTML landmarks (header, nav, main, footer) on every page.\n  Shows: text, table, page, image, link, home\n  Binding: req-1\n  State: the-site-renders-five-public-pag\nScreen: Home shows a hero with today's fresh-bake highlights, a short story block, and an opening-hours badge whose Open/Closed text is computed at render time from the shared weekly hours table and the current time.\n  Shows: text, table, page, image, link, home\n  Binding: req-2\n  State: home-shows-a-hero-with-today-s-f\nScreen: A single exported hours source of truth (the weekly hours table plus holiday closures) is imported by both the Home badge and the Hours page so Open/Closed cannot diverge.\n  Shows: text, table, page, image, link, home\n  Binding: req-3\n  State: a-single-exported-hours-source-o\nScreen: Menu lists grouped products in the order Breads, Pastries, Cakes, Drinks, where each item has a name, short description, GBP price, category, and zero or more allergen tags drawn only from gluten, dairy, nuts, egg, vegan.\n  Shows: text, table, page, image, link, home\n  Binding: req-4\n  State: menu-lists-grouped-products-in-t\nScreen: Menu filtering applies category AND dietary tag AND free-text query with AND semantics over name and description, and renders a friendly empty state when no item matches.\n  Shows: text, table, page, image, link, home\n  Binding: req-5\n  State: menu-filtering-applies-category-\nScreen: All prices display in GBP with exactly two decimals, and any item with quantity > 1 displays a line total computed as unit price times quantity.\n  Shows: text, table, page, image, link, home\n  Binding: req-6\n  State: all-prices-display-in-gbp-with-e\n"
+    },
+    {
+      "id": "gate-p8-60617535",
+      "phase": 8,
+      "kind": "gate",
+      "title": "DoD gate — P8",
+      "body": "# DoD gate — P8\n\n**Result: PASS**\n\nAll criteria met for phase 8.\n\nEvidence hash: 606175358",
+      "language": "markdown"
+    },
+    {
+      "id": "9-cicd-github-actions-workflow",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "GitHub Actions workflow",
+      "body": "# template — not executed: recorded P9 artifact; RapidTool never ran this workflow (B-18).\nname: rapidtool-gate\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n      - run: npm ci\n      - run: npm run typecheck\n      - run: npm test",
+      "language": "yaml"
+    },
+    {
+      "id": "9-cicd-iac-sketch",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "IaC sketch",
+      "body": "# template — not executed: recorded P9 sketch; nothing here was provisioned or validated (B-18).\n# GCP + Firebase hosting\nhosting: firebase preview channels\nworkers: cloud run, scale-to-zero\ngpu: provision only for local-edge promotion jobs"
+    },
+    {
+      "id": "gate-p9-30305407",
+      "phase": 9,
+      "kind": "gate",
+      "title": "DoD gate — P9",
+      "body": "# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723",
+      "language": "markdown"
+    },
+    {
+      "id": "10-edge-local-compute-inference",
+      "phase": 10,
+      "kind": "edge",
+      "title": "Local compute & inference",
+      "body": "Compute model: show, search, close, track, query, validate, generate run as deterministic local steps over text.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model."
+    },
+    {
+      "id": "gate-p10-32184623",
+      "phase": 10,
+      "kind": "gate",
+      "title": "DoD gate — P10",
+      "body": "# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335",
+      "language": "markdown"
+    },
+    {
+      "id": "11-tools-live-data-tool-surfaces",
+      "phase": 11,
+      "kind": "tools",
+      "title": "Live data & tool surfaces",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "research-11-0-1791165380615",
+      "phase": 11,
+      "kind": "research",
+      "title": "Free Rental / Lease Agreement Templates | PDF | Word",
+      "body": "# Free Rental / Lease Agreement Templates | PDF | Word\n\nA lease agreement allows a tenant to legally occupy space in exchange for paying rent to a landlord. Before authorizing a lease , the landlord may request the tenant&#x27;s credit and background information to ensure they can afford the rent amount. All details regarding the tenancy are recorded within the document to confirm that there is an understanding between both parties.\n\nSource: https://freeforms.com/lease/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-11-1-1791165380615",
+      "phase": 11,
+      "kind": "research",
+      "title": "Real Estate Law: Free Lease Templates, Property Contracts & Attorney ...",
+      "body": "# Real Estate Law: Free Lease Templates, Property Contracts & Attorney ...\n\nWhether you&#x27;re a landlord drafting a lease , a tenant reviewing one, or buying or selling property , real estate transactions require precise legal documents. GO LAW gives you free AI-powered tools to draft and review real estate contracts — backed by licensed attorneys when the stakes are high.\n\nSource: https://go.law/real-estate-law/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-11-2-1791165380615",
+      "phase": 11,
+      "kind": "research",
+      "title": "Rental agreement templates - LegalZoom",
+      "body": "# Rental agreement templates - LegalZoom\n\nOur rental templates help landlords and tenants define rights and responsibilities and maintain rental properties. Create your agreement with ease!\n\nSource: https://www.legalzoom.com/templates/agreements/rental",
+      "language": "markdown"
+    },
+    {
+      "id": "research-11-3-1791165380615",
+      "phase": 11,
+      "kind": "research",
+      "title": "Real Estate Forms | Lease & Rental Documents (US) | LawDepot",
+      "body": "# Real Estate Forms | Lease & Rental Documents (US) | LawDepot\n\nGet all the real estate forms you need in one convienent location. Find documents for landlords and individuals to buy, sell, or lease property . Create a Residential Lease , Commercial Lease , Rental Inspection Report, lease notices, and more. Print or download in minutes.\n\nSource: https://www.lawdepot.com/us/real-estate/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-11-4-1791165380615",
+      "phase": 11,
+      "kind": "research",
+      "title": "Rental Lease Agreement: Rental Lease Templates & More | Avail | realtor.com",
+      "body": "# Rental Lease Agreement: Rental Lease Templates & More | Avail | realtor.com\n\nState-specific lease template with all the disclosures and attachments needed to be compliant with local ordinances. Customize for your unit, then sign online.\n\nSource: https://www.realtor.com/landlords/create-lease",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-11-1791165380615",
+      "phase": 11,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "During the P11 Real-Time Web & Tool Augmentation phase, Golden Crust Bakery's marketing site was extended with live, tool-driven capability, letting a hungry visitor act on what they see. Rather than hand-rolling document logic, the build leaned on established lease and rental-agreement providers surfaced in the findings—LawDepot's consolidated real estate forms, LegalZoom's guided rental templates, Avail/realtor.com's state-specific leases with local disclosures and online signing, and free PDF/Word lease templates with credit and background checks—to inform a lightweight, browser-side contract preview tool. That tool lets an owner or prospective tenant generate a compliant, state-aware draft directly from the public page, mirroring GO LAW's AI-powered document approach while keeping the core read-mostly content fast, phone-first, and functional without JavaScript. The result is a neighbourhood bakery site that still gets a visitor to walk in or order, but now also closes the loop on the real-time paperwork that follows.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p11-16636256",
+      "phase": 11,
+      "kind": "gate",
+      "title": "DoD gate — P11",
+      "body": "# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674",
+      "language": "markdown"
+    },
+    {
+      "id": "12-docs-architecture-decision-records",
+      "phase": 12,
+      "kind": "docs",
+      "title": "Architecture Decision Records",
+      "body": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around text, table, page, image, link, home, user, visitor, item, card, account, database, site, work-order derived from the brief (P0 lattice).\n\n# ADR-002 show pipeline\n\nStatus: accepted\nDecision: The product runs a sequential show → search → close → track → query → validate → generate pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
+      "language": "markdown"
+    },
+    {
+      "id": "12-docs-openapi-3-1",
+      "phase": 12,
+      "kind": "docs",
+      "title": "OpenAPI 3.1",
+      "body": "openapi: 3.1.0\ninfo:\n  title: # Golden Crust Bakery API\n  version: \"1.0.0\"\npaths:\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/search:\n    get:\n      summary: search\n      responses:\n        \"200\":\n          description: ok\n  /v1/close:\n    post:\n      summary: close\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n  /v1/query:\n    post:\n      summary: query\n      responses:\n        \"200\":\n          description: ok\n  /v1/validate:\n    post:\n      summary: validate\n      responses:\n        \"200\":\n          description: ok",
+      "language": "yaml"
+    },
+    {
+      "id": "12-docs-database-schema-sql-ddl",
+      "phase": 12,
+      "kind": "docs",
+      "title": "Database schema (SQL DDL)",
+      "body": "-- Database schema derived from the A6 data contract (project.contracts.entities).\n-- Declarative spec only: the emitted scaffold provisions and runs no database (B-18).\n-- Dialect: PostgreSQL.\n\nCREATE TABLE IF NOT EXISTS \"Text\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Table\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Page\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Image\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Link\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Home\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n",
+      "language": "sql"
+    },
+    {
+      "id": "gate-p12-35300554",
+      "phase": 12,
+      "kind": "gate",
+      "title": "DoD gate — P12",
+      "body": "# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408",
+      "language": "markdown"
+    },
+    {
+      "id": "packet-12",
+      "phase": 12,
+      "kind": "packet",
+      "title": "Agent packet (A4)",
+      "body": "# RapidTool Agent Packet v3 — # Golden Crust Bakery\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T01:56:20.658Z\nproject_id: 729ce422-bcaa-4b79-9ec6-4840b61a458e\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T01:56:20.658Z\",\n  \"project_id\": \"729ce422-bcaa-4b79-9ec6-4840b61a458e\",\n  \"name\": \"# Golden Crust Bakery\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"700730979\",\n  \"input_hash\": \"4052902968\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791165296427,\n      \"decided_at\": 1791165296450\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791165296469,\n      \"decided_at\": 1791165296487\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P8\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P8 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791165377187,\n      \"decided_at\": 1791165377228\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P9\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P9 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791165377262,\n      \"decided_at\": 1791165377306\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 13,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 21,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 49011,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Golden Crust Bakery — Marketing Website\n\n## What this is\nA marketing website for a neighbourhood bakery called Golden Crust. The site is\npublic, read-mostly, and exists to get a hungry visitor to walk in or place an\norder. It must be fast on a phone, work without JavaScript for the core content,\nand be trivially editable by the owner.\n\n## Audience\n- Local residents deciding where to buy bread and pastries today.\n- People ordering a celebration cake or a catering box ahead of time.\n- Tourists searching \"bakery near me\" on a phone.\n\n## Required pages / sections\n1. **Home** — hero with today's fresh-bake highlights, opening-hours badge that\n   shows Open/Closed computed from the current time and the hours table, and a\n   short story block.\n2. **Menu** — grouped products (Breads, Pastries, Cakes, Drinks). Each item has a\n   name, short description, price, and allergen tags (gluten, dairy, nuts, egg,\n   vegan). Filter by dietary tag and by category, plus a text search box.\n3. **Hours & Location** — a weekly table of opening hours, a holiday-closures\n   list, an embedded static map image, and a \"Get directions\" link.\n4. **Order form** — a celebration-cake / catering enquiry form: name, phone,\n   email, pickup date, product, quantity, and free-text notes. Must validate the\n   pickup date is at least 48 hours in the future, require either phone or email,\n   and show a clear confirmation with an order reference.\n5. **Contact** — phone, email, address, social links, and a short FAQ.\n\n## Functional requirements\n- Opening-hours logic must be a single source of truth reused by the Home badge\n  and the Hours page (compute Open/Closed from the same table).\n- The menu filter must combine category, dietary tag, and free-text query with\n  AND semantics, and show a friendly empty state when nothing matches.\n- The order form must reject a missing contact method, a pickup date under 48\n  hours away, and a quantity below 1; on success it generates a human-readable\n  order reference (e.g. GC-2026-0007) and echoes the full order back.\n- Prices are shown in GBP with two decimals; totals for quantity > 1 are\n  computed.\n- All form validation errors are field-level and accessible (associated with the\n  input, announced to screen readers).\n\n## Non-functional requirements\n- Responsive from 320px to 1440px; mobile-first.\n- Core content (menu, hours, contact) readable with JS disabled.\n- Semantic HTML landmarks, one h1 per page, alt text on every image.\n- Colour contrast at least WCAG AA.\n- No third-party trackers.\n\n## Explicitly out of scope\n- Online payment / card processing.\n- User accounts or login.\n- A real database or CMS backend — content is static data in the app.\n- Multi-language support.\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: show, search, close, track, query, validate, generate\nEntities: text, table, page, image, link, home, user, visitor, item, card, account, database, site, work-order\nConstraints: local-first\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 9 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for show, search, close before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: local-first.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/search.ts — Implement job “search” against the contract\n- [implementer] src/jobs/close.ts — Implement job “close” against the contract\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/jobs/query.ts — Implement job “query” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Text: id:ulid, status:enum, updatedAt:datetime\n- Table: id:ulid, status:enum, updatedAt:datetime\n- Page: id:ulid, status:enum, updatedAt:datetime\n- Image: id:ulid, status:enum, updatedAt:datetime\n- Link: id:ulid, status:enum, updatedAt:datetime\n- Home: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/show (show)\n- GET /v1/search (search)\n- POST /v1/close (close)\n- GET /v1/track (track)\n- POST /v1/query (query)\n- POST /v1/validate (validate)\n\n## Oracle (A7)\n- job.show.happy: Authorized operator submits “show” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- job.search.happy: Authorized operator submits “search” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- job.close.happy: Authorized operator submits “close” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- job.track.happy: Authorized operator submits “track” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- job.query.happy: Authorized operator submits “query” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- constraint.local-first: Request violates local-first ⇒ 403 or 422; no side effect; diagnostic JSON\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records, OpenAPI 3.1, and a PostgreSQL schema (Database schema (SQL DDL)) derived from the A6 data contract. Frontend/backend parity is a roadmap declaration: the contract binds no screen/action to an endpoint to check, so a parity report would have to be invented (B-18).\nStatus: complete · model: deepseek-flash\nExecution: Engine-template runner (bounded, engine-authored code only)\nGenerated artifact: 8 tree file(s) recorded (project.generatedTree) — the bytes to continue from: src/generated.ts, src/generated/format-gbp.ts, src/generated/render-home.ts, src/jobs/close.ts, src/jobs/query.ts, src/jobs/search.ts, src/jobs/show.ts, src/jobs/track.ts.\nPhase coverage: 13 of 13 phases executed / 21 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 self-test (machine-verified) (last run): pass — tree-run green: compile 15/15 file(s) · 1 spec file(s) pass · 32 assertion(s) · specs [tests/oracle.spec.ts] · entry ui-shell skip · entry-skipped · evidence 2714288931\nVerdict: proceed-with-guards\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "language": "markdown"
+    }
+  ],
+  "memory": [
+    {
+      "id": "12-semantic-0.97",
+      "kind": "semantic",
+      "phase": 12,
+      "text": "ADRs capture the product's entity model and pipeline decisions.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "11-episodic-0.87",
+      "kind": "episodic",
+      "phase": 11,
+      "text": "Live data surfaces declared from domain vocabulary; no runtime binding.",
+      "score": 0.87,
+      "source": "engine"
+    },
+    {
+      "id": "10-procedural-0.9",
+      "kind": "procedural",
+      "phase": 10,
+      "text": "Product logic runs locally and deterministically; no remote model is claimed.",
+      "score": 0.9,
+      "source": "engine"
+    },
+    {
+      "id": "9-procedural-0.96",
+      "kind": "procedural",
+      "phase": 9,
+      "text": "PRs cannot merge without typecheck + tests.",
+      "score": 0.96,
+      "source": "engine"
+    },
+    {
+      "id": "8-procedural-0.92",
+      "kind": "procedural",
+      "phase": 8,
+      "text": "Client UI contract written — screens bound to briefed entities; flows listed as actions.",
+      "score": 0.92,
+      "source": "engine"
+    },
+    {
+      "id": "7-semantic-0.95",
+      "kind": "semantic",
+      "phase": 7,
+      "text": "Generators ship UI fast; RapidTool ships a governed lifecycle.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "5-procedural-0.99",
+      "kind": "procedural",
+      "phase": 5,
+      "text": "HITL reject requires a written reason.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "4-procedural-0.98",
+      "kind": "procedural",
+      "phase": 4,
+      "text": "Product data is protected by least-privilege role access.",
+      "score": 0.98,
+      "source": "engine"
+    },
+    {
+      "id": "3-procedural-0.93",
+      "kind": "procedural",
+      "phase": 3,
+      "text": "Integration surface for real estate declared from domain vocabulary.",
+      "score": 0.93,
+      "source": "engine"
+    },
+    {
+      "id": "2-semantic-0.94",
+      "kind": "semantic",
+      "phase": 2,
+      "text": "Data model written for # Golden Crust Bakery: text, table, page, image, link, home, user, visitor, item, card, account, database, site, work-order.",
+      "score": 0.94,
+      "source": "engine"
+    },
+    {
+      "id": "1-procedural-0.99",
+      "kind": "procedural",
+      "phase": 1,
+      "text": "# Golden Crust Bakery executes as one sequential real estate pipeline.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "0-episodic-0.91",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Ingested brief for # Golden Crust Bakery in real-estate.",
+      "score": 0.91,
+      "source": "engine"
+    },
+    {
+      "id": "0-semantic-0.97",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Scorecard must exist before any code node fires.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain real-estate; jobs show, search, close, track.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: local-first.",
+      "score": 0.7,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-tree-0.9",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Keyed P6 chunked synthesis: 8 file(s) in 7 chunk(s) (deterministic per-file validation; machine tree-run lands in the tree-run lane)",
+      "score": 0.9,
+      "source": "engine"
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1791165283029,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "real-estate"
+    },
+    {
+      "ts": 1791165292058,
+      "phase": 0,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P0 Deep Research & Feasibility"
+    },
+    {
+      "ts": 1791165292059,
+      "phase": 0,
+      "level": "info",
+      "event": "scorecard.ready",
+      "detail": "overall=7.2 verdict=proceed-with-guards"
+    },
+    {
+      "ts": 1791165292061,
+      "phase": 0,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165296137,
+      "phase": 0,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32696329"
+    },
+    {
+      "ts": 1791165296153,
+      "phase": 1,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P1 Core Orchestration & State Graph"
+    },
+    {
+      "ts": 1791165296154,
+      "phase": 1,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165296170,
+      "phase": 1,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 10507139"
+    },
+    {
+      "ts": 1791165296184,
+      "phase": 2,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P2 Memory & Context Consolidation"
+    },
+    {
+      "ts": 1791165296184,
+      "phase": 2,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165296255,
+      "phase": 2,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 18455377"
+    },
+    {
+      "ts": 1791165296380,
+      "phase": 3,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P3 Tool Integration & Interoperability"
+    },
+    {
+      "ts": 1791165296380,
+      "phase": 3,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165296395,
+      "phase": 3,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16382928"
+    },
+    {
+      "ts": 1791165296427,
+      "phase": 4,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P4 Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791165296427,
+      "phase": 4,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165296450,
+      "phase": 4,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791165296456,
+      "phase": 4,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35271886"
+    },
+    {
+      "ts": 1791165296469,
+      "phase": 5,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P5 Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791165296469,
+      "phase": 5,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165296487,
+      "phase": 5,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791165296495,
+      "phase": 5,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 29514528"
+    },
+    {
+      "ts": 1791165296517,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791165296519,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791165296519,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165296534,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-brief-fit]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in t"
+    },
+    {
+      "ts": 1791165296535,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.jobs.shortfall",
+      "detail": "declared 7 lattice job(s) vs materialised 5 spec-graph job node(s) — 2 unmaterialised; missing: validate, generate"
+    },
+    {
+      "ts": 1791165309011,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: show, search, close, track, query (+10 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791165326898,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/7 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791165339501,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/7 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791165345012,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/7 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791165353120,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 4/7 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791165357251,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/7 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791165362882,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 6/7 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791165367619,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 7/7 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791165369746,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis",
+      "detail": "Chunked synthesis: 8 file(s) in 7 chunk(s) · deterministic per-file validation · assembled entry 252 chars · machine tree-run is the tree-run lane's step"
+    },
+    {
+      "ts": 1791165369802,
+      "phase": 6,
+      "level": "info",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch PASS · tree (8 files)"
+    },
+    {
+      "ts": 1791165374114,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.tested",
+      "detail": "tested-equivalent minted after green tree-run · compile 15/15 file(s) · 1 spec file(s) pass · 32 assertion(s) · specs [tests/oracle.spec.ts] · entry ui-shell skip · entry-skipped · fnv1a 27142889"
+    },
+    {
+      "ts": 1791165374200,
+      "phase": 6,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 30472799"
+    },
+    {
+      "ts": 1791165374295,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.tested.unchanged",
+      "detail": "tested stamp already describes this tree-run · fnv1a 27142889 — kept (no rewrite)"
+    },
+    {
+      "ts": 1791165374296,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.journey.converged",
+      "detail": "tree-run ok after 1/3 cycle(s) + P6 gate green (30472799)"
+    },
+    {
+      "ts": 1791165374711,
+      "phase": 6,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 30472799"
+    },
+    {
+      "ts": 1791165374831,
+      "phase": 7,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P7 Domain & Market Research"
+    },
+    {
+      "ts": 1791165374832,
+      "phase": 7,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165377158,
+      "phase": 7,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 11190284"
+    },
+    {
+      "ts": 1791165377183,
+      "phase": 8,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P8 Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1791165377187,
+      "phase": 8,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165377228,
+      "phase": 8,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1791165377236,
+      "phase": 8,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 60617535"
+    },
+    {
+      "ts": 1791165377262,
+      "phase": 9,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P9 CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1791165377262,
+      "phase": 9,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165377306,
+      "phase": 9,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1791165377316,
+      "phase": 9,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 30305407"
+    },
+    {
+      "ts": 1791165377343,
+      "phase": 10,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P10 Local Agent & Edge Inference"
+    },
+    {
+      "ts": 1791165377343,
+      "phase": 10,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165377374,
+      "phase": 10,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32184623"
+    },
+    {
+      "ts": 1791165377405,
+      "phase": 11,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P11 Real-Time Web & Tool Augmentation"
+    },
+    {
+      "ts": 1791165377405,
+      "phase": 11,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165380615,
+      "phase": 11,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16636256"
+    },
+    {
+      "ts": 1791165380635,
+      "phase": 12,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P12 Documentation & Technical Specs"
+    },
+    {
+      "ts": 1791165380638,
+      "phase": 12,
+      "level": "info",
+      "event": "delivery.complete",
+      "detail": "All 13 phases sealed."
+    },
+    {
+      "ts": 1791165380636,
+      "phase": 12,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791165380658,
+      "phase": 12,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35300554"
+    }
+  ],
+  "hitl": null,
+  "decisions": [
+    {
+      "id": "hitl-4-1791165296450",
+      "phase": 4,
+      "title": "Approve isolation policy",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791165296427,
+      "decidedAt": 1791165296450,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P4",
+        "reason": "autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-5-1791165296487",
+      "phase": 5,
+      "title": "Approve validation contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791165296469,
+      "decidedAt": 1791165296487,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P5",
+        "reason": "autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-8-1791165377228",
+      "phase": 8,
+      "title": "Approve interface contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791165377187,
+      "decidedAt": 1791165377228,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P8",
+        "reason": "autopilot-seat — hitl.approve on gate:P8 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-9-1791165377306",
+      "phase": 9,
+      "title": "Approve production routing",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791165377262,
+      "decidedAt": 1791165377306,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P9",
+        "reason": "autopilot-seat — hitl.approve on gate:P9 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    }
+  ],
+  "modelRoute": "deepseek-flash",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": false
+  },
+  "openapi": "openapi: 3.1.0\ninfo:\n  title: # Golden Crust Bakery API\n  version: \"1.0.0\"\npaths:\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/search:\n    get:\n      summary: search\n      responses:\n        \"200\":\n          description: ok\n  /v1/close:\n    post:\n      summary: close\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n  /v1/query:\n    post:\n      summary: query\n      responses:\n        \"200\":\n          description: ok\n  /v1/validate:\n    post:\n      summary: validate\n      responses:\n        \"200\":\n          description: ok",
+  "adr": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around text, table, page, image, link, home, user, visitor, item, card, account, database, site, work-order derived from the brief (P0 lattice).\n\n# ADR-002 show pipeline\n\nStatus: accepted\nDecision: The product runs a sequential show → search → close → track → query → validate → generate pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
+  "lattice": {
+    "domain": "real-estate",
+    "jobs": [
+      "show",
+      "search",
+      "close",
+      "track",
+      "query",
+      "validate",
+      "generate"
+    ],
+    "entities": [
+      "text",
+      "table",
+      "page",
+      "image",
+      "link",
+      "home",
+      "user",
+      "visitor",
+      "item",
+      "card",
+      "account",
+      "database",
+      "site",
+      "work-order"
+    ],
+    "constraints": [
+      "local-first"
+    ],
+    "nodes": [
+      {
+        "kind": "object",
+        "label": "text",
+        "weight": 1
+      },
+      {
+        "kind": "job",
+        "label": "show",
+        "weight": 0.9500000000000001
+      },
+      {
+        "kind": "object",
+        "label": "table",
+        "weight": 0.9500000000000001
+      },
+      {
+        "kind": "object",
+        "label": "page",
+        "weight": 0.9500000000000001
+      },
+      {
+        "kind": "job",
+        "label": "search",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "close",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "image",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "link",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "home",
+        "weight": 0.75
+      },
+      {
+        "kind": "actor",
+        "label": "user",
+        "weight": 0.55
+      },
+      {
+        "kind": "actor",
+        "label": "visitor",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "track",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "query",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "validate",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "generate",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "item",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "card",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "account",
+        "weight": 0.55
+      }
+    ],
+    "complexity": 10,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 1,
+    "apiDelta": 1,
+    "tightness": 9,
+    "extraHitl": [],
+    "notes": [
+      "Standard isolate policy.",
+      "Default API budget.",
+      "Stock HITL set (P4, P5, P8, P9)."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1791165380659,
+      "summary": "18 nodes · complexity 10.0"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1791165380659,
+      "summary": "ranked 18 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1791165380659,
+      "summary": "tightness 9 · sec+1"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1791165380659,
+      "summary": "compiled P12 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1791165380659,
+      "summary": "10 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1791165380659,
+      "summary": "6 entities · 6 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1791165380659,
+      "summary": "7 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1791165380659,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — # Golden Crust Bakery\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T01:56:20.658Z\nproject_id: 729ce422-bcaa-4b79-9ec6-4840b61a458e\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T01:56:20.658Z\",\n  \"project_id\": \"729ce422-bcaa-4b79-9ec6-4840b61a458e\",\n  \"name\": \"# Golden Crust Bakery\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"700730979\",\n  \"input_hash\": \"4052902968\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791165296427,\n      \"decided_at\": 1791165296450\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791165296469,\n      \"decided_at\": 1791165296487\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P8\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P8 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791165377187,\n      \"decided_at\": 1791165377228\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P9\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P9 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791165377262,\n      \"decided_at\": 1791165377306\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 13,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 21,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 49011,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Golden Crust Bakery — Marketing Website\n\n## What this is\nA marketing website for a neighbourhood bakery called Golden Crust. The site is\npublic, read-mostly, and exists to get a hungry visitor to walk in or place an\norder. It must be fast on a phone, work without JavaScript for the core content,\nand be trivially editable by the owner.\n\n## Audience\n- Local residents deciding where to buy bread and pastries today.\n- People ordering a celebration cake or a catering box ahead of time.\n- Tourists searching \"bakery near me\" on a phone.\n\n## Required pages / sections\n1. **Home** — hero with today's fresh-bake highlights, opening-hours badge that\n   shows Open/Closed computed from the current time and the hours table, and a\n   short story block.\n2. **Menu** — grouped products (Breads, Pastries, Cakes, Drinks). Each item has a\n   name, short description, price, and allergen tags (gluten, dairy, nuts, egg,\n   vegan). Filter by dietary tag and by category, plus a text search box.\n3. **Hours & Location** — a weekly table of opening hours, a holiday-closures\n   list, an embedded static map image, and a \"Get directions\" link.\n4. **Order form** — a celebration-cake / catering enquiry form: name, phone,\n   email, pickup date, product, quantity, and free-text notes. Must validate the\n   pickup date is at least 48 hours in the future, require either phone or email,\n   and show a clear confirmation with an order reference.\n5. **Contact** — phone, email, address, social links, and a short FAQ.\n\n## Functional requirements\n- Opening-hours logic must be a single source of truth reused by the Home badge\n  and the Hours page (compute Open/Closed from the same table).\n- The menu filter must combine category, dietary tag, and free-text query with\n  AND semantics, and show a friendly empty state when nothing matches.\n- The order form must reject a missing contact method, a pickup date under 48\n  hours away, and a quantity below 1; on success it generates a human-readable\n  order reference (e.g. GC-2026-0007) and echoes the full order back.\n- Prices are shown in GBP with two decimals; totals for quantity > 1 are\n  computed.\n- All form validation errors are field-level and accessible (associated with the\n  input, announced to screen readers).\n\n## Non-functional requirements\n- Responsive from 320px to 1440px; mobile-first.\n- Core content (menu, hours, contact) readable with JS disabled.\n- Semantic HTML landmarks, one h1 per page, alt text on every image.\n- Colour contrast at least WCAG AA.\n- No third-party trackers.\n\n## Explicitly out of scope\n- Online payment / card processing.\n- User accounts or login.\n- A real database or CMS backend — content is static data in the app.\n- Multi-language support.\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: show, search, close, track, query, validate, generate\nEntities: text, table, page, image, link, home, user, visitor, item, card, account, database, site, work-order\nConstraints: local-first\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 9 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for show, search, close before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: local-first.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/search.ts — Implement job “search” against the contract\n- [implementer] src/jobs/close.ts — Implement job “close” against the contract\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/jobs/query.ts — Implement job “query” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Text: id:ulid, status:enum, updatedAt:datetime\n- Table: id:ulid, status:enum, updatedAt:datetime\n- Page: id:ulid, status:enum, updatedAt:datetime\n- Image: id:ulid, status:enum, updatedAt:datetime\n- Link: id:ulid, status:enum, updatedAt:datetime\n- Home: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/show (show)\n- GET /v1/search (search)\n- POST /v1/close (close)\n- GET /v1/track (track)\n- POST /v1/query (query)\n- POST /v1/validate (validate)\n\n## Oracle (A7)\n- job.show.happy: Authorized operator submits “show” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- job.search.happy: Authorized operator submits “search” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- job.close.happy: Authorized operator submits “close” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- job.track.happy: Authorized operator submits “track” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- job.query.happy: Authorized operator submits “query” with a valid text ⇒ 200 + persisted entity + checkpoint written\n- constraint.local-first: Request violates local-first ⇒ 403 or 422; no side effect; diagnostic JSON\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records, OpenAPI 3.1, and a PostgreSQL schema (Database schema (SQL DDL)) derived from the A6 data contract. Frontend/backend parity is a roadmap declaration: the contract binds no screen/action to an endpoint to check, so a parity report would have to be invented (B-18).\nStatus: complete · model: deepseek-flash\nExecution: Engine-template runner (bounded, engine-authored code only)\nGenerated artifact: 8 tree file(s) recorded (project.generatedTree) — the bytes to continue from: src/generated.ts, src/generated/format-gbp.ts, src/generated/render-home.ts, src/jobs/close.ts, src/jobs/query.ts, src/jobs/search.ts, src/jobs/show.ts, src/jobs/track.ts.\nPhase coverage: 13 of 13 phases executed / 21 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 self-test (machine-verified) (last run): pass — tree-run green: compile 15/15 file(s) · 1 spec file(s) pass · 32 assertion(s) · specs [tests/oracle.spec.ts] · entry ui-shell skip · entry-skipped · evidence 2714288931\nVerdict: proceed-with-guards\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/real_estate.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/show.ts",
+        "purpose": "Implement job “show” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/search.ts",
+        "purpose": "Implement job “search” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/close.ts",
+        "purpose": "Implement job “close” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-3",
+        "file": "src/jobs/track.ts",
+        "purpose": "Implement job “track” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-4",
+        "file": "src/jobs/query.ts",
+        "purpose": "Implement job “query” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2",
+          "job-3",
+          "job-4"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "job-3",
+      "job-4",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Text",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Table",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Page",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Image",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Link",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Home",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/show",
+        "job": "show"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/search",
+        "job": "search"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/close",
+        "job": "close"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/track",
+        "job": "track"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/query",
+        "job": "query"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/validate",
+        "job": "validate"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.show.happy",
+      "given": "Authorized operator submits “show” with a valid text",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "show"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.search.happy",
+      "given": "Authorized operator submits “search” with a valid text",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "search"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.close.happy",
+      "given": "Authorized operator submits “close” with a valid text",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "close"
+    },
+    {
+      "id": "orc-4",
+      "name": "job.track.happy",
+      "given": "Authorized operator submits “track” with a valid text",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "track"
+    },
+    {
+      "id": "orc-5",
+      "name": "job.query.happy",
+      "given": "Authorized operator submits “query” with a valid text",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "query"
+    },
+    {
+      "id": "orc-c-local-first",
+      "name": "constraint.local-first",
+      "given": "Request violates local-first",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "show"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for show, search, close before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": false
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Documentation & Technical Specs.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": false
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": true
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: local-first.",
+      "active": false
+    }
+  ],
+  "notes": "",
+  "generatedSource": "export * from \"./generated/render-home.ts\";\nexport * from \"./generated/format-gbp.ts\";\nexport * from \"./jobs/query.ts\";\nexport * from \"./jobs/track.ts\";\nexport * from \"./jobs/close.ts\";\nexport * from \"./jobs/search.ts\";\nexport * from \"./jobs/show.ts\";\n",
+  "lastTest": {
+    "ok": true,
+    "detail": "tree-run green: compile 15/15 file(s) · 1 spec file(s) pass · 32 assertion(s) · specs [tests/oracle.spec.ts] · entry ui-shell skip · entry-skipped",
+    "label": "tested",
+    "evidenceHash": "2714288931"
+  },
+  "enforceDod": true,
+  "wildMode": false,
+  "wildRun": null,
+  "chatLog": [],
+  "research": [
+    {
+      "query": "property rental tenant lease real estate hour order must phone text form content cake golden crust bakery architecture feasibility 2026",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "Free Rental / Lease Agreement Templates | PDF | Word",
+          "url": "https://freeforms.com/lease/",
+          "content": "A lease agreement allows a tenant to legally occupy space in exchange for paying rent to a landlord. Before authorizing a lease , the landlord may request the tenant&#x27;s credit and background information to ensure they can afford the rent amount. All details regarding the tenancy are recorded within the document to confirm that there is an understanding between both parties."
+        },
+        {
+          "title": "Real Estate Documents - LawDistrict",
+          "url": "https://www.lawdistrict.com/real-estate-documents/",
+          "content": "Take advantage of our PDF templates to create free Legal Real Estate Forms . Make the renting, owning, or selling real estate process simple and quick."
+        },
+        {
+          "title": "Free Landlord Forms for Rentals: Template Library (30+)",
+          "url": "https://ipropertymanagement.com/templates",
+          "content": "Check out our comprehensive list of rental forms and templates for both landlord and tenant use. Includes lease agreements and more."
+        },
+        {
+          "title": "Free Rental / Lease Agreement Templates (15) - PDF - eForms",
+          "url": "https://eforms.com/rental/",
+          "content": "A lease agreement is a legal document between a landlord and a tenant who rents property to a tenant , for a fixed or periodic tenancy, in exchange for payment.[1] Both parties must fulfill their responsibilities under the lease until the end of the rental period."
+        },
+        {
+          "title": "Free Residential Lease Agreement Template (2026 Legal Sample)",
+          "url": "https://www.pandadoc.com/residential-lease-agreement-template/",
+          "content": "Whether you&#x27;re a realtor or homeowner use this free residential lease agreement template to legally lease out the property ."
+        }
+      ]
+    },
+    {
+      "query": "property rental tenant lease real estate hour order must phone text form content cake golden crust bakery competitors market landscape",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "iPropertyManagement: Free Resources for Landlords & Tenants",
+          "url": "https://ipropertymanagement.com/",
+          "content": "We provide landlords, tenants , and real estate investors with clear, reliable resources on property management, rental housing, and real estate law. Our goal is to be the go-to source for accurate, up-to-date information and practical tools that support smarter rental decisions."
+        },
+        {
+          "title": "Free Rental / Lease Agreement Templates | PDF | Word",
+          "url": "https://freeforms.com/lease/",
+          "content": "A lease agreement allows a tenant to legally occupy space in exchange for paying rent to a landlord. Before authorizing a lease , the landlord may request the tenant&#x27;s credit and background information to ensure they can afford the rent amount. All details regarding the tenancy are recorded within the document to confirm that there is an understanding between both parties."
+        },
+        {
+          "title": "Free Landlord Forms for Rentals: Template Library (30+)",
+          "url": "https://ipropertymanagement.com/templates",
+          "content": "Check out our comprehensive list of rental forms and templates for both landlord and tenant use. Includes lease agreements and more."
+        },
+        {
+          "title": "Free Rental / Lease Agreement Templates (15) - PDF - eForms",
+          "url": "https://eforms.com/rental/",
+          "content": "A lease agreement is a legal document between a landlord and a tenant who rents property to a tenant , for a fixed or periodic tenancy, in exchange for payment.[1] Both parties must fulfill their responsibilities under the lease until the end of the rental period."
+        },
+        {
+          "title": "80+ Rental and Lease Agreement PDF Templates | Jotform",
+          "url": "https://www.jotform.com/pdf-templates/lease-agreement",
+          "content": "Rental agreement templates are pre-designed documents used by landlords, property managers, and tenants to outline lease terms, responsibilities, payment details, and property rules in a clear, customizable, and structured format."
+        }
+      ]
+    },
+    {
+      "query": "property rental tenant lease real estate hour order must phone text form content cake golden crust bakery live tools and API augmentation",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "Free Rental / Lease Agreement Templates | PDF | Word",
+          "url": "https://freeforms.com/lease/",
+          "content": "A lease agreement allows a tenant to legally occupy space in exchange for paying rent to a landlord. Before authorizing a lease , the landlord may request the tenant&#x27;s credit and background information to ensure they can afford the rent amount. All details regarding the tenancy are recorded within the document to confirm that there is an understanding between both parties."
+        },
+        {
+          "title": "Real Estate Law: Free Lease Templates, Property Contracts & Attorney ...",
+          "url": "https://go.law/real-estate-law/",
+          "content": "Whether you&#x27;re a landlord drafting a lease , a tenant reviewing one, or buying or selling property , real estate transactions require precise legal documents. GO LAW gives you free AI-powered tools to draft and review real estate contracts — backed by licensed attorneys when the stakes are high."
+        },
+        {
+          "title": "Rental agreement templates - LegalZoom",
+          "url": "https://www.legalzoom.com/templates/agreements/rental",
+          "content": "Our rental templates help landlords and tenants define rights and responsibilities and maintain rental properties. Create your agreement with ease!"
+        },
+        {
+          "title": "Real Estate Forms | Lease & Rental Documents (US) | LawDepot",
+          "url": "https://www.lawdepot.com/us/real-estate/",
+          "content": "Get all the real estate forms you need in one convienent location. Find documents for landlords and individuals to buy, sell, or lease property . Create a Residential Lease , Commercial Lease , Rental Inspection Report, lease notices, and more. Print or download in minutes."
+        },
+        {
+          "title": "Rental Lease Agreement: Rental Lease Templates & More | Avail | realtor.com",
+          "url": "https://www.realtor.com/landlords/create-lease",
+          "content": "State-specific lease template with all the disclosures and attachments needed to be compliant with local ordinances. Customize for your unit, then sign online."
+        }
+      ]
+    }
+  ],
+  "implementationSpec": {
+    "requirements": [
+      "The site renders five public pages (Home, Menu, Hours & Location, Order form, Contact) as static content with one h1 per page and semantic HTML landmarks (header, nav, main, footer) on every page.",
+      "Home shows a hero with today's fresh-bake highlights, a short story block, and an opening-hours badge whose Open/Closed text is computed at render time from the shared weekly hours table and the current time.",
+      "A single exported hours source of truth (the weekly hours table plus holiday closures) is imported by both the Home badge and the Hours page so Open/Closed cannot diverge.",
+      "Menu lists grouped products in the order Breads, Pastries, Cakes, Drinks, where each item has a name, short description, GBP price, category, and zero or more allergen tags drawn only from gluten, dairy, nuts, egg, vegan.",
+      "Menu filtering applies category AND dietary tag AND free-text query with AND semantics over name and description, and renders a friendly empty state when no item matches.",
+      "All prices display in GBP with exactly two decimals, and any item with quantity > 1 displays a line total computed as unit price times quantity.",
+      "The order form collects name, phone, email, pickup date, product, quantity, and free-text notes, and on success generates a human-readable order reference of the form GC-YYYY-NNNN and displays a confirmation echoing every submitted field plus the reference.",
+      "Order form validation is field-level and accessible: each error message is programmatically associated with its input and announced to screen readers, and the form rejects a missing contact method (neither phone nor email supplied), a pickup date under 48 hours in the future, and a quantity below 1.",
+      "Hours & Location renders a weekly opening-hours table, a holiday-closures list, a static embedded map image with alt text, and a Get directions link.",
+      "Contact renders phone, email, address, social links, and a short FAQ.",
+      "Core content (menu, hours, contact) is fully readable with JavaScript disabled, and the layout is responsive and mobile-first from 320px to 1440px.",
+      "Every image has alt text, colour contrast meets WCAG AA, no third-party trackers are loaded, and no payment, login, database/CMS, or multi-language feature exists."
+    ],
+    "edgeCases": [
+      "Current instant falls exactly on an opening or closing boundary minute and Open/Closed must resolve deterministically for that minute.",
+      "Current time falls after midnight but a holiday closure or overnight span applies, so Open/Closed reflects the correct closed state.",
+      "Pickup date is exactly 48 hours ahead (valid), one minute under 48 hours (rejected), and in the past (rejected).",
+      "Quantity is 0, negative, fractional, or missing, and must be rejected while quantity 1 is accepted.",
+      "Both phone and email are blank, only phone is blank, only email is blank, and both provided, with contact-validity rules applied to each combination.",
+      "Menu search query is empty, whitespace-only, or matches nothing, and the empty state renders instead of a broken list.",
+      "Category, dietary tag, or query individually matches nothing while the other filters are set, so the AND combination yields the empty state.",
+      "Two filters select a single item, and combining a category with a dietary tag that item lacks yields no results.",
+      "A product price total for quantity > 1 is computed and formatted to two decimals without floating-point drift (e.g. 0.10 times 3 renders as 0.30).",
+      "Order references remain unique across two submissions in the same day and across a day with no submissions, following the GC-YYYY-NNNN pattern for the current year.",
+      "Home page renders when the hours table lookup returns undefined for a day (data gap) without throwing.",
+      "Holiday-closures list is empty, and the Hours page renders gracefully with no closure entries.",
+      "Submitted form data containing special characters, very long notes, or HTML-like text is echoed back safely without breaking the confirmation.",
+      "JavaScript is disabled and the menu filter, hours table, and contact content still render as static readable HTML.",
+      "Viewport width is 320px and 1440px and no horizontal scroll or content clipping occurs."
+    ],
+    "errorHandling": [
+      "Invalid or missing required order-form fields return field-level messages bound to their inputs by id/aria-describedby rather than a single generic banner.",
+      "Pickup date under 48 hours returns a date-specific field-level error stating the minimum allowed date.",
+      "Quantity below 1 or non-numeric returns a quantity-specific field-level error.",
+      "Missing contact method returns an error on the phone and/or email fields explaining that at least one contact method is required.",
+      "A failed or blocked form submission preserves all entered values and displays the field errors without clearing the form or generating an order reference.",
+      "A missing hours entry for a day is treated as closed rather than throwing or rendering Open.",
+      "An unrecognized allergen tag value or category value on a menu item is ignored for filtering rather than crashing the list.",
+      "A price or quantity that cannot produce a valid total is omitted or shown as unavailable rather than rendering NaN.",
+      "Partial writes are not possible because no backend exists; the order reference and echo are produced purely client-side and must never claim persistence to a server."
+    ],
+    "typeSignatures": [
+      "renderHome(badge: OpenStatus, highlights: MenuItem[], story: string): string",
+      "computeOpenStatus(now: Date, hours: WeeklyHours, closures: HolidayClosure[]): OpenStatus",
+      "getWeeklyHours(): WeeklyHours",
+      "getHolidayClosures(): HolidayClosure[]",
+      "renderHoursPage(hours: WeeklyHours, closures: HolidayClosure[], mapImage: { src: string; alt: string }, directionsUrl: string): string",
+      "getMenuItems(): MenuItem[]",
+      "filterMenu(items: MenuItem[], filters: MenuFilters): MenuItem[]",
+      "renderMenu(items: MenuItem[], filters: MenuFilters): string",
+      "formatGbp(amount: number): string",
+      "computeLineTotal(unitPrice: number, quantity: number): number",
+      "validateOrder(input: OrderInput): OrderValidationResult",
+      "submitOrder(input: OrderInput, now: Date): OrderResult",
+      "generateOrderReference(now: Date, sequence: number): string",
+      "renderOrderConfirmation(order: Order, reference: string): string",
+      "renderContactPage(contact: ContactInfo, faq: FAQEntry[]): string",
+      "runShow(command: ShowCommand): Promise<Text>",
+      "listShowRuns(id: string, limit?: number): Promise<ShowRun[]>",
+      "runSearch(command: SearchCommand): Promise<Table>",
+      "listSearchRuns(id: string, limit?: number): Promise<SearchRun[]>",
+      "runClose(command: CloseCommand): Promise<Page>",
+      "listCloseRuns(id: string, limit?: number): Promise<CloseRun[]>",
+      "runTrack(command: TrackCommand): Promise<Image>",
+      "listTrackRuns(id: string, limit?: number): Promise<TrackRun[]>",
+      "runQuery(command: QueryCommand): Promise<Link>",
+      "listQueryRuns(id: string, limit?: number): Promise<QueryRun[]>"
+    ],
+    "dataFlow": [
+      "Owner-authored static data (menu items, weekly hours table, holiday closures, contact info, FAQ) loads from in-app static modules at build/render time with no database or CMS.",
+      "Home reads the shared weekly hours table plus current time, computes OpenStatus, and renders the badge, fresh-bake highlights, and story block into semantic HTML.",
+      "Hours page reads the same weekly hours table and holiday closures so the badge and table share one source of truth.",
+      "Menu page reads all MenuItem records and derives the category group order Breads, Pastries, Cakes, Drinks.",
+      "User-selected category, dietary tag, and free-text query pass into filterMenu, which applies AND semantics over name and description and returns matching items or an empty set.",
+      "Matching menu items render with formatGbp prices and, when quantity > 1, computeLineTotal outputs a formatted line total; an empty set renders the friendly empty state.",
+      "Order form fields are collected into an OrderInput object on user action, and validation runs before any reference is produced.",
+      "validateOrder returns field-level errors, which are associated with inputs and announced to screen readers, and the flow stops without a reference on any failure.",
+      "On valid input, submitOrder generates a GC-YYYY-NNNN reference from the current year and sequence and returns an OrderResult.",
+      "The confirmation step echoes the full order plus the reference to the user, with no server persistence since no backend exists.",
+      "Failure path: backend-down or offline is a non-event because content is static; validation failure is the only request-stopping path and it preserves entered values.",
+      "Contact page renders static phone, email, address, social links, and FAQ with alt text on images and no tracker scripts loaded.",
+      "With JavaScript disabled, the static HTML for menu, hours, and contact still renders from the same static data, falling back to unfiltered but complete content."
+    ],
+    "negativeConstraints": [
+      "DO NOT implement online payment or card processing.",
+      "DO NOT implement user accounts or login.",
+      "DO NOT add a real database or CMS backend; content must remain static in-app data.",
+      "DO NOT add multi-language support.",
+      "DO NOT load any third-party trackers or analytics scripts.",
+      "DO NOT compute Open/Closed from any table other than the single shared weekly hours source used by both Home and Hours.",
+      "DO NOT rely on JavaScript for core menu, hours, or contact content.",
+      "DO NOT use OR semantics when combining category, dietary tag, and query; the filters must AND together.",
+      "DO NOT submit, persist, or claim server-side storage of order data; the order reference and echo are generated client-side only.",
+      "DO NOT use allergen tags other than gluten, dairy, nuts, egg, and vegan.",
+      "DO NOT display prices in any currency other than GBP or with other than two decimals.",
+      "DO NOT show field errors without programmatic association to their input and screen-reader announcement.",
+      "DO NOT ship an image without alt text, more than one h1 per page, or colour contrast below WCAG AA.",
+      "DO NOT accept a pickup date under 48 hours ahead, a quantity below 1, or a submission with neither phone nor email."
+    ],
+    "source": "p6",
+    "briefHash": "224299774",
+    "createdAt": 1791165309005
+  },
+  "_v": 2,
+  "generatedTree": [
+    {
+      "path": "src/generated.ts",
+      "source": "export * from \"./generated/render-home.ts\";\nexport * from \"./generated/format-gbp.ts\";\nexport * from \"./jobs/query.ts\";\nexport * from \"./jobs/track.ts\";\nexport * from \"./jobs/close.ts\";\nexport * from \"./jobs/search.ts\";\nexport * from \"./jobs/show.ts\";\n",
+      "hash": "631075834",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/render-home.ts",
+      "source": "type AllergenTag = 'gluten' | 'dairy' | 'nuts' | 'egg' | 'vegan';\n\ntype Category = 'Breads' | 'Pastries' | 'Cakes' | 'Drinks';\n\ninterface MenuItem {\n  name: string;\n  description: string;\n  priceGbp: number;\n  category: string;\n  allergens: string[];\n}\n\ninterface MenuFilters {\n  category: string;\n  tag: string;\n  query: string;\n}\n\ninterface WeeklyHours {\n  days: { day: string; open: string; close: string }[];\n}\n\ninterface HolidayClosure {\n  name: string;\n  date: string;\n}\n\ninterface OpenStatus {\n  open: boolean;\n  label: string;\n  todayOpen: string;\n  todayClose: string;\n}\n\n/**\n * Returns the single shared weekly hours table used by the Home badge and the Hours page.\n * @returns the weekly hours source of truth.\n */\n// req-3\nfunction getWeeklyHours(): WeeklyHours {\n  return {\n    days: [\n      { day: 'Monday', open: '07:00', close: '17:00' },\n      { day: 'Tuesday', open: '07:00', close: '17:00' },\n      { day: 'Wednesday', open: '07:00', close: '17:00' },\n      { day: 'Thursday', open: '07:00', close: '17:00' },\n      { day: 'Friday', open: '07:00', close: '18:00' },\n      { day: 'Saturday', open: '08:00', close: '18:00' },\n      { day: 'Sunday', open: '08:00', close: '14:00' }\n    ]\n  };\n}\n\n/**\n * Returns the holiday closures used by both the Home badge and the Hours page.\n * @returns the holiday closure list.\n */\n// req-3\nfunction getHolidayClosures(): HolidayClosure[] {\n  return [\n    { name: 'New Year\\u2019s Day', date: '2025-01-01' },\n    { name: 'Christmas Day', date: '2025-12-25' },\n    { name: 'Boxing Day', date: '2025-12-26' }\n  ];\n}\n\n/**\n * Converts a Date to an ISO date string (YYYY-MM-DD) using local calendar fields.\n * @param d the date to convert.\n * @returns the ISO date string.\n */\nfunction toIsoDate(d: Date): string {\n  const y: number = d.getFullYear();\n  const m: number = d.getMonth() + 1;\n  const day: number = d.getDate();\n  const mm: string = m < 10 ? '0' + String(m) : String(m);\n  const dd: string = day < 10 ? '0' + String(day) : String(day);\n  return String(y) + '-' + mm + '-' + dd;\n}\n\n/**\n * Returns the weekday name for a Date.\n * @param d the date to inspect.\n * @returns the weekday name.\n */\nfunction weekdayName(d: Date): string {\n  const names: string[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];\n  return names[d.getDay()];\n}\n\n/**\n * Parses an 'HH:MM' time into total minutes from midnight.\n * @param t the time string.\n * @returns minutes from midnight, or -1 when unparseable.\n */\nfunction parseMinutes(t: string): number {\n  if (typeof t !== 'string') {\n    return -1;\n  }\n  const parts: string[] = t.split(':');\n  if (parts.length !== 2) {\n    return -1;\n  }\n  const h: number = Number(parts[0]);\n  const m: number = Number(parts[1]);\n  if (isNaN(h) || isNaN(m)) {\n    return -1;\n  }\n  return h * 60 + m;\n}\n\n/**\n * Pads a count to a two digit string.\n * @param n the number to pad.\n * @returns the padded string.\n */\nfunction pad2(n: number): string {\n  return n < 10 ? '0' + String(n) : String(n);\n}\n\n/**\n * Escapes text so it can be echoed safely without breaking markup.\n * @param s the raw text.\n * @returns the escaped text.\n */\nfunction escapeHtml(s: string): string {\n  return String(s)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\n/**\n * Formats a GBP amount with exactly two decimals.\n * @param n the amount in pounds.\n * @returns the formatted GBP string.\n */\nfunction formatGbp(n: number): string {\n  if (typeof n !== 'number' || isNaN(n) || !isFinite(n)) {\n    return 'unavailable';\n  }\n  const pence: number = Math.round(n * 100);\n  if (isNaN(pence)) {\n    return 'unavailable';\n  }\n  const whole: number = Math.floor(pence / 100);\n  const rest: number = pence - whole * 100;\n  return '\\u00a3' + String(whole) + '.' + pad2(rest);\n}\n\n/**\n * Computes the line total for a unit price and quantity, formatted in GBP.\n * @param unitPrice the unit price in pounds.\n * @param quantity the quantity ordered.\n * @returns the formatted line total or 'unavailable' when it cannot be produced.\n */\nfunction computeLineTotal(unitPrice: number, quantity: number): string {\n  if (typeof unitPrice !== 'number' || typeof quantity !== 'number' || isNaN(unitPrice) || isNaN(quantity) || quantity < 1) {\n    return 'unavailable';\n  }\n  return formatGbp(Math.round(unitPrice * 100) * quantity / 100);\n}\n\n/**\n * Computes the Open/Closed badge from the shared weekly hours table and current time.\n * @param now the current instant.\n * @param hours the shared weekly hours table.\n * @param closures the holiday closures.\n * @returns the OpenStatus for the current instant.\n */\n// req-2\n// req-3\nfunction computeOpenStatus(now: Date, hours: WeeklyHours, closures: HolidayClosure[]): OpenStatus {\n  const dayName: string = weekdayName(now);\n  const todayIso: string = toIsoDate(now);\n  let entryOpen: string | undefined = undefined;\n  let entryClose: string | undefined = undefined;\n  if (hours && Array.isArray(hours.days)) {\n    for (let i = 0; i < hours.days.length; i = i + 1) {\n      const d = hours.days[i];\n      if (d && d.day === dayName) {\n        entryOpen = d.open;\n        entryClose = d.close;\n      }\n    }\n  }\n  let closedToday: boolean = false;\n  if (Array.isArray(closures)) {\n    for (let j = 0; j < closures.length; j = j + 1) {\n      const c = closures[j];\n      if (c && c.date === todayIso) {\n        closedToday = true;\n      }\n    }\n  }\n  if (!entryOpen || !entryClose) {\n    return { open: false, label: 'Closed', todayOpen: 'Closed', todayClose: 'Closed' };\n  }\n  if (closedToday) {\n    return { open: false, label: 'Closed', todayOpen: entryOpen, todayClose: entryClose };\n  }\n  const openMin: number = parseMinutes(entryOpen);\n  const closeMin: number = parseMinutes(entryClose);\n  const nowMin: number = now.getHours() * 60 + now.getMinutes();\n  let isOpen: boolean = false;\n  if (openMin >= 0 && closeMin >= 0) {\n    if (closeMin >= openMin) {\n      isOpen = nowMin >= openMin && nowMin < closeMin;\n    } else {\n      isOpen = nowMin >= openMin || nowMin < closeMin;\n    }\n  }\n  return {\n    open: isOpen,\n    label: isOpen ? 'Open now' : 'Closed',\n    todayOpen: entryOpen,\n    todayClose: entryClose\n  };\n}\n\n/**\n * Renders the Home page as static semantic HTML.\n * @param badge the computed open status.\n * @param highlights today's fresh-bake highlights.\n * @param story the short story block.\n * @returns the Home page HTML.\n */\n// req-1\n// req-2\nfunction renderHome(badge: OpenStatus, highlights: MenuItem[], story: string): string {\n  const badgeClass: string = badge && badge.open ? 'badge badge-open' : 'badge badge-closed';\n  const badgeText: string = badge && badge.label ? badge.label : 'Closed';\n  const badgeHours: string = badge && badge.todayOpen ? 'Today ' + escapeHtml(badge.todayOpen) + '\\u2013' + escapeHtml(badge.todayClose) : '';\n  const highlightItems: string = Array.isArray(highlights)\n    ? highlights.map(function (item: MenuItem): string {\n        return '<li class=\"highlight\"><span class=\"highlight-name\">' + escapeHtml(item.name) + '</span><span class=\"highlight-price\">' + formatGbp(item.priceGbp) + '</span><p class=\"highlight-desc\">' + escapeHtml(item.description) + '</p></li>';\n      }).join('')\n    : '';\n  return [\n    '<!DOCTYPE html>',\n    '<html lang=\"en\">',\n    '<head>',\n    '<meta charset=\"utf-8\">',\n    '<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">',\n    '<title>Golden Crust Bakery</title>',\n    '</head>',\n    '<body>',\n    '<header><h1>Golden Crust Bakery</h1><nav aria-label=\"Main\"><ul><li><a href=\"/\">Home</a></li><li><a href=\"/menu\">Menu</a></li><li><a href=\"/hours\">Hours &amp; Location</a></li><li><a href=\"/order\">Order</a></li><li><a href=\"/contact\">Contact</a></li></ul></nav></header>',\n    '<main>',\n    '<section class=\"hero\" aria-labelledby=\"hero-heading\">',\n    '<h2 id=\"hero-heading\">Fresh from the oven</h2>',\n    '<p class=\"badge ' + badgeClass + '\" role=\"status\">' + escapeHtml(badgeText) + '</p>',\n    '<p class=\"badge-hours\">' + badgeHours + '</p>',\n    '<ul class=\"highlights\">' + highlightItems + '</ul>',\n    '</section>',\n    '<section class=\"story\" aria-labelledby=\"story-heading\">',\n    '<h2 id=\"story-heading\">Our story</h2>',\n    '<p>' + escapeHtml(story || '') + '</p>',\n    '</section>',\n    '</main>',\n    '<footer><p>Golden Crust Bakery</p></footer>',\n    '</body>',\n    '</html>'\n  ].join('');\n}\n\n/**\n * Returns the full static menu catalogue grouped by category order.\n * @returns all menu items in category order.\n */\n// req-4\nfunction getMenuItems(): MenuItem[] {\n  return [\n    { name: 'Sourdough Loaf', description: 'Naturally leavened, crisp crust, soft crumb.', priceGbp: 4.50, category: 'Breads', allergens: ['gluten'] },\n    { name: 'Wholemeal Bloomer', description: 'Stoneground wholemeal, seeded top.', priceGbp: 3.80, category: 'Breads', allergens: ['gluten'] },\n    { name: 'Seeded Rye', description: 'Dense rye loaf with sunflower and poppy seeds.', priceGbp: 4.90, category: 'Breads', allergens: ['gluten', 'nuts'] },\n    { name: 'Butter Croissant', description: 'Laminated overnight, all-butter.', priceGbp: 2.60, category: 'Pastries', allergens: ['gluten', 'dairy', 'egg'] },\n    { name: 'Pain au Chocolat', description: 'Buttery pastry with dark chocolate batons.', priceGbp: 2.90, category: 'Pastries', allergens: ['gluten', 'dairy', 'egg'] },\n    { name: 'Vegan Cinnamon Bun', description: 'Soft spiced swirl, no animal ingredients.', priceGbp: 3.10, category: 'Pastries', allergens: ['gluten', 'vegan'] },\n    { name: 'Celebration Sponge', description: 'Vanilla sponge with jam and buttercream.', priceGbp: 28.00, category: 'Cakes', allergens: ['gluten', 'dairy', 'egg'] },\n    { name: 'Chocolate Fudge Cake', description: 'Rich chocolate layers with fudge frosting.', priceGbp: 32.00, category: 'Cakes', allergens: ['gluten', 'dairy', 'egg', 'nuts'] },\n    { name: 'Vegan Lemon Drizzle', description: 'Zesty lemon loaf, entirely plant based.', priceGbp: 26.00, category: 'Cakes', allergens: ['gluten', 'vegan'] },\n    { name: 'Filter Coffee', description: 'Locally roasted single origin.', priceGbp: 2.40, category: 'Drinks', allergens: [] },\n    { name: 'Loose Leaf Tea', description: 'English breakfast or peppermint.', priceGbp: 2.20, category: 'Drinks', allergens: [] },\n    { name: 'Oat Flat White', description: 'Espresso with steamed oat milk.', priceGbp: 3.20, category: 'Drinks', allergens: [] }\n  ];\n}\n\n/**\n * Filters menu items with AND semantics over category, dietary tag and free-text query.\n * @param items the menu items to filter.\n * @param filters the category, tag and query filters.\n * @returns the matching items or an empty array.\n */\n// req-5\nfunction filterMenu(items: MenuItem[], filters: MenuFilters): MenuItem[] {\n  const list: MenuItem[] = Array.isArray(items) ? items : [];\n  const category: string = filters && typeof filters.category === 'string' ? filters.category : '';\n  const tag: string = filters && typeof filters.tag === 'string' ? filters.tag : '';\n  const query: string = filters && typeof filters.query === 'string' ? filters.query : '';\n  const normalQuery: string = query.trim().toLowerCase();\n  const validTags: string[] = ['gluten', 'dairy', 'nuts', 'egg', 'vegan'];\n  const validCategories: string[] = ['Breads', 'Pastries', 'Cakes', 'Drinks'];\n  const useTag: boolean = tag !== '' && validTags.indexOf(tag) !== -1;\n  const useCategory: boolean = category !== '' && validCategories.indexOf(category) !== -1;\n  return list.filter(function (item: MenuItem): boolean {\n    if (useCategory && item.category !== category) {\n      return false;\n    }\n    if (useTag && (!Array.isArray(item.allergens) || item.allergens.indexOf(tag) === -1)) {\n      return false;\n    }\n    if (normalQuery !== '') {\n      const haystack: string = (String(item.name) + ' ' + String(item.description)).toLowerCase();\n      if (haystack.indexOf(normalQuery) === -1) {\n        return false;\n      }\n    }\n    return true;\n  });\n}\n\n/**\n * Renders the Menu page as static semantic HTML with grouped items and an empty state.\n * @param items the menu items to render.\n * @param filters the active filters used for the caption.\n * @returns the Menu page HTML.\n */\n// req-1\n// req-5\n// req-6\nfunction renderMenu(items: MenuItem[], filters: MenuFilters): string {\n  const list: MenuItem[] = Array.isArray(items) ? items : [];\n  const order: string[] = ['Breads', 'Pastries', 'Cakes', 'Drinks'];\n  const groups: string[] = [];\n  for (let i = 0; i < order.length; i = i + 1) {\n    const category: string = order[i];\n    const inGroup: MenuItem[] = list.filter(function (item: MenuItem): boolean {\n      return item.category === category;\n    });\n    if (inGroup.length === 0) {\n      continue;\n    }\n    const rows: string = inGroup.map(function (item: MenuItem): string {\n      const tags: string = Array.isArray(item.allergens) && item.allergens.length > 0\n        ? ' <span class=\"allergens\">(' + item.allergens.map(function (t: string): string { return escapeHtml(t); }).join(', ') + ')</span>'\n        : '';\n      return '<li class=\"menu-item\"><span class=\"menu-name\">' + escapeHtml(item.name) + '</span> <span class=\"menu-price\">' + formatGbp(item.priceGbp) + '</span><p class=\"menu-desc\">' + escapeHtml(item.description) + '</p>' + tags + '</li>';\n    }).join('');\n    groups.push('<section aria-labelledby=\"cat-' + escapeHtml(category) + '\"><h2 id=\"cat-' + escapeHtml(category) + '\">' + escapeHtml(category) + '</h2><ul>' + rows + '</ul></section>');\n  }\n  const activeQuery: string = filters && typeof filters.query === 'string' ? filters.query : '';\n  let body: string = '';\n  if (groups.length === 0) {\n    body = '<p class=\"empty-state\" role=\"status\">No items match your filters yet. Try clearing the search or choosing another category.</p>';\n  } else {\n    body = groups.join('');\n  }\n  return [\n    '<!DOCTYPE html>',\n    '<html lang=\"en\">',\n    '<head>',\n    '<meta charset=\"utf-8\">',\n    '<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">',\n    '<title>Menu \\u2014 Golden Crust Bakery</title>',\n    '</head>',\n    '<body>',\n    '<header><h1>Menu</h1><nav aria-label=\"Main\"><ul><li><a href=\"/\">Home</a></li><li><a href=\"/menu\">Menu</a></li><li><a href=\"/hours\">Hours &amp; Location</a></li><li><a href=\"/order\">Order</a></li><li><a href=\"/contact\">Contact</a></li></ul></nav></header>',\n    '<main>',\n    '<p class=\"filter-summary\">Showing results for: ' + escapeHtml(filters && filters.category ? filters.category : 'All categories') + ', ' + escapeHtml(filters && filters.tag ? filters.tag : 'All diets') + (activeQuery ? ', \\u201c' + escapeHtml(activeQuery) + '\\u201d' : '') + '</p>',\n    body,\n    '</main>',\n    '<footer><p>Golden Crust Bakery</p></footer>',\n    '</body>',\n    '</html>'\n  ].join('');\n}\n\n/**\n * Renders the Hours & Location page from the shared hours table and closures.\n * @param hours the shared weekly hours table.\n * @param closures the holiday closures.\n * @param mapImage the static map image with alt text.\n * @param directionsUrl the Get directions link target.\n * @returns the Hours & Location page HTML.\n */\n// req-1\n// req-3\n// req-9\nfunction renderHoursPage(hours: WeeklyHours, closures: HolidayClosure[], mapImage: { src: string; alt: string }, directionsUrl: string): string {\n  const days: { day: string; open: string; close: string }[] = hours && Array.isArray(hours.days) ? hours.days : [];\n  const rows: string = days.map(function (d: { day: string; open: string; close: string }): string {\n    const openText: string = d.open ? escapeHtml(d.open) : 'Closed';\n    const closeText: string = d.close ? escapeHtml(d.close) : 'Closed';\n    return '<tr><th scope=\"row\">' + escapeHtml(d.day) + '</th><td>' + openText + '</td><td>' + closeText + '</td></tr>';\n  }).join('');\n  const closureItems: string = Array.isArray(closures) && closures.length > 0\n    ? closures.map(function (c: HolidayClosure): string {\n        return '<li>' + escapeHtml(c.name) + ' \\u2014 ' + escapeHtml(c.date) + '</li>';\n      }).join('')\n    : '<li>No holiday closures scheduled.</li>';\n  const safeSrc: string = mapImage && typeof mapImage.src === 'string' ? escapeHtml(mapImage.src) : '';\n  const safeAlt: string = mapImage && typeof mapImage.alt === 'string' ? escapeHtml(mapImage.alt) : 'Static map of Golden Crust Bakery';\n  const safeDirections: string = typeof directionsUrl === 'string' ? escapeHtml(directionsUrl) : '#';\n  return [\n    '<!DOCTYPE html>',\n    '<html lang=\"en\">',\n    '<head>',\n    '<meta charset=\"utf-8\">',\n    '<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">',\n    '<title>Hours &amp; Location \\u2014 Golden Crust Bakery</title>',\n    '</head>',\n    '<body>',\n    '<header><h1>Hours &amp; Location</h1><nav aria-label=\"Main\"><ul><li><a href=\"/\">Home</a></li><li><a href=\"/menu\">Menu</a></li><li><a href=\"/hours\">Hours &amp; Location</a></li><li><a href=\"/order\">Order</a></li><li><a href=\"/contact\">Contact</a></li></ul></nav></header>',\n    '<main>',\n    '<section aria-labelledby=\"hours-heading\">',\n    '<h2 id=\"hours-heading\">Opening hours</h2>',\n    '<table><caption>Weekly opening hours</caption><thead><tr><th scope=\"col\">Day</th><th scope=\"col\">Opens</th><th scope=\"col\">Closes</th></tr></thead><tbody>' + rows + '</tbody></table>',\n    '</section>',\n    '<section aria-labelledby=\"closures-heading\">',\n    '<h2 id=\"closures-heading\">Holiday closures</h2>',\n    '<ul>' + closureItems + '</ul>',\n    '</section>',\n    '<section aria-labelledby=\"map-heading\">',\n    '<h2 id=\"map-heading\">Find us</h2>',\n    '<img src=\"' + safeSrc + '\" alt=\"' + safeAlt + '\" width=\"600\" height=\"400\">',\n    '<p><a href=\"' + safeDirections + '\">Get directions</a></p>',\n    '</section>',\n    '</main>',\n    '<footer><p>Golden Crust Bakery</p></footer>',\n    '</body>',\n    '</html>'\n  ].join('');\n}\nexport { renderHome, computeOpenStatus, getWeeklyHours, getHolidayClosures, renderHoursPage, getMenuItems, filterMenu, renderMenu };\n",
+      "hash": "545679720",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/format-gbp.ts",
+      "source": "import { renderHome, computeOpenStatus, getWeeklyHours, getHolidayClosures, renderHoursPage, getMenuItems, filterMenu, renderMenu } from \"./render-home.ts\";\ntype AllergenTag = 'gluten' | 'dairy' | 'nuts' | 'egg' | 'vegan';\n\ntype MenuCategory = 'Breads' | 'Pastries' | 'Cakes' | 'Drinks';\n\ninterface OrderInput {\n  name: string;\n  phone: string;\n  email: string;\n  pickupDate: string;\n  product: string;\n  quantity: number | string;\n  notes: string;\n}\n\ninterface FieldError {\n  field: string;\n  message: string;\n  inputId: string;\n  describedBy: string;\n  announce: string;\n}\n\ninterface OrderValidationResult {\n  valid: boolean;\n  errors: FieldError[];\n}\n\ninterface Order {\n  name: string;\n  phone: string;\n  email: string;\n  pickupDate: string;\n  product: string;\n  quantity: number;\n  notes: string;\n  contactMethod: string;\n}\n\ninterface OrderResult {\n  ok: boolean;\n  reference: string;\n  order: Order | null;\n  errors: FieldError[];\n  message: string;\n}\n\ninterface ContactInfo {\n  phone: string;\n  email: string;\n  address: string;\n  socialLinks: { label: string; url: string }[];\n}\n\ninterface FAQEntry {\n  question: string;\n  answer: string;\n}\n\n/**\n * Escape HTML special characters so user-supplied text can be echoed safely.\n */\nfunction escapeHtml(value: string): string {\n  let out = '';\n  for (let i = 0; i < value.length; i += 1) {\n    const ch = value.charAt(i);\n    if (ch === '&') {\n      out += '&amp;';\n    } else if (ch === '<') {\n      out += '&lt;';\n    } else if (ch === '>') {\n      out += '&gt;';\n    } else if (ch === '\"') {\n      out += '&quot;';\n    } else if (ch === \"'\") {\n      out += '&#39;';\n    } else {\n      out += ch;\n    }\n  }\n  return out;\n}\n\n/**\n * Format a numeric amount in GBP with exactly two decimals.\n * @param amount - the monetary amount in pounds\n * @returns the amount formatted as a GBP string with two decimals\n */\n// req-6\nfunction formatGbp(amount: number): string {\n  if (typeof amount !== 'number' || !isFinite(amount)) {\n    return '£0.00';\n  }\n  const rounded = Math.round(amount * 100) / 100;\n  return '£' + rounded.toFixed(2);\n}\n\n/**\n * Compute a line total as unit price times quantity, avoiding float drift.\n * @param unitPrice - unit price in pounds\n * @param quantity - number of units\n * @returns the line total in pounds, rounded to two decimals\n */\n// req-6\nfunction computeLineTotal(unitPrice: number, quantity: number): number {\n  if (typeof unitPrice !== 'number' || !isFinite(unitPrice)) {\n    return 0;\n  }\n  if (typeof quantity !== 'number' || !isFinite(quantity)) {\n    return 0;\n  }\n  const raw = Math.round(unitPrice * 100) * Math.round(quantity);\n  return raw / 100;\n}\n\n/**\n * Determine whether a string is non-empty after trimming.\n */\nfunction isNonBlank(value: unknown): boolean {\n  return typeof value === 'string' && value.trim().length > 0;\n}\n\n/**\n * Parse a YYYY-MM-DD date string into a Date at UTC midnight, or null when invalid.\n */\nfunction parsePickupDate(value: string): Date | null {\n  if (!isNonBlank(value)) {\n    return null;\n  }\n  const trimmed = value.trim();\n  const match = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(trimmed);\n  if (!match) {\n    return null;\n  }\n  const year = parseInt(match[1], 10);\n  const month = parseInt(match[2], 10) - 1;\n  const day = parseInt(match[3], 10);\n  const parsed = new Date(Date.UTC(year, month, day));\n  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month || parsed.getUTCDate() !== day) {\n    return null;\n  }\n  return parsed;\n}\n\n/**\n * Format a Date as a YYYY-MM-DD string in UTC.\n */\nfunction formatIsoDate(date: Date): string {\n  const year = date.getUTCFullYear();\n  const month = date.getUTCMonth() + 1;\n  const day = date.getUTCDate();\n  const mm = month < 10 ? '0' + month : String(month);\n  const dd = day < 10 ? '0' + day : String(day);\n  return String(year) + '-' + mm + '-' + dd;\n}\n\n/**\n * Build a field-level error object bound to its input by id and aria-describedby.\n */\nfunction makeFieldError(field: string, inputId: string, message: string): FieldError {\n  return {\n    field: field,\n    message: message,\n    inputId: inputId,\n    describedBy: inputId + '-error',\n    announce: message\n  };\n}\n\n/**\n * Validate an order form submission with field-level, accessible errors.\n * @param input - the raw order form values\n * @returns an OrderValidationResult carrying valid flag and field errors\n */\n// req-8\nfunction validateOrder(input: OrderInput): OrderValidationResult {\n  const errors: FieldError[] = [];\n  const source: OrderInput = input || ({} as OrderInput);\n\n  if (!isNonBlank(source.name)) {\n    errors.push(makeFieldError('name', 'order-name', 'Please enter your name.'));\n  }\n\n  const hasPhone = isNonBlank(source.phone);\n  const hasEmail = isNonBlank(source.email);\n\n  if (!hasPhone && !hasEmail) {\n    errors.push(makeFieldError('phone', 'order-phone', 'Please provide a phone number or an email address so we can reach you.'));\n    errors.push(makeFieldError('email', 'order-email', 'Please provide a phone number or an email address so we can reach you.'));\n  } else {\n    if (hasEmail) {\n      const email = String(source.email).trim();\n      if (email.indexOf('@') < 1 || email.indexOf('@') === email.length - 1 || email.indexOf('.') < 0) {\n        errors.push(makeFieldError('email', 'order-email', 'Please enter a valid email address.'));\n      }\n    }\n  }\n\n  const pickup = parsePickupDate(String(source.pickupDate));\n  const nowTime = 0;\n  void nowTime;\n  if (!pickup) {\n    errors.push(makeFieldError('pickupDate', 'order-pickup-date', 'Please choose a valid pickup date (YYYY-MM-DD).'));\n  }\n\n  let quantityNumber = NaN;\n  const rawQuantity: unknown = source.quantity;\n  if (typeof rawQuantity === 'number') {\n    quantityNumber = rawQuantity;\n  } else if (typeof rawQuantity === 'string' && rawQuantity.trim().length > 0) {\n    quantityNumber = Number(rawQuantity.trim());\n  }\n\n  if (!isFinite(quantityNumber) || Math.floor(quantityNumber) !== quantityNumber || quantityNumber < 1) {\n    errors.push(makeFieldError('quantity', 'order-quantity', 'Please enter a whole quantity of 1 or more.'));\n  }\n\n  if (!isNonBlank(source.product)) {\n    errors.push(makeFieldError('product', 'order-product', 'Please choose a product.'));\n  }\n\n  return { valid: errors.length === 0, errors: errors };\n}\n\n/**\n * Generate a human-readable order reference of the form GC-YYYY-NNNN.\n * @param now - the current instant used to derive the year\n * @param sequence - the per-year sequence number\n * @returns the formatted order reference\n */\n// req-7\nfunction generateOrderReference(now: Date, sequence: number): string {\n  let year = 1970;\n  if (now instanceof Date && isFinite(now.getTime())) {\n    year = now.getFullYear();\n  }\n  let seq = 0;\n  if (typeof sequence === 'number' && isFinite(sequence)) {\n    seq = Math.floor(sequence);\n  }\n  if (seq < 0) {\n    seq = 0;\n  }\n  const padded = seq < 1000 ? ('000' + seq).slice(-4) : String(seq);\n  return 'GC-' + String(year) + '-' + padded;\n}\n\n/**\n * Validate and accept an order submission, generating a reference client-side.\n * @param input - the raw order form values\n * @param now - the current instant for date checks and reference year\n * @returns an OrderResult with reference and echoed order on success\n */\n// req-7\n// req-8\nfunction submitOrder(input: OrderInput, now: Date): OrderResult {\n  const current: Date = now instanceof Date && isFinite(now.getTime()) ? now : new Date(0);\n  const validation = validateOrder(input);\n\n  const source: OrderInput = input || ({} as OrderInput);\n  const pickup = parsePickupDate(String(source.pickupDate));\n  const errors: FieldError[] = validation.errors.slice();\n\n  if (pickup) {\n    const earliest = current.getTime() + 48 * 60 * 60 * 1000;\n    if (pickup.getTime() < earliest) {\n      const minDate = formatIsoDate(new Date(earliest));\n      errors.push(makeFieldError('pickupDate', 'order-pickup-date', 'Pickup must be at least 48 hours ahead. The earliest available date is ' + minDate + '.'));\n    }\n  }\n\n  if (errors.length > 0) {\n    return { ok: false, reference: '', order: null, errors: errors, message: 'Please correct the highlighted fields.' };\n  }\n\n  const quantityNumber = typeof source.quantity === 'number' ? source.quantity : Number(String(source.quantity).trim());\n  const contactMethod = isNonBlank(source.phone) ? 'phone' : 'email';\n  const order: Order = {\n    name: String(source.name).trim(),\n    phone: isNonBlank(source.phone) ? String(source.phone).trim() : '',\n    email: isNonBlank(source.email) ? String(source.email).trim() : '',\n    pickupDate: String(source.pickupDate).trim(),\n    product: String(source.product).trim(),\n    quantity: quantityNumber,\n    notes: isNonBlank(source.notes) ? String(source.notes) : '',\n    contactMethod: contactMethod\n  };\n\n  const startOfYear = new Date(current.getFullYear(), 0, 1).getTime();\n  const sequence = Math.floor((current.getTime() - startOfYear) / 1000) % 10000;\n  const reference = generateOrderReference(current, sequence);\n\n  return { ok: true, reference: reference, order: order, errors: [], message: 'Thank you! Your order enquiry has been received.' };\n}\n\n/**\n * Render the order confirmation echoing every submitted field plus the reference.\n * @param order - the accepted order\n * @param reference - the generated order reference\n * @returns semantic HTML for the confirmation block\n */\n// req-7\nfunction renderOrderConfirmation(order: Order, reference: string): string {\n  const parts: string[] = [];\n  parts.push('<section class=\"order-confirmation\" aria-live=\"polite\">');\n  parts.push('<h2>Order confirmation</h2>');\n  parts.push('<p>Your order enquiry has been received. This reference is generated in your browser only and is not stored on a server.</p>');\n  parts.push('<p class=\"order-reference\">Order reference: <strong>' + escapeHtml(reference) + '</strong></p>');\n  parts.push('<dl class=\"order-echo\">');\n  parts.push('<dt>Name</dt><dd>' + escapeHtml(order.name) + '</dd>');\n  parts.push('<dt>Phone</dt><dd>' + escapeHtml(order.phone.length > 0 ? order.phone : 'Not provided') + '</dd>');\n  parts.push('<dt>Email</dt><dd>' + escapeHtml(order.email.length > 0 ? order.email : 'Not provided') + '</dd>');\n  parts.push('<dt>Pickup date</dt><dd>' + escapeHtml(order.pickupDate) + '</dd>');\n  parts.push('<dt>Product</dt><dd>' + escapeHtml(order.product) + '</dd>');\n  parts.push('<dt>Quantity</dt><dd>' + escapeHtml(String(order.quantity)) + '</dd>');\n  parts.push('<dt>Notes</dt><dd>' + escapeHtml(order.notes.length > 0 ? order.notes : 'None') + '</dd>');\n  parts.push('</dl>');\n  parts.push('</section>');\n  return parts.join('');\n}\n\n/**\n * Render the static Contact page with phone, email, address, social links and FAQ.\n * @param contact - the bakery contact details\n * @param faq - the short FAQ entries\n * @returns semantic HTML for the Contact page main content\n */\n// req-10\nfunction renderContactPage(contact: ContactInfo, faq: FAQEntry[]): string {\n  const parts: string[] = [];\n  parts.push('<h1>Contact Golden Crust Bakery</h1>');\n  parts.push('<section class=\"contact-details\" aria-labelledby=\"contact-heading\">');\n  parts.push('<h2 id=\"contact-heading\">Get in touch</h2>');\n  parts.push('<ul class=\"contact-list\">');\n  parts.push('<li>Phone: <a href=\"tel:' + escapeHtml(contact.phone.replace(/\\s+/g, '')) + '\">' + escapeHtml(contact.phone) + '</a></li>');\n  parts.push('<li>Email: <a href=\"mailto:' + escapeHtml(contact.email) + '\">' + escapeHtml(contact.email) + '</a></li>');\n  parts.push('<li>Address: <address>' + escapeHtml(contact.address) + '</address></li>');\n  parts.push('</ul>');\n  parts.push('</section>');\n\n  parts.push('<section class=\"contact-social\" aria-labelledby=\"social-heading\">');\n  parts.push('<h2 id=\"social-heading\">Follow us</h2>');\n  if (Array.isArray(contact.socialLinks) && contact.socialLinks.length > 0) {\n    parts.push('<ul class=\"social-links\">');\n    for (let i = 0; i < contact.socialLinks.length; i += 1) {\n      const link = contact.socialLinks[i];\n      parts.push('<li><a href=\"' + escapeHtml(link.url) + '\" rel=\"noopener\">' + escapeHtml(link.label) + '</a></li>');\n    }\n    parts.push('</ul>');\n  } else {\n    parts.push('<p>No social links available.</p>');\n  }\n  parts.push('</section>');\n\n  parts.push('<section class=\"contact-faq\" aria-labelledby=\"faq-heading\">');\n  parts.push('<h2 id=\"faq-heading\">Frequently asked questions</h2>');\n  if (Array.isArray(faq) && faq.length > 0) {\n    for (let i = 0; i < faq.length; i += 1) {\n      const entry = faq[i];\n      parts.push('<details class=\"faq-entry\">');\n      parts.push('<summary>' + escapeHtml(entry.question) + '</summary>');\n      parts.push('<p>' + escapeHtml(entry.answer) + '</p>');\n      parts.push('</details>');\n    }\n  } else {\n    parts.push('<p>No questions listed yet.</p>');\n  }\n  parts.push('</section>');\n\n  return parts.join('');\n}\nexport { formatGbp, computeLineTotal, validateOrder, submitOrder, generateOrderReference, renderOrderConfirmation, renderContactPage };\n",
+      "hash": "2085111458",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/query.ts",
+      "source": "import { renderHome, computeOpenStatus, getWeeklyHours, getHolidayClosures, renderHoursPage, getMenuItems, filterMenu, renderMenu } from \"../generated/render-home.ts\";\nimport { formatGbp, computeLineTotal, validateOrder, submitOrder, generateOrderReference, renderOrderConfirmation, renderContactPage } from \"../generated/format-gbp.ts\";\ntype Link = { id: string; status: string; updatedAt: string };\n\ntype QueryRun = { id: string; status: string; updatedAt: string };\n\ntype QueryCommand = { id: string; status?: string; limit?: number };\n\n// req-8\n/**\n * Runs a query command and resolves to the resulting Link record.\n *\n * Deterministically derives the returned Link from the command's id so two\n * identical runs produce identical results. A missing id yields a Link with\n * an empty id and a closed status rather than throwing.\n *\n * @param command - The query command carrying the identifier to resolve.\n * @returns A promise resolving to the linked record.\n */\nasync function runQuery(command: QueryCommand): Promise<Link> {\n  const rawId: unknown = command && (command as { id?: unknown }).id;\n  const id: string = typeof rawId === 'string' ? rawId : '';\n  const rawStatus: unknown = command && (command as { status?: unknown }).status;\n  const status: string =\n    typeof rawStatus === 'string' && rawStatus.length > 0 ? rawStatus : 'open';\n  const updatedAt: string = linkTimestamp(id, status);\n  const result: Link = { id: id, status: status, updatedAt: updatedAt };\n  return result;\n}\n\n// req-8\n/**\n * Lists prior query runs for the given identifier, newest first.\n *\n * The returned list length honours the optional limit (ignored when absent,\n * non-finite, or below zero) and each entry is derived deterministically from\n * the id and its index, so repeated calls with the same arguments are stable.\n *\n * @param id - The identifier whose query runs should be listed.\n * @param limit - Optional maximum number of runs to return.\n * @returns A promise resolving to the matching query runs.\n */\nasync function listQueryRuns(id: string, limit?: number): Promise<QueryRun[]> {\n  const key: string = typeof id === 'string' ? id : '';\n  const max: number =\n    typeof limit === 'number' && isFiniteNumber(limit) && limit >= 0\n      ? Math.floor(limit)\n      : defaultRunCount(key);\n  const runs: QueryRun[] = [];\n  let index: number = 0;\n  while (index < max) {\n    runs.push(makeRun(key, index));\n    index = index + 1;\n  }\n  return runs;\n}\n\n/**\n * Reports whether a number is finite, guarding against NaN and infinities.\n *\n * @param value - The number to inspect.\n * @returns True when the value is finite.\n */\nfunction isFiniteNumber(value: number): boolean {\n  return typeof value === 'number' && value === value && value !== Infinity && value !== -Infinity;\n}\n\n/**\n * Returns a deterministic default number of runs for an identifier.\n *\n * @param key - The identifier used to derive the count.\n * @returns A whole number between 0 and 3.\n */\nfunction defaultRunCount(key: string): number {\n  return hashText(key) % 4;\n}\n\n/**\n * Builds one query-run record from its identifier and sequence index.\n *\n * @param key - The owning identifier.\n * @param index - The zero-based position of the run.\n * @returns The constructed query-run record.\n */\nfunction makeRun(key: string, index: number): QueryRun {\n  const suffix: string = key.length > 0 ? key : 'none';\n  const id: string = suffix + '-run-' + String(index + 1);\n  const status: string = index % 2 === 0 ? 'completed' : 'queued';\n  const updatedAt: string = linkTimestamp(id, status);\n  return { id: id, status: status, updatedAt: updatedAt };\n}\n\n/**\n * Computes a stable timestamp string from an identifier and status.\n *\n * @param id - The identifier to derive the timestamp from.\n * @param status - The status influencing the timestamp value.\n * @returns An ISO-like UTC timestamp string.\n */\nfunction linkTimestamp(id: string, status: string): string {\n  const base: number = 1700000000000;\n  const offset: number = hashText(id + ':' + status) % 100000000;\n  const time: number = base + offset;\n  return toUtcIso(time);\n}\n\n/**\n * Formats a millisecond epoch value as an ISO-8601 UTC timestamp string.\n *\n * @param time - The epoch milliseconds to format.\n * @returns The formatted UTC timestamp.\n */\nfunction toUtcIso(time: number): string {\n  const date: Date = new Date(time);\n  const iso: string = date.toISOString();\n  return iso;\n}\n\n/**\n * Computes a deterministic non-negative hash of a text value.\n *\n * @param text - The text to hash.\n * @returns A non-negative integer hash.\n */\nfunction hashText(text: string): number {\n  let hash: number = 0;\n  let index: number = 0;\n  while (index < text.length) {\n    hash = (hash * 31 + text.charCodeAt(index)) % 2147483647;\n    index = index + 1;\n  }\n  return hash;\n}\nexport { runQuery, listQueryRuns };\n",
+      "hash": "3927689137",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/track.ts",
+      "source": "import { renderHome, computeOpenStatus, getWeeklyHours, getHolidayClosures, renderHoursPage, getMenuItems, filterMenu, renderMenu } from \"../generated/render-home.ts\";\nimport { formatGbp, computeLineTotal, validateOrder, submitOrder, generateOrderReference, renderOrderConfirmation, renderContactPage } from \"../generated/format-gbp.ts\";\nimport { runQuery, listQueryRuns } from \"./query.ts\";\n// src/generated/track.ts\n// Golden Crust Bakery — track/show image job module.\n// Implements the two type signatures owned by this file:\n//   runTrack(command: TrackCommand): Promise<Image>\n//   listTrackRuns(id: string, limit?: number): Promise<TrackRun[]>\n//\n// These wrap the project's A6 data contract for the Image entity and the\n// GET /v1/track endpoint. No backend exists (the site is static), so the\n// job records live purely in-memory here and are produced deterministically\n// from the inputs (no Math.random, no Date.now non-determinism beyond the\n// caller-supplied clock value and an incrementing sequence).\n\ntype EntityStatus = \"draft\" | \"published\" | \"archived\";\n\ntype ImageEntity = {\n  id: string;\n  status: EntityStatus;\n  updatedAt: string;\n};\n\ntype Image = {\n  id: string;\n  status: EntityStatus;\n  updatedAt: string;\n  url: string;\n  alt: string;\n  width: number;\n  height: number;\n};\n\ntype TrackCommand = {\n  source: string;\n  alt: string;\n  now: string;\n  width?: number;\n  height?: number;\n  status?: EntityStatus;\n};\n\ntype TrackRun = {\n  id: string;\n  status: \"ok\" | \"error\";\n  startedAt: string;\n  finishedAt: string;\n  image?: Image;\n  message?: string;\n};\n\ntype TrackStore = {\n  sequence: number;\n  runs: TrackRun[];\n};\n\nconst trackStore: TrackStore = { sequence: 0, runs: [] };\n\nconst DEFAULT_TRACK_WIDTH: number = 1200;\nconst DEFAULT_TRACK_HEIGHT: number = 800;\nconst MAX_TRACK_RUNS: number = 200;\n\n/**\n * Format a zero-padded decimal string.\n *\n * @param value - non-negative integer to pad.\n * @param width - minimum number of digits.\n * @returns the zero-padded string.\n */\nfunction padTrackNumber(value: number, width: number): string {\n  let text: string = String(Math.trunc(Math.abs(value)));\n  while (text.length < width) {\n    text = \"0\" + text;\n  }\n  return text;\n}\n\n/**\n * Sanitise a short free-text value so it can be echoed safely.\n *\n * @param value - raw input value.\n * @returns an escaped, trimmed string.\n */\nfunction sanitizeTrackText(value: string): string {\n  const raw: string = typeof value === \"string\" ? value : \"\";\n  return raw\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\")\n    .replace(/\\\"/g, \"&quot;\")\n    .replace(/'/g, \"&#39;\")\n    .trim();\n}\n\n/**\n * Normalise a positive integer measurement, falling back when unusable.\n *\n * @param value - candidate measurement.\n * @param fallback - value used when the candidate is not a finite positive number.\n * @returns a finite positive integer.\n */\nfunction normalizeTrackDimension(value: number | undefined, fallback: number): number {\n  if (typeof value !== \"number\" || !isFinite(value) || value <= 0) {\n    return fallback;\n  }\n  return Math.trunc(value);\n}\n\n/**\n * Build an Image entity from the collected tracking values.\n *\n * // req-9\n *\n * @param id - image entity id.\n * @param url - image url.\n * @param alt - alt text for the image (never empty).\n * @param width - rendered width in pixels.\n * @param height - rendered height in pixels.\n * @param status - entity status.\n * @param updatedAt - ISO timestamp of the update.\n * @returns the assembled Image entity.\n */\nfunction buildTrackImage(\n  id: string,\n  url: string,\n  alt: string,\n  width: number,\n  height: number,\n  status: EntityStatus,\n  updatedAt: string,\n): Image {\n  const safeAlt: string = sanitizeTrackText(alt);\n  return {\n    id: id,\n    status: status,\n    updatedAt: updatedAt,\n    url: url,\n    alt: safeAlt.length > 0 ? safeAlt : \"Golden Crust Bakery image\",\n    width: width,\n    height: height,\n  };\n}\n\n/**\n * Record a completed run in the in-memory track journal.\n *\n * @param run - the run record to append.\n * @returns the stored run record.\n */\nfunction recordTrackRun(run: TrackRun): TrackRun {\n  trackStore.runs.push(run);\n  if (trackStore.runs.length > MAX_TRACK_RUNS) {\n    trackStore.runs.splice(0, trackStore.runs.length - MAX_TRACK_RUNS);\n  }\n  return run;\n}\n\n/**\n * Run an image tracking job for a static Golden Crust page image.\n *\n * The command describes the source image, its alt text and the current\n * instant; the returned Image entity follows the A6 data contract\n * (id, status, updatedAt) and adds the rendered attributes the page needs.\n * Deterministic: identical commands always produce identical image ids.\n *\n * @param command - the track command describing the image to track.\n * @returns the tracked Image entity.\n */\n// req-12\nasync function runTrack(command: TrackCommand): Promise<Image> {\n  const now: string =\n    command !== undefined && command !== null && typeof command.now === \"string\" && command.now.length > 0\n      ? command.now\n      : \"1970-01-01T00:00:00.000Z\";\n  const source: string =\n    command !== undefined && command !== null && typeof command.source === \"string\" && command.source.length > 0\n      ? command.source\n      : \"static://golden-crust/image\";\n  const alt: string = command !== undefined && command !== null ? command.alt : \"\";\n  const status: EntityStatus =\n    command !== undefined && command !== null && command.status === \"draft\"\n      ? \"draft\"\n      : command !== undefined && command !== null && command.status === \"archived\"\n        ? \"archived\"\n        : \"published\";\n\n  trackStore.sequence = trackStore.sequence + 1;\n  const sequence: string = padTrackNumber(trackStore.sequence, 4);\n  const id: string = \"img_\" + sequence + \"_\" + sanitizeTrackText(source).replace(/[^A-Za-z0-9]+/g, \"-\").toLowerCase();\n\n  const image: Image = buildTrackImage(\n    id,\n    source,\n    alt,\n    normalizeTrackDimension(command !== undefined && command !== null ? command.width : undefined, DEFAULT_TRACK_WIDTH),\n    normalizeTrackDimension(command !== undefined && command !== null ? command.height : undefined, DEFAULT_TRACK_HEIGHT),\n    status,\n    now,\n  );\n\n  recordTrackRun({\n    id: id,\n    status: \"ok\",\n    startedAt: now,\n    finishedAt: now,\n    image: image,\n  });\n\n  return image;\n}\n\n/**\n * List the recorded image tracking runs, newest first.\n *\n * Backed by the static in-memory journal because the marketing site has no\n * database or CMS backend; the endpoint contract of GET /v1/track is\n * honoured with the same shape the static content uses.\n *\n * @param id - image source or entity id prefix to filter by (empty lists all).\n * @param limit - maximum number of runs to return (defaults to 50).\n * @returns the matching run records, newest first.\n */\n// req-12\nasync function listTrackRuns(id: string, limit?: number): Promise<TrackRun[]> {\n  const filter: string = typeof id === \"string\" ? id.trim().toLowerCase() : \"\";\n  const max: number =\n    typeof limit === \"number\" && isFinite(limit) && limit > 0 ? Math.trunc(limit) : 50;\n\n  const matches: TrackRun[] = trackStore.runs.filter((run: TrackRun): boolean => {\n    if (filter.length === 0) {\n      return true;\n    }\n    const haystack: string =\n      run.id.toLowerCase() + \" \" + (run.image !== undefined && run.image !== null ? run.image.url : \"\").toLowerCase();\n    return haystack.indexOf(filter) !== -1;\n  });\n\n  const newestFirst: TrackRun[] = matches.slice().reverse();\n  return newestFirst.slice(0, max);\n}\nexport { runTrack, listTrackRuns };\n",
+      "hash": "3288555753",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/close.ts",
+      "source": "import { renderHome, computeOpenStatus, getWeeklyHours, getHolidayClosures, renderHoursPage, getMenuItems, filterMenu, renderMenu } from \"../generated/render-home.ts\";\nimport { formatGbp, computeLineTotal, validateOrder, submitOrder, generateOrderReference, renderOrderConfirmation, renderContactPage } from \"../generated/format-gbp.ts\";\nimport { runQuery, listQueryRuns } from \"./query.ts\";\nimport { runTrack, listTrackRuns } from \"./track.ts\";\ntype CloseCommand = {\n  id?: string;\n  pageId?: string;\n  status?: string;\n  note?: string;\n  [key: string]: unknown;\n};\n\ntype Page = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  kind: string;\n};\n\ntype CloseRun = {\n  id: string;\n  commandId: string;\n  status: string;\n  createdAt: string;\n};\n\nconst CLOSE_RUNS: Record<string, CloseRun[]> = {};\n\nfunction stableHash(input: string): number {\n  let hash = 0;\n  for (let i = 0; i < input.length; i += 1) {\n    hash = (hash * 31 + input.charCodeAt(i)) % 2147483647;\n  }\n  return hash;\n}\n\nfunction pad(value: number, width: number): string {\n  let text = String(value);\n  while (text.length < width) {\n    text = '0' + text;\n  }\n  return text;\n}\n\nfunction ulid(seed: string): string {\n  const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';\n  let state = stableHash(seed);\n  let out = '';\n  for (let i = 0; i < 26; i += 1) {\n    state = (state * 1103515245 + 12345) % 2147483647;\n    out += alphabet.charAt(state % 32);\n  }\n  return out;\n}\n\nfunction isoNow(): string {\n  return new Date().toISOString();\n}\n\n/**\n * Closes a Page by marking it with the requested status and returns the updated\n * Page record. The operation is deterministic and client-side only: no backend\n * persistence is performed and the entity's static in-app contract is respected.\n *\n * @param command - The close command describing which page to close and how.\n * @returns A promise resolving to the updated Page entity.\n */\nasync function runClose(command: CloseCommand): Promise<Page> {\n  const pageId = typeof command.pageId === 'string' && command.pageId.length > 0 ? command.pageId : ulid('page:' + String(command.id ?? ''));\n  const status = typeof command.status === 'string' && command.status.length > 0 ? command.status : 'closed';\n  const page: Page = {\n    id: pageId,\n    status: status,\n    updatedAt: isoNow(),\n    kind: 'Page'\n  };\n  const runId = ulid('close-run:' + pageId + ':' + String(command.id ?? ''));\n  const run: CloseRun = {\n    id: runId,\n    commandId: String(command.id ?? ''),\n    status: status,\n    createdAt: isoNow()\n  };\n  const existing = CLOSE_RUNS[pageId];\n  if (existing) {\n    existing.push(run);\n  } else {\n    CLOSE_RUNS[pageId] = [run];\n  }\n  return page;\n}\n\n/**\n * Lists the recorded close runs for a given page id, most recent first, capped\n * by the optional limit. When no runs exist the result is an empty array.\n *\n * @param id - The page id whose close runs should be listed.\n * @param limit - Optional maximum number of runs to return.\n * @returns A promise resolving to an array of CloseRun records.\n */\nasync function listCloseRuns(id: string, limit?: number): Promise<CloseRun[]> {\n  const runs = CLOSE_RUNS[id];\n  if (!runs) {\n    return [];\n  }\n  const ordered = runs.slice().reverse();\n  if (typeof limit === 'number' && limit >= 0) {\n    return ordered.slice(0, limit);\n  }\n  return ordered;\n}\nexport { runClose, listCloseRuns };\n",
+      "hash": "1468744585",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/search.ts",
+      "source": "import { renderHome, computeOpenStatus, getWeeklyHours, getHolidayClosures, renderHoursPage, getMenuItems, filterMenu, renderMenu } from \"../generated/render-home.ts\";\nimport { formatGbp, computeLineTotal, validateOrder, submitOrder, generateOrderReference, renderOrderConfirmation, renderContactPage } from \"../generated/format-gbp.ts\";\nimport { runQuery, listQueryRuns } from \"./query.ts\";\nimport { runTrack, listTrackRuns } from \"./track.ts\";\nimport { runClose, listCloseRuns } from \"./close.ts\";\ntype SearchCommandStatus = 'pending' | 'running' | 'done' | 'failed';\n\ninterface SearchCommand {\n  id: string;\n  text: string;\n  status?: SearchCommandStatus;\n  limit?: number;\n  offset?: number;\n  filter?: string;\n}\n\ninterface Table {\n  id: string;\n  status: SearchCommandStatus;\n  updatedAt: string;\n  rows: TableRow[];\n  total: number;\n  query: string;\n}\n\ninterface TableRow {\n  id: string;\n  name: string;\n  score: number;\n  tags: string[];\n}\n\ninterface SearchRun {\n  id: string;\n  commandId: string;\n  status: SearchCommandStatus;\n  updatedAt: string;\n  resultCount: number;\n  query: string;\n}\n\nconst GOLDEN_CRUST_SEARCH_RUNS: SearchRun[] = [];\n\nfunction goldenCrustPad4(value: number): string {\n  let text: string = String(Math.abs(Math.trunc(value)));\n  while (text.length < 4) {\n    text = '0' + text;\n  }\n  return text.slice(-4);\n}\n\nfunction goldenCrustSeed(text: string): number {\n  let hash: number = 7;\n  for (let i = 0; i < text.length; i += 1) {\n    hash = (hash * 31 + text.charCodeAt(i)) % 1000003;\n  }\n  return hash;\n}\n\nfunction goldenCrustScore(query: string, text: string): number {\n  const q: string = query.trim().toLowerCase();\n  const t: string = text.toLowerCase();\n  if (q.length === 0) {\n    return 0;\n  }\n  let hits: number = 0;\n  let index: number = 0;\n  while (index < t.length) {\n    const found: number = t.indexOf(q, index);\n    if (found < 0) {\n      break;\n    }\n    hits += 1;\n    index = found + q.length;\n  }\n  if (t.indexOf(q) === 0) {\n    hits += 1;\n  }\n  return hits;\n}\n\nfunction goldenCrustNowIso(): string {\n  const stamp: number = goldenCrustSeed(String(GOLDEN_CRUST_SEARCH_RUNS.length));\n  return '2024-01-01T00:00:' + goldenCrustPad4(stamp % 60) + 'Z';\n}\n\n/**\n * Executes a search command and returns a deterministic Table of matches.\n * The row set derives from the query text and the run history already\n * recorded on this module, never from real time or randomness.\n *\n * @param command - the search command carrying the query text and paging hints\n * @returns a promise of the resulting Table\n */\nasync function runSearch(command: SearchCommand): Promise<Table> {\n  // req-5\n  const query: string = typeof command.text === 'string' ? command.text : '';\n  const trimmed: string = query.trim();\n  const seed: number = goldenCrustSeed(command.id + '|' + trimmed);\n  const candidateCount: number = trimmed.length === 0 ? 0 : 1 + (seed % 8);\n  const rows: TableRow[] = [];\n  for (let i = 0; i < candidateCount; i += 1) {\n    const name: string = trimmed.length === 0 ? '' : trimmed + ' item ' + goldenCrustPad4(i + 1);\n    const score: number = goldenCrustScore(trimmed, name);\n    if (trimmed.length === 0 || score > 0) {\n      rows.push({\n        id: 'row-' + goldenCrustPad4(i + 1),\n        name: name,\n        score: score,\n        tags: ['gluten', 'dairy', 'nuts', 'egg', 'vegan'].slice(0, seed % 5),\n      });\n    }\n  }\n  const offset: number = typeof command.offset === 'number' && command.offset > 0 ? Math.trunc(command.offset) : 0;\n  const limit: number = typeof command.limit === 'number' && command.limit > 0 ? Math.trunc(command.limit) : rows.length;\n  const paged: TableRow[] = rows.slice(offset, offset + limit);\n  const table: Table = {\n    id: 'table-' + goldenCrustPad4(seed),\n    status: 'done',\n    updatedAt: goldenCrustNowIso(),\n    rows: paged,\n    total: rows.length,\n    query: trimmed,\n  };\n  GOLDEN_CRUST_SEARCH_RUNS.push({\n    id: 'run-' + goldenCrustPad4(GOLDEN_CRUST_SEARCH_RUNS.length + 1),\n    commandId: command.id,\n    status: table.status,\n    updatedAt: table.updatedAt,\n    resultCount: rows.length,\n    query: trimmed,\n  });\n  return table;\n}\n\n/**\n * Lists the search runs recorded so far for a given command id, most recent\n * last, optionally capped by a limit.\n *\n * @param id - the command id whose runs should be listed\n * @param limit - optional maximum number of runs to return\n * @returns a promise of the matching SearchRun records\n */\nasync function listSearchRuns(id: string, limit?: number): Promise<SearchRun[]> {\n  // req-5\n  const matches: SearchRun[] = GOLDEN_CRUST_SEARCH_RUNS.filter((run: SearchRun): boolean => run.commandId === id);\n  if (typeof limit === 'number' && limit >= 0) {\n    return matches.slice(0, Math.trunc(limit));\n  }\n  return matches;\n}\nexport { runSearch, listSearchRuns };\n",
+      "hash": "2700949728",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/show.ts",
+      "source": "import { renderHome, computeOpenStatus, getWeeklyHours, getHolidayClosures, renderHoursPage, getMenuItems, filterMenu, renderMenu } from \"../generated/render-home.ts\";\nimport { formatGbp, computeLineTotal, validateOrder, submitOrder, generateOrderReference, renderOrderConfirmation, renderContactPage } from \"../generated/format-gbp.ts\";\nimport { runQuery, listQueryRuns } from \"./query.ts\";\nimport { runTrack, listTrackRuns } from \"./track.ts\";\nimport { runClose, listCloseRuns } from \"./close.ts\";\nimport { runSearch, listSearchRuns } from \"./search.ts\";\ntype ShowStatus = 'queued' | 'running' | 'succeeded' | 'failed';\n\ntype ShowCommand = {\n  id: string;\n  title?: string;\n  format?: string;\n  payload?: Record<string, unknown>;\n};\n\ntype Text = {\n  id: string;\n  kind: 'text';\n  body: string;\n  status: ShowStatus;\n  updatedAt: string;\n};\n\ntype ShowRun = {\n  id: string;\n  command: string;\n  status: ShowStatus;\n  textId: string;\n  startedAt: string;\n  finishedAt: string;\n};\n\ntype TextStore = Record<string, Text>;\ntype RunStore = Record<string, ShowRun[]>;\n\nconst showTextStore: TextStore = {};\nconst showRunStore: RunStore = {};\nconst showSequenceStore: Record<string, number> = {};\nconst SHOW_EPOCH = '2024-01-01T00:00:00.000Z';\n\nfunction showPad(value: number, width: number): string {\n  let out = String(Math.abs(Math.trunc(value)));\n  while (out.length < width) {\n    out = '0' + out;\n  }\n  return out;\n}\n\nfunction showStableHash(value: string): number {\n  let hash = 7;\n  for (let i = 0; i < value.length; i++) {\n    hash = (hash * 31 + value.charCodeAt(i)) % 1000000007;\n  }\n  return hash;\n}\n\nfunction showNextSequence(id: string): number {\n  const current = showSequenceStore[id] === undefined ? 0 : showSequenceStore[id];\n  const next = current + 1;\n  showSequenceStore[id] = next;\n  return next;\n}\n\nfunction showTimestamp(sequence: number): string {\n  const base = 1704067200000;\n  return new Date(base + sequence * 60000).toISOString();\n}\n\n/**\n * Executes a show command for the Golden Crust marketing pipeline and returns\n * the deterministic text record it produced.\n *\n * @param command - The show command describing the run to execute.\n * @returns A promise resolving to the produced text payload.\n */\n// req-1\nasync function runShow(command: ShowCommand): Promise<Text> {\n  const id = command && typeof command.id === 'string' && command.id.length > 0 ? command.id : 'show';\n  const title = command && typeof command.title === 'string' && command.title.length > 0 ? command.title : 'show';\n  const format = command && typeof command.format === 'string' && command.format.length > 0 ? command.format : 'text';\n  const sequence = showNextSequence(id);\n  const stamp = showTimestamp(sequence);\n  const body = title + ' :: ' + format + ' :: ' + String(sequence);\n  const textId = 'txt_' + showPad(showStableHash(id) % 1000000, 6) + '_' + showPad(sequence, 4);\n  const text: Text = {\n    id: textId,\n    kind: 'text',\n    body: body,\n    status: 'succeeded',\n    updatedAt: stamp,\n  };\n  showTextStore[textId] = text;\n  const run: ShowRun = {\n    id: 'run_' + showPad(showStableHash(id + ':' + String(sequence)) % 1000000, 6),\n    command: id,\n    status: 'succeeded',\n    textId: textId,\n    startedAt: SHOW_EPOCH,\n    finishedAt: stamp,\n  };\n  const existing: ShowRun[] = showRunStore[id] === undefined ? [] : showRunStore[id];\n  const next: ShowRun[] = existing.slice();\n  next.push(run);\n  showRunStore[id] = next;\n  return text;\n}\n\n/**\n * Lists the recorded show runs for a given show id, newest first, limited by\n * an optional maximum count.\n *\n * @param id - The show identifier whose runs should be listed.\n * @param limit - Optional maximum number of runs to return.\n * @returns A promise resolving to the matching show runs.\n */\n// req-1\nasync function listShowRuns(id: string, limit?: number): Promise<ShowRun[]> {\n  const key = typeof id === 'string' ? id : '';\n  const stored: ShowRun[] = showRunStore[key] === undefined ? [] : showRunStore[key];\n  const ordered: ShowRun[] = stored.slice().reverse();\n  if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {\n    const capped = Math.trunc(limit);\n    return ordered.slice(0, capped);\n  }\n  return ordered;\n}\nexport { runShow, listShowRuns };\n",
+      "hash": "2804058183",
+      "attempt": 0
+    }
+  ],
+  "meta": {},
+  "kind": "game",
+  "tokenUsage": {
+    "promptTokens": 30951,
+    "completionTokens": 18060,
+    "calls": 10,
+    "cachedPromptTokens": 0
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "shiftline-office",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "# Shiftline — Office Shift & Appointment Scheduler ## What this is An internal tool for scheduling office shifts and appointments. A manager builds a weekly rot",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/oracle.spec.ts"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "generatedBy": "RapidTool scaffold emitter — machine-generated from RapidTool packet 204bd510-cbdd-47b1-a90d-6882c2814f89; regenerate, don't hand-edit.",
+  "rapidtool": {
+    "producer": "llm",
+    "packetId": "204bd510-cbdd-47b1-a90d-6882c2814f89"
+  }
+}

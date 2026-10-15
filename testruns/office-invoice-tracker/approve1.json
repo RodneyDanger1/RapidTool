@@ -1,0 +1,49 @@
+﻿{
+  "schema_version": 1,
+  "cmd": "approve",
+  "ok": true,
+  "path": "C:\\Users\\mnril\\Desktop\\testruns\\office-invoice-tracker\\build.json",
+  "summary": {
+    "name": "# Ledgeline ΓÇö Office",
+    "currentPhase": 7,
+    "status": "running",
+    "phaseCounts": {
+      "complete": 7,
+      "ready": 1,
+      "locked": 5
+    },
+    "lastGate": {
+      "phase": 6,
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat ΓÇö no human decision claimed",
+      "decidedBy": "autopilot",
+      "decidedAt": 1791167070228
+    },
+    "researchCount": 5,
+    "memoryCount": 12,
+    "vaultReady": true,
+    "failedGates": [
+      {
+        "phase": 6,
+        "unmet": [
+          "Last template self-test run passed",
+          "Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)",
+          "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+        ]
+      }
+    ],
+    "sealedWithFailures": true,
+    "nextAction": {
+      "kind": "fix-gate",
+      "cmd": "gate",
+      "phase": 6,
+      "why": "A gate check on P6 failed ΓÇö review the gate record before continuing."
+    },
+    "budget": {
+      "spent": 24330,
+      "cap": null,
+      "stop_reason": null
+    }
+  },
+  "exit_code": 0
+}

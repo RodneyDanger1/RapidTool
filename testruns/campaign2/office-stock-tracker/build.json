@@ -1,0 +1,1562 @@
+{
+  "id": "4ee3a8fa-c57b-4062-85b6-b9b78201335c",
+  "name": "Officestock",
+  "brief": "# Officestock — Office Supplies Inventory Tracker\n\n## What this is\nAn internal tool to track office supplies (stationery, printer consumables,\nkitchen and cleaning items) so nothing runs out unannounced. Staff record what\nthey take; the office manager receives deliveries and runs stocktakes.\n\n## Users\n- **Staff** — take an item from the cupboard.\n- **Office manager** — receive deliveries, adjust counts, run stocktakes.\n- **Approver** — approve purchase requests raised below reorder level.\n\n## Core domain\n- **Item**: id, name, category (Stationery | Printer | Kitchen | Cleaning |\n  Tech), unit (each / box / ream / pack), current qty, reorder level, target\n  qty (to top up to), location, active.\n- **Movement**: id, item, delta (+/-), reason (Issued | Received | Damaged |\n  Adjustment | Stocktake), actor, timestamp, note, resulting qty.\n- **PurchaseRequest**: id, item, requested qty, status (Open | Approved |\n  Ordered | Received | Cancelled), raised-by, decision note.\n\n## Required features\n1. **Item list** — searchable, filterable by category and by a \"needs reorder\"\n   toggle; each row shows qty, reorder level, a colour-coded status, and\n   location. Sort by name, qty, or category.\n2. **Issue an item** — pick item, quantity, actor; refuse if quantity exceeds\n   current stock; write an Issued movement and decrement qty.\n3. **Receive stock** — increase qty and write a Received movement; if an Open/\n   Approved/Ordered purchase request exists for that item, mark it Received.\n4. **Adjust / damage** — record a Damaged or Adjustment movement; an adjustment\n   requires a note and can set the qty to a counted value (the delta is\n   computed), never silently.\n5. **Purchase requests** — raise a request for a below-reorder item with a\n   suggested quantity of (target − current); approve, order, receive, cancel\n   with constrained transitions; receiving a request writes a Received movement.\n6. **Stocktake** — enter a counted qty per item in a category; for each item the\n   app writes a Stocktake movement whose delta is counted − current, and shows a\n   variance report (items over/under by more than a threshold).\n7. **Dashboard** — total items, count below reorder, open purchase requests, and\n   total value on hand if an optional unit cost is set per item.\n\n## Functional requirements\n- Quantities are non-negative integers; stock can never go negative (issuing\n  more than on hand is refused naming the shortfall).\n- Current qty is the running sum of movements; a reconstruction from the\n  movement log must equal the stored qty (invariant check exposed).\n- Purchase-request status transitions constrained: Open→Approved→Ordered→\n  Received (or →Cancelled from Open/Approved/Ordered); Received is terminal.\n- Suggested reorder qty = max(0, target − current).\n- Optional value on hand = qty × unit cost (integer pence), displayed GBP.\n\n## Non-functional requirements\n- Desktop-first, usable to 768px; accessible tables and forms.\n- Deterministic inventory logic separated from UI for unit testing.\n- Local persistence; no external services required.\n\n## Explicitly out of scope\n- Barcode scanning.\n- Supplier ordering / EDI integration.\n- Asset depreciation or accounting.\n- Multi-site inventory.",
+  "domain": "operations",
+  "createdAt": 1791193106356,
+  "status": "running",
+  "currentPhase": 6,
+  "phases": [
+    {
+      "id": 0,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3269632901",
+        "checkedAt": 1791193110832
+      },
+      "startedAt": 1791193107278,
+      "completedAt": 1791193107317
+    },
+    {
+      "id": 1,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1050713914",
+        "checkedAt": 1791193110856
+      },
+      "startedAt": 1791193110838,
+      "completedAt": 1791193110843
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1845537766",
+        "checkedAt": 1791193110872
+      },
+      "startedAt": 1791193110862,
+      "completedAt": 1791193110864
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1638292844",
+        "checkedAt": 1791193110890
+      },
+      "startedAt": 1791193110877,
+      "completedAt": 1791193110880
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3527188654",
+        "checkedAt": 1791193110912
+      },
+      "startedAt": 1791193110894,
+      "completedAt": 1791193110909
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "2951452883",
+        "checkedAt": 1791193110945
+      },
+      "startedAt": 1791193110917,
+      "completedAt": 1791193110938
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": false,
+        "unmet": [
+          "Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)",
+          "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) — keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns core missing (18/32): console, manager, office, officestock, oracle, report, scan, show, staff, tech, terminal, track, …; advisory missing (70/141): internal, stationery, printer, consumables, kitchen, cleaning, nothing, runs, unannounced, deliveries, cupboard, run, …",
+          "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+        ],
+        "evidenceHash": "2072697611",
+        "checkedAt": 1791193223879
+      },
+      "startedAt": 1791193110952,
+      "completedAt": 1791193195564
+    },
+    {
+      "id": 7,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 8,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 9,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 10,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 11,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 12,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    }
+  ],
+  "scorecard": {
+    "overall": 6.8,
+    "verdict": "proceed-with-guards",
+    "axes": [
+      {
+        "key": "feasibility",
+        "label": "Technical feasibility",
+        "score": 3,
+        "note": "Typed contracts + sequential graph."
+      },
+      {
+        "key": "scale",
+        "label": "Scale headroom",
+        "score": 9,
+        "note": "Stateless workers + durable checkpoints."
+      },
+      {
+        "key": "security",
+        "label": "Security posture",
+        "score": 7,
+        "note": "Scheduler Δ0."
+      },
+      {
+        "key": "api",
+        "label": "API / rate-limit risk",
+        "score": 7,
+        "note": "Live-tool Δ1."
+      },
+      {
+        "key": "delivery",
+        "label": "Delivery confidence",
+        "score": 8,
+        "note": "Phased graph prevents skipped work."
+      }
+    ],
+    "bottlenecks": [
+      "Long-running tools must stream over WebSocket MCP.",
+      "HITL rejection without a qualitative note is illegal.",
+      "Constraint: deterministic",
+      "Constraint: local-first"
+    ],
+    "attackVectors": [
+      "Prompt injection via ingested competitor pages.",
+      "Tool-call privilege escalation if OAuth scopes are inherited.",
+      "Sandbox escape if generated exec has network."
+    ],
+    "libraries": [
+      {
+        "name": "TanStack Start",
+        "role": "Typed app shell and file routes"
+      },
+      {
+        "name": "Zod",
+        "role": "Schema lock on generated artifacts"
+      },
+      {
+        "name": "Inventory core (vendor or in-house)",
+        "role": "SKU truth + stock ledger"
+      }
+    ]
+  },
+  "competitors": [],
+  "artifacts": [
+    {
+      "id": "0-scorecard-feasibility-architecture-scoreca",
+      "phase": 0,
+      "kind": "scorecard",
+      "title": "Feasibility & Architecture Scorecard",
+      "body": "# Officestock — Phase 0 scorecard\n\nDomain: operations\nOverall: 6.8 / 10 — proceed-with-guards\nLattice jobs: approve, track, record, show, scan, test\nEntities: item, inventory, manager, tech, user, dashboard, table, account, asset, code, log, report, site\nConstraints: deterministic, local-first\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n- Constraint: deterministic\n- Constraint: local-first\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- Inventory core (vendor or in-house): SKU truth + stock ledger"
+    },
+    {
+      "id": "0-algorithm-intent-lattice-a1",
+      "phase": 0,
+      "kind": "algorithm",
+      "title": "Intent Lattice (A1)",
+      "body": "{\n  \"domain\": \"operations\",\n  \"jobs\": [\n    \"approve\",\n    \"track\",\n    \"record\",\n    \"show\",\n    \"scan\",\n    \"test\"\n  ],\n  \"entities\": [\n    \"item\",\n    \"inventory\",\n    \"manager\",\n    \"tech\",\n    \"user\",\n    \"dashboard\",\n    \"table\",\n    \"account\",\n    \"asset\",\n    \"code\",\n    \"log\",\n    \"report\",\n    \"site\"\n  ],\n  \"constraints\": [\n    \"deterministic\",\n    \"local-first\"\n  ],\n  \"nodes\": [\n    {\n      \"kind\": \"job\",\n      \"label\": \"approve\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"item\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"inventory\",\n      \"weight\": 0.9500000000000001\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"manager\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"track\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"record\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"show\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"deterministic\",\n      \"weight\": 0.7000000000000001\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"tech\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"user\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"scan\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"test\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"dashboard\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"table\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"account\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"asset\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"code\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"log\",\n      \"weight\": 0.55\n    }\n  ],\n  \"complexity\": 10,\n  \"vague\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "research-0-0-1791193110831",
+      "phase": 0,
+      "kind": "research",
+      "title": "Why architects use quantity calculations: a 2026 guide",
+      "body": "# Why architects use quantity calculations: a 2026 guide\n\nInaccurate quantity takeoffs cause budget overruns of 10-30% and trigger significant delays from material shortages or ordering errors. That single statistic explains why no serious architectural practice treats measurement as an afterthought. Quantity calculations bridge design intent and financial feasibility , preventing the costly redesign cycles that erode client trust and project ...\n\nSource: https://blog.quantiflow.co.uk/blog/why-architects-use-quantity-calculations-a-2026-guide",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-1-1791193110831",
+      "phase": 0,
+      "kind": "research",
+      "title": "AI Architecture 2026: Design, Massing and Feasibility",
+      "body": "# AI Architecture 2026: Design, Massing and Feasibility\n\nAI architecture workflow guide showing how GRAI helps test site feasibility , massing, materials, climate risks, and development decisions.\n\nSource: https://internationalreal.estate/insights/the-new-ai-architecture-workflow-for-pre-design-massing-and-real-estate-feasibility",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-2-1791193110831",
+      "phase": 0,
+      "kind": "research",
+      "title": "PDF Ed Architecture Insights Q1 2026 - cove.inc",
+      "body": "# PDF Ed Architecture Insights Q1 2026 - cove.inc\n\nThis quarterly report highlights the trends, market signals, and strategic considerations shaping architectural practice. From ABI data and construction forecasts to building performance and evolving market conditions, it provides actionable, must-read insights to guide your practice and decisions.\n\nSource: https://cove.inc/wp-content/uploads/2026/04/Q1-2026-Architecture-Industry-Insights.pdf",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-3-1791193110831",
+      "phase": 0,
+      "kind": "research",
+      "title": "Architecture & Design Trends 2026: 20 Data-Backed Shifts",
+      "body": "# Architecture & Design Trends 2026: 20 Data-Backed Shifts\n\n2026 Architecture , Design & Construction Trends: 20 Data-Backed Shifts Reshaping the Industry 80+ statistics from Deloitte, DBIA, ASCE, and Houzz. What each trend means for your firm's strategy and marketing.\n\nSource: https://programa.design/blog/2026-architecture-design-construction-trends",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-4-1791193110831",
+      "phase": 0,
+      "kind": "research",
+      "title": "Mastering Quantity Takeoffs: The Ultimate Guide to Construction ...",
+      "body": "# Mastering Quantity Takeoffs: The Ultimate Guide to Construction ...\n\nMaster accurate quantity takeoffs for 2026 . Our guide shows you how to eliminate costly errors, integrate BIM, and protect your construction project profits.\n\nSource: https://www.craydl.com/blog/posts/mastering-quantity-takeoffs-the-ultimate-guide-to-construction-estimation-in-2026.html",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-0-1791193110831",
+      "phase": 0,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "Officestock's P0 Deep Research & Feasibility phase established a clear market rationale by triangulating architectural practice trends with internal pain points. Research confirms that inaccurate quantity takeoffs drive 10–30% budget overruns and material-shortage delays, explaining why serious practices treat calculation rigor as non-negotiable—a discipline directly transferable to mundane office-supply tracking, where undocumented consumption and ad-hoc reordering create the same class of avoidable cost and disruption. Broader 2026 signals reinforce the moment: AI-assisted feasibility and massing tools (GRAI), quarterly practice insights from Cove, and data-backed industry shifts from Deloitte, DBIA, ASCE, and Houzz all point to firms professionalizing operational workflows, while BIM-integrated takeoff guides show a maturing expectation that inventory data should be structured, auditable, and actionable. For Officestock, feasibility is therefore validated not as a novel invention but as a right-sized application of proven quantity-management principles to a low-stakes, high-frequency domain—staff withdrawals, manager receipts, and stocktakes—where the incumbent \"system\" is memory and goodwill, and where even modest accuracy gains eliminate the recurring friction of unannounced shortages.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p0-32696329",
+      "phase": 0,
+      "kind": "gate",
+      "title": "DoD gate — P0",
+      "body": "# DoD gate — P0\n\n**Result: PASS**\n\nAll criteria met for phase 0.\n\nEvidence hash: 3269632901",
+      "language": "markdown"
+    },
+    {
+      "id": "1-graph-execution-topology-this-build",
+      "phase": 1,
+      "kind": "graph",
+      "title": "Execution topology (this build)",
+      "body": "Sequential pipeline: approve → track → record → show → scan → test\nState entities: item, inventory, manager, tech, user, dashboard, table, account, asset, code, log, report, site\n\nEach step advances a item through its lifecycle in the operations domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over items; no parallel, event, or failover topology is claimed beyond what the brief states.",
+      "language": "text"
+    },
+    {
+      "id": "gate-p1-10507139",
+      "phase": 1,
+      "kind": "gate",
+      "title": "DoD gate — P1",
+      "body": "# DoD gate — P1\n\n**Result: PASS**\n\nAll criteria met for phase 1.\n\nEvidence hash: 1050713914",
+      "language": "markdown"
+    },
+    {
+      "id": "2-memory-data-model-retrieval",
+      "phase": 2,
+      "kind": "memory",
+      "title": "Data model & retrieval",
+      "body": "Records: item, inventory, manager, tech, user, dashboard, table, account, asset, code, log, report, site\nOperations: approve, track, record, show, scan, test\n\nEach item is the unit of state; approve steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
+    },
+    {
+      "id": "gate-p2-18455377",
+      "phase": 2,
+      "kind": "gate",
+      "title": "DoD gate — P2",
+      "body": "# DoD gate — P2\n\n**Result: PASS**\n\nAll criteria met for phase 2.\n\nEvidence hash: 1845537766",
+      "language": "markdown"
+    },
+    {
+      "id": "3-mcp-integration-surface-declared",
+      "phase": 3,
+      "kind": "mcp",
+      "title": "Integration surface (declared)",
+      "body": "{\n  \"domain\": \"operations\",\n  \"surface\": [\n    \"inventory / SKU ledger\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p3-16382928",
+      "phase": 3,
+      "kind": "gate",
+      "title": "DoD gate — P3",
+      "body": "# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844",
+      "language": "markdown"
+    },
+    {
+      "id": "4-security-security-authorization-policy",
+      "phase": 4,
+      "kind": "security",
+      "title": "Security & authorization policy",
+      "body": "Protected data: item, inventory, manager, tech, user, dashboard (the brief's own entities).\nAccess model: manager, tech, user — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the items its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive item data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
+    },
+    {
+      "id": "gate-p4-35271886",
+      "phase": 4,
+      "kind": "gate",
+      "title": "DoD gate — P4",
+      "body": "# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654",
+      "language": "markdown"
+    },
+    {
+      "id": "5-validation-validation-hitl-contract",
+      "phase": 5,
+      "kind": "validation",
+      "title": "Validation + HITL contract",
+      "body": "Validation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap."
+    },
+    {
+      "id": "gate-p5-29514528",
+      "phase": 5,
+      "kind": "gate",
+      "title": "DoD gate — P5",
+      "body": "# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883",
+      "language": "markdown"
+    },
+    {
+      "id": "6-code-p6-placeholder-module-determinis",
+      "phase": 6,
+      "kind": "code",
+      "title": "P6 placeholder module (deterministic template)",
+      "body": "const JOBS = [\"approve\", \"track\", \"record\", \"show\", \"scan\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Officestock\", phase: 6, job: \"approve\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"approve\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"approve\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"approve\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+      "language": "javascript"
+    },
+    {
+      "id": "6-code-sandbox-result",
+      "phase": 6,
+      "kind": "code",
+      "title": "Sandbox result",
+      "body": "{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "packet-6",
+      "phase": 6,
+      "kind": "packet",
+      "title": "Agent packet (A4)",
+      "body": "# RapidTool Agent Packet v3 — Officestock\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T09:39:55.598Z\nproject_id: 4ee3a8fa-c57b-4062-85b6-b9b78201335c\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P6 Code Generation, Testing & Deployment) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T09:39:55.598Z\",\n  \"project_id\": \"4ee3a8fa-c57b-4062-85b6-b9b78201335c\",\n  \"name\": \"Officestock\",\n  \"project_status\": \"running\",\n  \"current_phase\": {\n    \"id\": 6,\n    \"code\": \"P6\",\n    \"title\": \"Code Generation, Testing & Deployment\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"1321263890\",\n  \"input_hash\": \"3572317904\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791193110897,\n      \"decided_at\": 1791193110909\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791193110920,\n      \"decided_at\": 1791193110938\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 9,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 10,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 7,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 0,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 24926,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Officestock — Office Supplies Inventory Tracker\n\n## What this is\nAn internal tool to track office supplies (stationery, printer consumables,\nkitchen and cleaning items) so nothing runs out unannounced. Staff record what\nthey take; the office manager receives deliveries and runs stocktakes.\n\n## Users\n- **Staff** — take an item from the cupboard.\n- **Office manager** — receive deliveries, adjust counts, run stocktakes.\n- **Approver** — approve purchase requests raised below reorder level.\n\n## Core domain\n- **Item**: id, name, category (Stationery | Printer | Kitchen | Cleaning |\n  Tech), unit (each / box / ream / pack), current qty, reorder level, target\n  qty (to top up to), location, active.\n- **Movement**: id, item, delta (+/-), reason (Issued | Received | Damaged |\n  Adjustment | Stocktake), actor, timestamp, note, resulting qty.\n- **PurchaseRequest**: id, item, requested qty, status (Open | Approved |\n  Ordered | Received | Cancelled), raised-by, decision note.\n\n## Required features\n1. **Item list** — searchable, filterable by category and by a \"needs reorder\"\n   toggle; each row shows qty, reorder level, a colour-coded status, and\n   location. Sort by name, qty, or category.\n2. **Issue an item** — pick item, quantity, actor; refuse if quantity exceeds\n   current stock; write an Issued movement and decrement qty.\n3. **Receive stock** — increase qty and write a Received movement; if an Open/\n   Approved/Ordered purchase request exists for that item, mark it Received.\n4. **Adjust / damage** — record a Damaged or Adjustment movement; an adjustment\n   requires a note and can set the qty to a counted value (the delta is\n   computed), never silently.\n5. **Purchase requests** — raise a request for a below-reorder item with a\n   suggested quantity of (target − current); approve, order, receive, cancel\n   with constrained transitions; receiving a request writes a Received movement.\n6. **Stocktake** — enter a counted qty per item in a category; for each item the\n   app writes a Stocktake movement whose delta is counted − current, and shows a\n   variance report (items over/under by more than a threshold).\n7. **Dashboard** — total items, count below reorder, open purchase requests, and\n   total value on hand if an optional unit cost is set per item.\n\n## Functional requirements\n- Quantities are non-negative integers; stock can never go negative (issuing\n  more than on hand is refused naming the shortfall).\n- Current qty is the running sum of movements; a reconstruction from the\n  movement log must equal the stored qty (invariant check exposed).\n- Purchase-request status transitions constrained: Open→Approved→Ordered→\n  Received (or →Cancelled from Open/Approved/Ordered); Received is terminal.\n- Suggested reorder qty = max(0, target − current).\n- Optional value on hand = qty × unit cost (integer pence), displayed GBP.\n\n## Non-functional requirements\n- Desktop-first, usable to 768px; accessible tables and forms.\n- Deterministic inventory logic separated from UI for unit testing.\n- Local persistence; no external services required.\n\n## Explicitly out of scope\n- Barcode scanning.\n- Supplier ordering / EDI integration.\n- Asset depreciation or accounting.\n- Multi-site inventory.\n\n## Intent lattice (A1)\nDomain: operations\nJobs: approve, track, record, show, scan, test\nEntities: item, inventory, manager, tech, user, dashboard, table, account, asset, code, log, report, site\nConstraints: deterministic, local-first\nComplexity: 10.0 / 10\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Exit criteria (DoD)\nGate P6: FAIL (3 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] Last template self-test run passed\n- [x] Generated source is non-empty\n- [x] Generated code artifact exists for P6\n- [ ] Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- [ ] Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) — keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns core missing (18/32): console, manager, office, officestock, oracle, report, scan, show, staff, tech, terminal, track, …; advisory missing (70/141): internal, stationery, printer, consumables, kitchen, cleaning, nothing, runs, unannounced, deliveries, cupboard, run, …\n- [ ] Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\n\n## Artifacts (trimmed)\nCensus: 21 artifact row(s) recorded — the newest 8 render below (window ≤ 8; the packet's own row is excluded).\n### P3 · Integration surface (declared)\n{\n  \"domain\": \"operations\",\n  \"surface\": [\n    \"inventory / SKU ledger\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}\n\n### P3 · DoD gate — P3\n# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844\n\n### P4 · Security & authorization policy\nProtected data: item, inventory, manager, tech, user, dashboard (the brief's own entities).\nAccess model: manager, tech, user — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the items its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive item data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty).\n\n### P4 · DoD gate — P4\n# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654\n\n### P5 · Validation + HITL contract\nValidation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap.\n\n### P5 · DoD gate — P5\n# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883\n\n### P6 · P6 placeholder module (deterministic template)\nconst JOBS = [\"approve\", \"track\", \"record\", \"show\", \"scan\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Officestock\", phase: 6, job: \"approve\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"approve\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"approve\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfuncti…\n\n### P6 · Sandbox result\n{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}\n\n\n## Research sources (live)\n- Why architects use quantity calculations: a 2026 guide — https://blog.quantiflow.co.uk/blog/why-architects-use-quantity-calculations-a-2026-guide\n- AI Architecture 2026: Design, Massing and Feasibility — https://internationalreal.estate/insights/the-new-ai-architecture-workflow-for-pre-design-massing-and-real-estate-feasibility\n- PDF Ed Architecture Insights Q1 2026 - cove.inc — https://cove.inc/wp-content/uploads/2026/04/Q1-2026-Architecture-Industry-Insights.pdf\n- Architecture & Design Trends 2026: 20 Data-Backed Shifts — https://programa.design/blog/2026-architecture-design-construction-trends\n- Mastering Quantity Takeoffs: The Ultimate Guide to Construction ... — https://www.craydl.com/blog/posts/mastering-quantity-takeoffs-the-ultimate-guide-to-construction-estimation-in-2026.html\n\n> Fetched by RapidTool — cite these, do not invent sources.\n\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge — only P7 if this phase completes\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "language": "markdown"
+    },
+    {
+      "id": "6-docs-p6-architecture-trace-reqtrace",
+      "phase": 6,
+      "kind": "docs",
+      "title": "P6 architecture trace (reqTrace)",
+      "body": "# P6 architecture trace (reqTrace)\n\n**p6-arch: FAIL** · tree (2 files)\n\n- approve → src/generated/chunk.ts\n- test → src/generated/chunk.ts\n\nMissing capabilities (no tree file carries their identifiers):\n- track\n- show\n- scan\n\n> reqTrace: capability → tree file(s), computed by p6-arch over generatedTree code identifiers (stemmed; literals/comments masked).",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p6-20726976",
+      "phase": 6,
+      "kind": "gate",
+      "title": "DoD gate — P6",
+      "body": "# DoD gate — P6\n\n**Result: FAIL**\n\nUnmet criteria:\n- Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) — keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns core missing (18/32): console, manager, office, officestock, oracle, report, scan, show, staff, tech, terminal, track, …; advisory missing (70/141): internal, stationery, printer, consumables, kitchen, cleaning, nothing, runs, unannounced, deliveries, cupboard, run, …\n- Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\nEvidence hash: 2072697611",
+      "language": "markdown"
+    },
+    {
+      "id": "harddod-p6-20726976",
+      "phase": 6,
+      "kind": "docs",
+      "title": "Hard DoD block — P6",
+      "body": "# Hard DoD block — P6\n\n**Advance denied**: P6 cannot be left while its exit criteria are unmet.\n\nUnmet criteria:\n- p6-verified: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- p6-brief-fit: Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) — keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns core missing (18/32): console, manager, office, officestock, oracle, report, scan, show, staff, tech, terminal, track, …; advisory missing (70/141): internal, stationery, printer, consumables, kitchen, cleaning, nothing, runs, unannounced, deliveries, cupboard, run, …\n- p6-arch: Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\nEvidence hash: 2072697611\n\n> Fix the unmet evidence (re-run the phase, deepen research, run real\n> verification) or turn Hard DoD off for this project to advance.",
+      "language": "markdown"
+    }
+  ],
+  "memory": [
+    {
+      "id": "6-episodic-0.86",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-3",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-2",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "5-procedural-0.99",
+      "kind": "procedural",
+      "phase": 5,
+      "text": "HITL reject requires a written reason.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "4-procedural-0.98",
+      "kind": "procedural",
+      "phase": 4,
+      "text": "Product data is protected by least-privilege role access.",
+      "score": 0.98,
+      "source": "engine"
+    },
+    {
+      "id": "3-procedural-0.93",
+      "kind": "procedural",
+      "phase": 3,
+      "text": "Integration surface for operations declared from domain vocabulary.",
+      "score": 0.93,
+      "source": "engine"
+    },
+    {
+      "id": "2-semantic-0.94",
+      "kind": "semantic",
+      "phase": 2,
+      "text": "Data model written for Officestock: item, inventory, manager, tech, user, dashboard, table, account, asset, code, log, report, site.",
+      "score": 0.94,
+      "source": "engine"
+    },
+    {
+      "id": "1-procedural-0.99",
+      "kind": "procedural",
+      "phase": 1,
+      "text": "Officestock executes as one sequential operations pipeline.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "0-episodic-0.91",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Ingested brief for Officestock in operations.",
+      "score": 0.91,
+      "source": "engine"
+    },
+    {
+      "id": "0-semantic-0.97",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Scorecard must exist before any code node fires.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain operations; jobs approve, track, record, show.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: deterministic, local-first.",
+      "score": 0.7,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-template-emission-2bddc817",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "L2 template-emission: phase P6 sealed with gate unmet (Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) — keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns core missing (18/32): console, manager, office, officestock, oracle, report, scan, show, staff, tech, terminal, track, …; advisory missing (70/141): internal, stationery, printer, consumables, kitchen, cleaning, no…",
+      "score": 0.7,
+      "source": "engine",
+      "tags": [
+        "L2",
+        "lesson",
+        "probe:141): internal, stationery, printer, consumables, kitchen, cleaning, nothing, runs, unannounced, deliveries, cupboard, run, …",
+        "probe:machine verification promoted a tested verdict (lasttest.label === \"tested\" with evidencehash)",
+        "probe:tree architecture: every expanded-spec capability maps to a real generatedtree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)",
+        "template-emission"
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1791193106356,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "operations"
+    },
+    {
+      "ts": 1791193107316,
+      "phase": 0,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P0 Deep Research & Feasibility"
+    },
+    {
+      "ts": 1791193107317,
+      "phase": 0,
+      "level": "info",
+      "event": "scorecard.ready",
+      "detail": "overall=6.8 verdict=proceed-with-guards"
+    },
+    {
+      "ts": 1791193107317,
+      "phase": 0,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193110832,
+      "phase": 0,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32696329"
+    },
+    {
+      "ts": 1791193110843,
+      "phase": 1,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P1 Core Orchestration & State Graph"
+    },
+    {
+      "ts": 1791193110843,
+      "phase": 1,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193110856,
+      "phase": 1,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 10507139"
+    },
+    {
+      "ts": 1791193110864,
+      "phase": 2,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P2 Memory & Context Consolidation"
+    },
+    {
+      "ts": 1791193110864,
+      "phase": 2,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193110872,
+      "phase": 2,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 18455377"
+    },
+    {
+      "ts": 1791193110880,
+      "phase": 3,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P3 Tool Integration & Interoperability"
+    },
+    {
+      "ts": 1791193110880,
+      "phase": 3,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193110890,
+      "phase": 3,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16382928"
+    },
+    {
+      "ts": 1791193110897,
+      "phase": 4,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P4 Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791193110897,
+      "phase": 4,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193110909,
+      "phase": 4,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791193110912,
+      "phase": 4,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35271886"
+    },
+    {
+      "ts": 1791193110920,
+      "phase": 5,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P5 Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791193110920,
+      "phase": 5,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193110938,
+      "phase": 5,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791193110945,
+      "phase": 5,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 29514528"
+    },
+    {
+      "ts": 1791193110958,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791193110960,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791193110959,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193110963,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-brief-fit]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in t"
+    },
+    {
+      "ts": 1791193110964,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.jobs.shortfall",
+      "detail": "declared 6 lattice job(s) vs materialised 5 spec-graph job node(s) — 1 unmaterialised; missing: test"
+    },
+    {
+      "ts": 1791193136392,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_VALIDATION · expandBrief failed: model returned a non-conforming expansion payload: reply is not a JSON object"
+    },
+    {
+      "ts": 1791193136392,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "RT_E_VALIDATION · expandBrief failed: model returned a non-conforming expansion payload: reply is not a JSON object"
+    },
+    {
+      "ts": 1791193136401,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791193136403,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791193136401,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193136405,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-brief-fit]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the uni · class: RT_E_VALIDATION"
+    },
+    {
+      "ts": 1791193147152,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: approve, track, show, scan (+8 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791193170274,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/10 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193189748,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/10 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193191321,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/10 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193191343,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_PLAN_UNDERPRODUCED · chunk 2/10 refused · accepted tree has 1 module(s) but the brief demands >= 8 — the plan is under-produced; missing module(s): src/jobs/approve.ts (job:approve), src/jobs/track.ts (job:track), src/jobs/record.ts (job:record), src/jobs/show.ts (job:show), src/jobs/scan.ts (job:scan), src/domain/operations.ts (entity:operations), src/generated/officestock.ts (brief:officestock), src/generated/office.ts (brief:office) — proximate refusal (RT_E_VALIDATION): cross-chunk duplicate declaration: \"listItems\" (declared at line 536; already exported by src/generated/chunk.ts), \"issueItem\" (declared at line 205; already exported by src/generated/chunk.ts), \"receiveStock\" (declared at line 235; already exported …[elided 526 chars]… orted by src/generated/chunk.ts), \"getDashboard\" (declared at line 474; already exported by src/generated/chunk.ts), \"verifyQuantities\" (declared at line 509; already exported by src/generated/chunk.ts), \"isNonNegativeInteger\" (declared at line 134; already exported by src/generated/chunk.ts) — the materialized ESM imports each earlier chunk's exports, so a same-named top-level declaration fails to load (SyntaxError: Identifier 'listItems' has already been declared)"
+    },
+    {
+      "ts": 1791193191356,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (2 files) · missing: track, show, scan"
+    },
+    {
+      "ts": 1791193195514,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "tests/oracle.spec.ts: fail — skip-dominated spec: 1 live case(s) ≤ 8 skipped — a skip is not a pass"
+    },
+    {
+      "ts": 1791193195564,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791193195566,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791193195564,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193195598,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 3 unmet DoD probe(s) [p6-verified, p6-brief-fit, p6-arch]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or · class: RT_E_PLAN_UNDERPRODUCED"
+    },
+    {
+      "ts": 1791193195644,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (2 files) · missing: track, show, scan"
+    },
+    {
+      "ts": 1791193217966,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: approve, track, record, show, scan (+10 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791193219867,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/11 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193219872,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_LLM_REJECTED · chunk 1/11 refused · model returned a legal refusal: The brief requires at least 8 modules with distinct files while this synthesis chunk can only emit a single module whose exports are already claimed by src/generated/chunk.ts, so the mandated type signatures cannot be satisfied without duplicating earlier exports. (reason: TYPE SIGNATURES demand the Category/Unit/MovementReason/PurchaseRequestStatus types and job modules (approve/track/record/show/scan) but chunk.ts already exports the corresponding functions, causing the cross-chunk duplicate-declaration failure the previous cycle hit.)"
+    },
+    {
+      "ts": 1791193219884,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (2 files) · missing: track, show, scan"
+    },
+    {
+      "ts": 1791193223832,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "tests/oracle.spec.ts: fail — skip-dominated spec: 1 live case(s) ≤ 8 skipped — a skip is not a pass"
+    },
+    {
+      "ts": 1791193223832,
+      "phase": 6,
+      "level": "error",
+      "event": "p6.journey.exhausted",
+      "detail": "3 cycle(s) without a green tree-run — last refusal: RT_E_LLM_REJECTED · chunk 1/11 refused · model returned a legal refusal: The brief requires at least 8 modules with distinct files while this synthesis chunk can only emit a single"
+    },
+    {
+      "ts": 1791193223880,
+      "phase": 6,
+      "level": "warn",
+      "event": "gate.verdict",
+      "detail": "FAIL · 3 unmet · 20726976"
+    },
+    {
+      "ts": 1791193223918,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.blocked",
+      "detail": "P6 advance blocked — unmet: p6-verified, p6-brief-fit, p6-arch"
+    },
+    {
+      "ts": 1791193223932,
+      "phase": 6,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L2 template-emission lesson-template-emission-2bddc817 (keyed P6 synthesis refused — red gate on a live run)"
+    }
+  ],
+  "hitl": null,
+  "decisions": [
+    {
+      "id": "hitl-4-1791193110909",
+      "phase": 4,
+      "title": "Approve isolation policy",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791193110897,
+      "decidedAt": 1791193110909,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P4",
+        "reason": "autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-5-1791193110938",
+      "phase": 5,
+      "title": "Approve validation contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791193110920,
+      "decidedAt": 1791193110938,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P5",
+        "reason": "autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    }
+  ],
+  "modelRoute": "deepseek-flash",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": false
+  },
+  "openapi": "",
+  "adr": "",
+  "lattice": {
+    "domain": "operations",
+    "jobs": [
+      "approve",
+      "track",
+      "record",
+      "show",
+      "scan",
+      "test"
+    ],
+    "entities": [
+      "item",
+      "inventory",
+      "manager",
+      "tech",
+      "user",
+      "dashboard",
+      "table",
+      "account",
+      "asset",
+      "code",
+      "log",
+      "report",
+      "site"
+    ],
+    "constraints": [
+      "deterministic",
+      "local-first"
+    ],
+    "nodes": [
+      {
+        "kind": "job",
+        "label": "approve",
+        "weight": 1
+      },
+      {
+        "kind": "object",
+        "label": "item",
+        "weight": 1
+      },
+      {
+        "kind": "object",
+        "label": "inventory",
+        "weight": 0.9500000000000001
+      },
+      {
+        "kind": "actor",
+        "label": "manager",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "track",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "record",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "show",
+        "weight": 0.75
+      },
+      {
+        "kind": "constraint",
+        "label": "deterministic",
+        "weight": 0.7000000000000001
+      },
+      {
+        "kind": "actor",
+        "label": "tech",
+        "weight": 0.55
+      },
+      {
+        "kind": "actor",
+        "label": "user",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "scan",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "test",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "dashboard",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "table",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "account",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "asset",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "code",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "log",
+        "weight": 0.55
+      }
+    ],
+    "complexity": 10,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 0,
+    "apiDelta": 1,
+    "tightness": 7.5,
+    "extraHitl": [],
+    "notes": [
+      "Standard isolate policy.",
+      "Default API budget.",
+      "Stock HITL set (P4, P5, P8, P9)."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1791193195600,
+      "summary": "18 nodes · complexity 10.0"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1791193195600,
+      "summary": "ranked 13 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1791193195600,
+      "summary": "tightness 7.5 · sec+0"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1791193195600,
+      "summary": "compiled P6 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1791193195600,
+      "summary": "10 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1791193195600,
+      "summary": "6 entities · 6 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1791193195600,
+      "summary": "8 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1791193195600,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — Officestock\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T09:39:55.598Z\nproject_id: 4ee3a8fa-c57b-4062-85b6-b9b78201335c\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P6 Code Generation, Testing & Deployment) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T09:39:55.598Z\",\n  \"project_id\": \"4ee3a8fa-c57b-4062-85b6-b9b78201335c\",\n  \"name\": \"Officestock\",\n  \"project_status\": \"running\",\n  \"current_phase\": {\n    \"id\": 6,\n    \"code\": \"P6\",\n    \"title\": \"Code Generation, Testing & Deployment\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"1321263890\",\n  \"input_hash\": \"3572317904\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791193110897,\n      \"decided_at\": 1791193110909\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791193110920,\n      \"decided_at\": 1791193110938\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 9,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 10,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 7,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 0,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 24926,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Officestock — Office Supplies Inventory Tracker\n\n## What this is\nAn internal tool to track office supplies (stationery, printer consumables,\nkitchen and cleaning items) so nothing runs out unannounced. Staff record what\nthey take; the office manager receives deliveries and runs stocktakes.\n\n## Users\n- **Staff** — take an item from the cupboard.\n- **Office manager** — receive deliveries, adjust counts, run stocktakes.\n- **Approver** — approve purchase requests raised below reorder level.\n\n## Core domain\n- **Item**: id, name, category (Stationery | Printer | Kitchen | Cleaning |\n  Tech), unit (each / box / ream / pack), current qty, reorder level, target\n  qty (to top up to), location, active.\n- **Movement**: id, item, delta (+/-), reason (Issued | Received | Damaged |\n  Adjustment | Stocktake), actor, timestamp, note, resulting qty.\n- **PurchaseRequest**: id, item, requested qty, status (Open | Approved |\n  Ordered | Received | Cancelled), raised-by, decision note.\n\n## Required features\n1. **Item list** — searchable, filterable by category and by a \"needs reorder\"\n   toggle; each row shows qty, reorder level, a colour-coded status, and\n   location. Sort by name, qty, or category.\n2. **Issue an item** — pick item, quantity, actor; refuse if quantity exceeds\n   current stock; write an Issued movement and decrement qty.\n3. **Receive stock** — increase qty and write a Received movement; if an Open/\n   Approved/Ordered purchase request exists for that item, mark it Received.\n4. **Adjust / damage** — record a Damaged or Adjustment movement; an adjustment\n   requires a note and can set the qty to a counted value (the delta is\n   computed), never silently.\n5. **Purchase requests** — raise a request for a below-reorder item with a\n   suggested quantity of (target − current); approve, order, receive, cancel\n   with constrained transitions; receiving a request writes a Received movement.\n6. **Stocktake** — enter a counted qty per item in a category; for each item the\n   app writes a Stocktake movement whose delta is counted − current, and shows a\n   variance report (items over/under by more than a threshold).\n7. **Dashboard** — total items, count below reorder, open purchase requests, and\n   total value on hand if an optional unit cost is set per item.\n\n## Functional requirements\n- Quantities are non-negative integers; stock can never go negative (issuing\n  more than on hand is refused naming the shortfall).\n- Current qty is the running sum of movements; a reconstruction from the\n  movement log must equal the stored qty (invariant check exposed).\n- Purchase-request status transitions constrained: Open→Approved→Ordered→\n  Received (or →Cancelled from Open/Approved/Ordered); Received is terminal.\n- Suggested reorder qty = max(0, target − current).\n- Optional value on hand = qty × unit cost (integer pence), displayed GBP.\n\n## Non-functional requirements\n- Desktop-first, usable to 768px; accessible tables and forms.\n- Deterministic inventory logic separated from UI for unit testing.\n- Local persistence; no external services required.\n\n## Explicitly out of scope\n- Barcode scanning.\n- Supplier ordering / EDI integration.\n- Asset depreciation or accounting.\n- Multi-site inventory.\n\n## Intent lattice (A1)\nDomain: operations\nJobs: approve, track, record, show, scan, test\nEntities: item, inventory, manager, tech, user, dashboard, table, account, asset, code, log, report, site\nConstraints: deterministic, local-first\nComplexity: 10.0 / 10\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Exit criteria (DoD)\nGate P6: FAIL (3 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] Last template self-test run passed\n- [x] Generated source is non-empty\n- [x] Generated code artifact exists for P6\n- [ ] Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- [ ] Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) — keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns core missing (18/32): console, manager, office, officestock, oracle, report, scan, show, staff, tech, terminal, track, …; advisory missing (70/141): internal, stationery, printer, consumables, kitchen, cleaning, nothing, runs, unannounced, deliveries, cupboard, run, …\n- [ ] Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\n\n## Artifacts (trimmed)\nCensus: 21 artifact row(s) recorded — the newest 8 render below (window ≤ 8; the packet's own row is excluded).\n### P3 · Integration surface (declared)\n{\n  \"domain\": \"operations\",\n  \"surface\": [\n    \"inventory / SKU ledger\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}\n\n### P3 · DoD gate — P3\n# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844\n\n### P4 · Security & authorization policy\nProtected data: item, inventory, manager, tech, user, dashboard (the brief's own entities).\nAccess model: manager, tech, user — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the items its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive item data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty).\n\n### P4 · DoD gate — P4\n# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654\n\n### P5 · Validation + HITL contract\nValidation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap.\n\n### P5 · DoD gate — P5\n# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883\n\n### P6 · P6 placeholder module (deterministic template)\nconst JOBS = [\"approve\", \"track\", \"record\", \"show\", \"scan\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Officestock\", phase: 6, job: \"approve\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"approve\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"approve\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfuncti…\n\n### P6 · Sandbox result\n{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}\n\n\n## Research sources (live)\n- Why architects use quantity calculations: a 2026 guide — https://blog.quantiflow.co.uk/blog/why-architects-use-quantity-calculations-a-2026-guide\n- AI Architecture 2026: Design, Massing and Feasibility — https://internationalreal.estate/insights/the-new-ai-architecture-workflow-for-pre-design-massing-and-real-estate-feasibility\n- PDF Ed Architecture Insights Q1 2026 - cove.inc — https://cove.inc/wp-content/uploads/2026/04/Q1-2026-Architecture-Industry-Insights.pdf\n- Architecture & Design Trends 2026: 20 Data-Backed Shifts — https://programa.design/blog/2026-architecture-design-construction-trends\n- Mastering Quantity Takeoffs: The Ultimate Guide to Construction ... — https://www.craydl.com/blog/posts/mastering-quantity-takeoffs-the-ultimate-guide-to-construction-estimation-in-2026.html\n\n> Fetched by RapidTool — cite these, do not invent sources.\n\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge — only P7 if this phase completes\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/operations.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/approve.ts",
+        "purpose": "Implement job “approve” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/track.ts",
+        "purpose": "Implement job “track” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/record.ts",
+        "purpose": "Implement job “record” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-3",
+        "file": "src/jobs/show.ts",
+        "purpose": "Implement job “show” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-4",
+        "file": "src/jobs/scan.ts",
+        "purpose": "Implement job “scan” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2",
+          "job-3",
+          "job-4"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "job-3",
+      "job-4",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Item",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Inventory",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Manager",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Tech",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "User",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Dashboard",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/approve",
+        "job": "approve"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/track",
+        "job": "track"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/record",
+        "job": "record"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/show",
+        "job": "show"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/scan",
+        "job": "scan"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/test",
+        "job": "test"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.approve.happy",
+      "given": "Authorized operator submits “approve” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "approve"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.track.happy",
+      "given": "Authorized operator submits “track” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "track"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.record.happy",
+      "given": "Authorized operator submits “record” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "record"
+    },
+    {
+      "id": "orc-4",
+      "name": "job.show.happy",
+      "given": "Authorized operator submits “show” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "show"
+    },
+    {
+      "id": "orc-5",
+      "name": "job.scan.happy",
+      "given": "Authorized operator submits “scan” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "scan"
+    },
+    {
+      "id": "orc-c-deterministic",
+      "name": "constraint.deterministic",
+      "given": "Request violates deterministic",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "approve"
+    },
+    {
+      "id": "orc-c-local-first",
+      "name": "constraint.local-first",
+      "given": "Request violates local-first",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "approve"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for approve, track, record before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": false
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Code Generation, Testing & Deployment.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": true
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": false
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: deterministic, local-first.",
+      "active": true
+    }
+  ],
+  "notes": "",
+  "generatedSource": "const JOBS = [\"approve\", \"track\", \"record\", \"show\", \"scan\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Officestock\", phase: 6, job: \"approve\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"approve\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"approve\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"approve\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+  "lastTest": {
+    "ok": true,
+    "detail": "tests.pass"
+  },
+  "enforceDod": true,
+  "wildMode": false,
+  "wildRun": null,
+  "chatLog": [],
+  "research": [
+    {
+      "query": "architecture feasibility 2026 item qty movement",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "Why architects use quantity calculations: a 2026 guide",
+          "url": "https://blog.quantiflow.co.uk/blog/why-architects-use-quantity-calculations-a-2026-guide",
+          "content": "Inaccurate quantity takeoffs cause budget overruns of 10-30% and trigger significant delays from material shortages or ordering errors. That single statistic explains why no serious architectural practice treats measurement as an afterthought. Quantity calculations bridge design intent and financial feasibility , preventing the costly redesign cycles that erode client trust and project ..."
+        },
+        {
+          "title": "AI Architecture 2026: Design, Massing and Feasibility",
+          "url": "https://internationalreal.estate/insights/the-new-ai-architecture-workflow-for-pre-design-massing-and-real-estate-feasibility",
+          "content": "AI architecture workflow guide showing how GRAI helps test site feasibility , massing, materials, climate risks, and development decisions."
+        },
+        {
+          "title": "PDF Ed Architecture Insights Q1 2026 - cove.inc",
+          "url": "https://cove.inc/wp-content/uploads/2026/04/Q1-2026-Architecture-Industry-Insights.pdf",
+          "content": "This quarterly report highlights the trends, market signals, and strategic considerations shaping architectural practice. From ABI data and construction forecasts to building performance and evolving market conditions, it provides actionable, must-read insights to guide your practice and decisions."
+        },
+        {
+          "title": "Architecture & Design Trends 2026: 20 Data-Backed Shifts",
+          "url": "https://programa.design/blog/2026-architecture-design-construction-trends",
+          "content": "2026 Architecture , Design & Construction Trends: 20 Data-Backed Shifts Reshaping the Industry 80+ statistics from Deloitte, DBIA, ASCE, and Houzz. What each trend means for your firm's strategy and marketing."
+        },
+        {
+          "title": "Mastering Quantity Takeoffs: The Ultimate Guide to Construction ...",
+          "url": "https://www.craydl.com/blog/posts/mastering-quantity-takeoffs-the-ultimate-guide-to-construction-estimation-in-2026.html",
+          "content": "Master accurate quantity takeoffs for 2026 . Our guide shows you how to eliminate costly errors, integrate BIM, and protect your construction project profits."
+        }
+      ]
+    }
+  ],
+  "implementationSpec": null,
+  "_v": 2,
+  "generatedTree": [
+    {
+      "path": "src/generated.ts",
+      "source": "export * from \"./generated/chunk.ts\";\n",
+      "hash": "3644953871",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/chunk.ts",
+      "source": "type Category = 'Stationery' | 'Printer' | 'Kitchen' | 'Cleaning' | 'Tech';\ntype Unit = 'each' | 'box' | 'ream' | 'pack';\ntype MovementReason = 'Issued' | 'Received' | 'Damaged' | 'Adjustment' | 'Stocktake';\ntype PurchaseRequestStatus = 'Open' | 'Approved' | 'Ordered' | 'Received' | 'Cancelled';\n\ninterface Item {\n  id: string;\n  name: string;\n  category: Category;\n  unit: Unit;\n  currentQty: number;\n  reorderLevel: number;\n  targetQty: number;\n  location: string;\n  active: boolean;\n  unitCost?: number;\n}\n\ninterface Movement {\n  id: string;\n  itemId: string;\n  delta: number;\n  reason: MovementReason;\n  actor: string;\n  timestamp: string;\n  note: string;\n  resultingQty: number;\n}\n\ninterface PurchaseRequest {\n  id: string;\n  itemId: string;\n  requestedQty: number;\n  status: PurchaseRequestStatus;\n  raisedBy: string;\n  decisionNote: string;\n}\n\ninterface ItemRow {\n  id: string;\n  name: string;\n  category: Category;\n  unit: Unit;\n  currentQty: number;\n  reorderLevel: number;\n  status: string;\n  location: string;\n  active: boolean;\n}\n\ninterface ItemListResult {\n  ok: boolean;\n  rows: ItemRow[];\n  error: string;\n}\n\ninterface StockItemResult {\n  ok: boolean;\n  item: Item | null;\n  movements: Movement[];\n  requests: PurchaseRequest[];\n  error: string;\n}\n\ninterface VarianceRow {\n  itemId: string;\n  name: string;\n  delta: number;\n  direction: string;\n}\n\ninterface StocktakeResult {\n  ok: boolean;\n  variance: VarianceRow[];\n  movements: Movement[];\n  items: Item[];\n  error: string;\n}\n\ninterface DashboardResult {\n  totalItems: number;\n  belowReorder: number;\n  openPurchaseRequests: number;\n  totalValuePence: number;\n  valueDisplay: string;\n}\n\ninterface VerifyRow {\n  itemId: string;\n  name: string;\n  storedQty: number;\n  reconstructedQty: number;\n  matches: boolean;\n}\n\ninterface VerifyResult {\n  ok: boolean;\n  rows: VerifyRow[];\n  drifted: number;\n}\n\ninterface InventoryState {\n  items: Item[];\n  movements: Movement[];\n  requests: PurchaseRequest[];\n  seq: number;\n}\n\ninterface ClockLike {\n  nowIso: string;\n}\n\n/**\n * Create a fresh in-memory inventory state with deterministic counters.\n *\n * @returns {InventoryState} an empty inventory state.\n */\nfunction createState(): InventoryState {\n  return { items: [], movements: [], requests: [], seq: 0 };\n}\n\n/**\n * Deterministically build the next identifier from the state sequence.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} prefix - a short prefix for the identifier.\n * @returns {string} a stable identifier string.\n */\nfunction nextId(state: InventoryState, prefix: string): string {\n  state.seq = state.seq + 1;\n  let n: number = state.seq;\n  let digits: string = '';\n  while (n > 0) {\n    const d: number = n % 10;\n    digits = String(d) + digits;\n    n = Math.floor(n / 10);\n  }\n  while (digits.length < 8) {\n    digits = '0' + digits;\n  }\n  return prefix + '-' + digits;\n}\n\n/**\n * Deterministically derive an ISO timestamp from a supplied base time and offset.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} baseIso - the base ISO timestamp (usually the wall clock).\n * @param {number} offsetMs - the millisecond offset for this record.\n * @returns {string} an ISO timestamp string.\n */\nfunction stamp(state: InventoryState, baseIso: string, offsetMs: number): string {\n  const base: number = Date.parse(baseIso);\n  const baseValue: number = isNaN(base) ? 0 : base;\n  const parts: number[] = [baseValue + offsetMs];\n  return new Date(parts[0]).toISOString();\n}\n\n/**\n * Determine whether a value is a non-negative integer quantity.\n *\n * @param {unknown} value - the value to check.\n * @returns {boolean} true when the value is a finite non-negative integer.\n */\nfunction isNonNegativeInteger(value: unknown): boolean {\n  if (typeof value !== 'number') {\n    return false;\n  }\n  if (!isFinite(value)) {\n    return false;\n  }\n  if (Math.floor(value) !== value) {\n    return false;\n  }\n  return value >= 0;\n}\n\n/**\n * Locate an item by id and reject unknown or inactive items on the failure path.\n *\n * @param {Item[]} items - the stored items.\n * @param {string} itemId - the item identifier.\n * @returns {Item | null} the item when found, otherwise null.\n */\nfunction findItem(items: Item[], itemId: string): Item | null {\n  let i: number = 0;\n  while (i < items.length) {\n    const candidate: Item = items[i];\n    if (candidate.id === itemId) {\n      return candidate;\n    }\n    i = i + 1;\n  }\n  return null;\n}\n\n/**\n * Compute the colour-coded stock status label for an item row.\n *\n * @param {Item} item - the item to classify.\n * @param {number} threshold - the variance threshold in use.\n * @returns {string} one of 'out', 'low', 'ok' or 'inactive'.\n */\nfunction statusFor(item: Item, threshold: number): string {\n  if (!item.active) {\n    return 'inactive';\n  }\n  if (item.currentQty <= 0) {\n    return 'out';\n  }\n  if (item.currentQty <= item.reorderLevel) {\n    return 'low';\n  }\n  if (threshold > 0 && item.currentQty <= item.reorderLevel + threshold) {\n    return 'warn';\n  }\n  return 'ok';\n}\n\n/**\n * Determine whether an item currently needs reordering.\n *\n * @param {Item} item - the item to test.\n * @returns {boolean} true when the item is active and at or below its reorder level.\n */\nfunction needsReorder(item: Item): boolean {\n  return item.active === true && item.currentQty <= item.reorderLevel;\n}\n\n/**\n * Append a movement to the log using a deterministic id and timestamp.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} itemId - the item identifier.\n * @param {number} delta - the signed quantity change.\n * @param {MovementReason} reason - the movement reason.\n * @param {string} actor - who performed the movement.\n * @param {string} note - a free-text note.\n * @param {number} resultingQty - the quantity after the movement.\n * @param {string} baseIso - the base ISO timestamp.\n * @returns {Movement} the appended movement.\n */\nfunction appendMovement(state: InventoryState, itemId: string, delta: number, reason: MovementReason, actor: string, note: string, resultingQty: number, baseIso: string): Movement {\n  const movement: Movement = {\n    id: nextId(state, 'mv'),\n    itemId: itemId,\n    delta: delta,\n    reason: reason,\n    actor: actor,\n    timestamp: stamp(state, baseIso, state.seq),\n    note: note,\n    resultingQty: resultingQty\n  };\n  state.movements.push(movement);\n  return movement;\n}\n\n/**\n * Whether a purchase request is still open for receiving purposes.\n *\n * @param {PurchaseRequestStatus} s - the request status.\n * @returns {boolean} true for Open, Approved or Ordered.\n */\nfunction isOpenRequestStatus(s: PurchaseRequestStatus): boolean {\n  return s === 'Open' || s === 'Approved' || s === 'Ordered';\n}\n\n/**\n * Create a new item in the catalogue.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {{ name: string; category: Category; unit: Unit; currentQty: number; reorderLevel: number; targetQty: number; location: string; active: boolean; unitCost?: number }} fields - the item fields.\n * @returns {Item} the stored item.\n */\nfunction createItem(state: InventoryState, fields: { name: string; category: Category; unit: Unit; currentQty: number; reorderLevel: number; targetQty: number; location: string; active: boolean; unitCost?: number }): Item {\n  const item: Item = {\n    id: nextId(state, 'it'),\n    name: fields.name,\n    category: fields.category,\n    unit: fields.unit,\n    currentQty: fields.currentQty,\n    reorderLevel: fields.reorderLevel,\n    targetQty: fields.targetQty,\n    location: fields.location,\n    active: fields.active\n  };\n  if (typeof fields.unitCost === 'number') {\n    item.unitCost = fields.unitCost;\n  }\n  state.items.push(item);\n  return item;\n}\n\n/**\n * Filter, sort, and project items for accessible list rendering.\n *\n * @param {Item[]} items - the stored items.\n * @param {{ search?: string; category?: Category | null; needsReorder?: boolean; sortBy?: string }} options - list options.\n * @returns {ItemListResult} matching rows with qty, reorder level, status and location.\n */\nfunction listItems(items: Item[], options: { search?: string; category?: Category | null; needsReorder?: boolean; sortBy?: string }): ItemListResult {\n  const search: string = typeof options.search === 'string' ? options.search.trim().toLowerCase() : '';\n  const category: Category | null = options.category === undefined ? null : options.category;\n  const reorderOnly: boolean = options.needsReorder === true;\n  const sortBy: string = typeof options.sortBy === 'string' ? options.sortBy : 'name';\n  const rows: ItemRow[] = [];\n  let i: number = 0;\n  while (i < items.length) {\n    const item: Item = items[i];\n    let keep: boolean = true;\n    if (category !== null && item.category !== category) {\n      keep = false;\n    }\n    if (reorderOnly && !needsReorder(item)) {\n      keep = false;\n    }\n    if (search.length > 0 && item.name.toLowerCase().indexOf(search) === -1) {\n      keep = false;\n    }\n    if (keep) {\n      const row: ItemRow = {\n        id: item.id,\n        name: item.name,\n        category: item.category,\n        unit: item.unit,\n        currentQty: item.currentQty,\n        reorderLevel: item.reorderLevel,\n        status: statusFor(item, 0),\n        location: item.location,\n        active: item.active\n      };\n      rows.push(row);\n    }\n    i = i + 1;\n  }\n  rows.sort(function (a: ItemRow, b: ItemRow): number {\n    if (sortBy === 'qty') {\n      if (a.currentQty !== b.currentQty) {\n        return a.currentQty - b.currentQty;\n      }\n      return a.name < b.name ? -1 : 1;\n    }\n    if (sortBy === 'category') {\n      if (a.category !== b.category) {\n        return a.category < b.category ? -1 : 1;\n      }\n      return a.name < b.name ? -1 : 1;\n    }\n    if (a.name !== b.name) {\n      return a.name < b.name ? -1 : 1;\n    }\n    return 0;\n  });\n  return { ok: true, rows: rows, error: '' };\n}\n\n/**\n * Issue an item to a member of staff.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} itemId - the item identifier.\n * @param {number} qty - the quantity to issue.\n * @param {string} actor - who is taking the item.\n * @param {string} baseIso - the base ISO timestamp.\n * @returns {StockItemResult} the updated item and movement, or a failure.\n */\nfunction issueItem(state: InventoryState, itemId: string, qty: number, actor: string, baseIso: string): StockItemResult {\n  const item: Item | null = findItem(state.items, itemId);\n  if (item === null) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'not-found' };\n  }\n  if (!item.active) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'inactive' };\n  }\n  if (!isNonNegativeInteger(qty)) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'invalid-quantity' };\n  }\n  if (qty > item.currentQty) {\n    const shortfall: number = qty - item.currentQty;\n    return { ok: false, item: null, movements: [], requests: [], error: 'shortfall ' + String(shortfall) };\n  }\n  item.currentQty = item.currentQty - qty;\n  const movement: Movement = appendMovement(state, item.id, -qty, 'Issued', actor, '', item.currentQty, baseIso);\n  return { ok: true, item: item, movements: [movement], requests: [], error: '' };\n}\n\n/**\n * Receive a delivery of stock, transitioning any open request to Received.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} itemId - the item identifier.\n * @param {number} qty - the quantity received.\n * @param {string} actor - who received the delivery.\n * @param {string} baseIso - the base ISO timestamp.\n * @returns {StockItemResult} the updated item, movement and requests, or a failure.\n */\nfunction receiveStock(state: InventoryState, itemId: string, qty: number, actor: string, baseIso: string): StockItemResult {\n  const item: Item | null = findItem(state.items, itemId);\n  if (item === null) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'not-found' };\n  }\n  if (!item.active) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'inactive' };\n  }\n  if (!isNonNegativeInteger(qty)) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'invalid-quantity' };\n  }\n  item.currentQty = item.currentQty + qty;\n  const movement: Movement = appendMovement(state, item.id, qty, 'Received', actor, '', item.currentQty, baseIso);\n  const touched: PurchaseRequest[] = [];\n  let i: number = 0;\n  while (i < state.requests.length) {\n    const request: PurchaseRequest = state.requests[i];\n    if (request.itemId === item.id && isOpenRequestStatus(request.status)) {\n      request.status = 'Received';\n      touched.push(request);\n    }\n    i = i + 1;\n  }\n  return { ok: true, item: item, movements: [movement], requests: touched, error: '' };\n}\n\n/**\n * Record damaged stock, decrementing the quantity like an issue.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} itemId - the item identifier.\n * @param {number} qty - the damaged quantity.\n * @param {string} actor - who recorded the damage.\n * @param {string} baseIso - the base ISO timestamp.\n * @returns {StockItemResult} the updated item and movement, or a failure.\n */\nfunction recordDamaged(state: InventoryState, itemId: string, qty: number, actor: string, baseIso: string): StockItemResult {\n  const item: Item | null = findItem(state.items, itemId);\n  if (item === null) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'not-found' };\n  }\n  if (!item.active) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'inactive' };\n  }\n  if (!isNonNegativeInteger(qty)) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'invalid-quantity' };\n  }\n  if (qty > item.currentQty) {\n    const shortfall: number = qty - item.currentQty;\n    return { ok: false, item: null, movements: [], requests: [], error: 'shortfall ' + String(shortfall) };\n  }\n  item.currentQty = item.currentQty - qty;\n  const movement: Movement = appendMovement(state, item.id, -qty, 'Damaged', actor, '', item.currentQty, baseIso);\n  return { ok: true, item: item, movements: [movement], requests: [], error: '' };\n}\n\n/**\n * Record a counted adjustment, requiring a non-empty note and writing a movement.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} itemId - the item identifier.\n * @param {number} countedQty - the counted quantity.\n * @param {string} actor - who counted.\n * @param {string} note - the required explanation note.\n * @param {string} baseIso - the base ISO timestamp.\n * @returns {StockItemResult} the updated item and movement, or a failure.\n */\nfunction recordAdjustment(state: InventoryState, itemId: string, countedQty: number, actor: string, note: string, baseIso: string): StockItemResult {\n  const item: Item | null = findItem(state.items, itemId);\n  if (item === null) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'not-found' };\n  }\n  if (!item.active) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'inactive' };\n  }\n  const trimmed: string = typeof note === 'string' ? note.trim() : '';\n  if (trimmed.length === 0) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'note-required' };\n  }\n  if (!isNonNegativeInteger(countedQty)) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'invalid-quantity' };\n  }\n  const delta: number = countedQty - item.currentQty;\n  item.currentQty = countedQty;\n  const movement: Movement = appendMovement(state, item.id, delta, 'Adjustment', actor, trimmed, item.currentQty, baseIso);\n  return { ok: true, item: item, movements: [movement], requests: [], error: '' };\n}\n\n/**\n * Raise a purchase request for an item at or below its reorder level.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} itemId - the item identifier.\n * @param {string} actor - who raised the request.\n * @param {string} baseIso - the base ISO timestamp.\n * @returns {StockItemResult} the created request, or a failure.\n */\nfunction raisePurchaseRequest(state: InventoryState, itemId: string, actor: string, baseIso: string): StockItemResult {\n  const item: Item | null = findItem(state.items, itemId);\n  if (item === null) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'not-found' };\n  }\n  if (!needsReorder(item)) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'above-reorder-level' };\n  }\n  const suggested: number = Math.max(0, item.targetQty - item.currentQty);\n  const request: PurchaseRequest = {\n    id: nextId(state, 'pr'),\n    itemId: item.id,\n    requestedQty: suggested,\n    status: 'Open',\n    raisedBy: actor,\n    decisionNote: ''\n  };\n  state.requests.push(request);\n  const stampIso: string = stamp(state, baseIso, state.seq);\n  const noteMovement: Movement = appendMovement(state, item.id, 0, 'Adjustment', actor, 'request-raised ' + stampIso, item.currentQty, baseIso);\n  return { ok: true, item: item, movements: [noteMovement], requests: [request], error: '' };\n}\n\n/**\n * Transition a purchase request along the permitted status graph.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} requestId - the request identifier.\n * @param {PurchaseRequestStatus} next - the attempted next status.\n * @param {string} note - the decision note.\n * @returns {StockItemResult} the updated request, or a failure.\n */\nfunction transitionRequest(state: InventoryState, requestId: string, next: PurchaseRequestStatus, note: string): StockItemResult {\n  let found: PurchaseRequest | null = null;\n  let i: number = 0;\n  while (i < state.requests.length) {\n    const candidate: PurchaseRequest = state.requests[i];\n    if (candidate.id === requestId) {\n      found = candidate;\n    }\n    i = i + 1;\n  }\n  if (found === null) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'request-not-found' };\n  }\n  const current: PurchaseRequestStatus = found.status;\n  const legal: boolean =\n    (current === 'Open' && (next === 'Approved' || next === 'Cancelled' || next === 'Ordered')) ||\n    (current === 'Approved' && (next === 'Ordered' || next === 'Cancelled')) ||\n    (current === 'Ordered' && (next === 'Received' || next === 'Cancelled')) ||\n    (current === 'Open' && next === 'Received');\n  if (!legal) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'illegal-transition from ' + current + ' to ' + next };\n  }\n  found.status = next;\n  found.decisionNote = typeof note === 'string' ? note : '';\n  return { ok: true, item: null, movements: [], requests: [found], error: '' };\n}\n\n/**\n * Approve a purchase request currently in Open status.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} requestId - the request identifier.\n * @param {string} note - the decision note.\n * @returns {StockItemResult} the approved request, or a failure.\n */\nfunction approveRequest(state: InventoryState, requestId: string, note: string): StockItemResult {\n  return transitionRequest(state, requestId, 'Approved', note);\n}\n\n/**\n * Order a purchase request currently in Approved status.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} requestId - the request identifier.\n * @param {string} note - the decision note.\n * @returns {StockItemResult} the ordered request, or a failure.\n */\nfunction orderRequest(state: InventoryState, requestId: string, note: string): StockItemResult {\n  return transitionRequest(state, requestId, 'Ordered', note);\n}\n\n/**\n * Cancel a purchase request that is Open, Approved or Ordered.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} requestId - the request identifier.\n * @param {string} note - the decision note.\n * @returns {StockItemResult} the cancelled request, or a failure.\n */\nfunction cancelRequest(state: InventoryState, requestId: string, note: string): StockItemResult {\n  return transitionRequest(state, requestId, 'Cancelled', note);\n}\n\n/**\n * Receive a purchase request, writing a Received movement and topping up stock.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {string} requestId - the request identifier.\n * @param {string} actor - who received the delivery.\n * @param {string} baseIso - the base ISO timestamp.\n * @returns {StockItemResult} the received request and movement, or a failure.\n */\nfunction receivePurchaseRequest(state: InventoryState, requestId: string, actor: string, baseIso: string): StockItemResult {\n  let found: PurchaseRequest | null = null;\n  let i: number = 0;\n  while (i < state.requests.length) {\n    const candidate: PurchaseRequest = state.requests[i];\n    if (candidate.id === requestId) {\n      found = candidate;\n    }\n    i = i + 1;\n  }\n  if (found === null) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'request-not-found' };\n  }\n  if (!isOpenRequestStatus(found.status)) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'illegal-transition from ' + found.status + ' to Received' };\n  }\n  const item: Item | null = findItem(state.items, found.itemId);\n  if (item === null) {\n    return { ok: false, item: null, movements: [], requests: [], error: 'not-found' };\n  }\n  item.currentQty = item.currentQty + found.requestedQty;\n  found.status = 'Received';\n  const movement: Movement = appendMovement(state, item.id, found.requestedQty, 'Received', actor, 'request ' + found.id, item.currentQty, baseIso);\n  return { ok: true, item: item, movements: [movement], requests: [found], error: '' };\n}\n\n/**\n * Run a category stocktake, writing movements and building a variance report.\n *\n * @param {InventoryState} state - the inventory state.\n * @param {Category} category - the category to count.\n * @param {Record<string, number>} counts - counted quantity per item id.\n * @param {string} actor - who performed the stocktake.\n * @param {number} threshold - the absolute variance threshold.\n * @param {string} baseIso - the base ISO timestamp.\n * @returns {StocktakeResult} the variance report and written movements.\n */\nfunction stocktakeCategory(state: InventoryState, category: Category, counts: Record<string, number>, actor: string, threshold: number, baseIso: string): StocktakeResult {\n  const variance: VarianceRow[] = [];\n  const written: Movement[] = [];\n  const touched: Item[] = [];\n  let i: number = 0;\n  while (i < state.items.length) {\n    const item: Item = state.items[i];\n    if (item.category === category) {\n      const supplied: unknown = counts[item.id];\n      const countedRaw: number = typeof supplied === 'number' ? supplied : item.currentQty;\n      const counted: number = isNonNegativeInteger(countedRaw) ? countedRaw : item.currentQty;\n      const delta: number = counted - item.currentQty;\n      item.currentQty = counted;\n      const movement: Movement = appendMovement(state, item.id, delta, 'Stocktake', actor, '', item.currentQty, baseIso);\n      written.push(movement);\n      touched.push(item);\n      if (Math.abs(delta) > threshold) {\n        variance.push({\n          itemId: item.id,\n          name: item.name,\n          delta: delta,\n          direction: delta > 0 ? 'over' : 'under'\n        });\n      }\n    }\n    i = i + 1;\n  }\n  return { ok: true, variance: variance, movements: written, items: touched, error: '' };\n}\n\n/**\n * Aggregate items and requests into dashboard totals valueed in integer pence.\n *\n * @param {Item[]} items - the stored items.\n * @param {PurchaseRequest[]} requests - the stored purchase requests.\n * @returns {DashboardResult} the dashboard totals.\n */\nfunction getDashboard(items: Item[], requests: PurchaseRequest[]): DashboardResult {\n  let belowReorder: number = 0;\n  let totalValuePence: number = 0;\n  let i: number = 0;\n  while (i < items.length) {\n    const item: Item = items[i];\n    if (needsReorder(item)) {\n      belowReorder = belowReorder + 1;\n    }\n    if (typeof item.unitCost === 'number' && isNonNegativeInteger(item.unitCost)) {\n      totalValuePence = totalValuePence + item.currentQty * item.unitCost;\n    }\n    i = i + 1;\n  }\n  let openRequests: number = 0;\n  let j: number = 0;\n  while (j < requests.length) {\n    const request: PurchaseRequest = requests[j];\n    if (isOpenRequestStatus(request.status)) {\n      openRequests = openRequests + 1;\n    }\n    j = j + 1;\n  }\n  const pounds: number = Math.floor(totalValuePence / 100);\n  const pence: number = totalValuePence - pounds * 100;\n  let penceText: string = String(pence);\n  if (penceText.length < 2) {\n    penceText = '0' + penceText;\n  }\n  return {\n    totalItems: items.length,\n    belowReorder: belowReorder,\n    openPurchaseRequests: openRequests,\n    totalValuePence: totalValuePence,\n    valueDisplay: 'GBP ' + String(pounds) + '.' + penceText\n  };\n}\n\n/**\n * Reconstruct each item quantity from its movement log and report drift.\n *\n * @param {Item[]} items - the stored items.\n * @param {Movement[]} movements - the stored movements.\n * @returns {VerifyResult} a report row per item indicating whether stored and reconstructed qty match.\n */\nfunction verifyQuantities(items: Item[], movements: Movement[]): VerifyResult {\n  const rows: VerifyRow[] = [];\n  let drifted: number = 0;\n  let i: number = 0;\n  while (i < items.length) {\n    const item: Item = items[i];\n    let reconstructed: number = 0;\n    let j: number = 0;\n    while (j < movements.length) {\n      const movement: Movement = movements[j];\n      if (movement.itemId === item.id) {\n        reconstructed = reconstructed + movement.delta;\n      }\n      j = j + 1;\n    }\n    const matches: boolean = reconstructed === item.currentQty;\n    if (!matches) {\n      drifted = drifted + 1;\n    }\n    rows.push({\n      itemId: item.id,\n      name: item.name,\n      storedQty: item.currentQty,\n      reconstructedQty: reconstructed,\n      matches: matches\n    });\n    i = i + 1;\n  }\n  return { ok: drifted === 0, rows: rows, drifted: drifted };\n}\nexport { createState, createItem, listItems, issueItem, receiveStock, recordDamaged, recordAdjustment, raisePurchaseRequest, transitionRequest, approveRequest, orderRequest, cancelRequest, receivePurchaseRequest, stocktakeCategory, getDashboard, verifyQuantities, needsReorder, isNonNegativeInteger };\n",
+      "hash": "3732141886",
+      "attempt": 0
+    }
+  ],
+  "meta": {},
+  "kind": "app",
+  "tokenUsage": {
+    "promptTokens": 15093,
+    "completionTokens": 14810,
+    "calls": 5,
+    "cachedPromptTokens": 0
+  }
+}

@@ -1,0 +1,1687 @@
+{
+  "id": "f13debeb-b530-445b-9f52-85b82ad7839e",
+  "name": "# Crumb & Bloom",
+  "brief": "# Crumb & Bloom Companion — Mobile App\n\n## What this is\nA mobile-optimised companion for the Crumb & Bloom back-office. It is a\nphone-first version of the counter workflow: staff on their feet take orders,\ncheck stock at a glance, and receive alerts when something needs restocking.\n\n## Form factor\n- Designed for a 360–430px portrait viewport; works one-handed.\n- Bottom tab bar navigation with four tabs: **Today**, **New Order**, **Stock**,\n  **Alerts**.\n- Large tap targets (min 44×44px), sticky primary action button per screen.\n\n## Required screens\n1. **Today** — a summary card set: orders due today, revenue today, items sold\n   today, and a prominent \"low stock\" count that links to Alerts. A reverse-\n   chronological list of today's orders with status chips.\n2. **New Order** — a fast counter flow: search products (big search field),\n   tap to add, adjust quantities with +/- steppers, see a sticky running total,\n   pick a customer (or quick-add name+phone), choose a fulfilment date, and\n   place the order. Placing validates stock and shows a success toast with the\n   order id.\n3. **Stock** — a searchable list of products with a stock badge (green / amber /\n   red vs reorder level). Tapping opens a sheet to receive stock (＋ quantity) or\n   record spoilage (－ quantity with a reason), each writing a stock movement.\n4. **Alerts** — low-stock items to reorder, newest first, with a suggested\n   quantity and a one-tap \"mark reordered\" that records a note (it must NOT\n   change stock — receiving does that).\n\n## Functional requirements\n- Offline-tolerant: the app reads a local snapshot; a clearly labelled pending\n  badge shows changes not yet synced. No fake sync success.\n- The New Order flow must prevent adding more of a product than is in stock and\n  must show the shortfall if it happens.\n- Money in integer pence, shown as GBP.\n- Stock and order logic must reuse the same contracts as the back-office\n  (products, orders, movements) so the two tools agree.\n\n## Non-functional requirements\n- Touch-first: no hover-only affordances; visible focus for keyboard.\n- Works in a mobile browser; no app-store packaging required.\n- Fast first paint; skeleton states while data loads.\n- Accessible: labelled controls, WCAG AA contrast, respects reduced motion.\n\n## Explicitly out of scope\n- Native iOS/Android builds.\n- Payment processing.\n- Push notifications from a server (alerts are in-app).\n- Multi-branch support.",
+  "domain": "real-estate",
+  "createdAt": 1791166580677,
+  "status": "running",
+  "currentPhase": 6,
+  "phases": [
+    {
+      "id": 0,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3269632901",
+        "checkedAt": 1791166585136
+      },
+      "startedAt": 1791166581700,
+      "completedAt": 1791166581749
+    },
+    {
+      "id": 1,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1050713914",
+        "checkedAt": 1791166585162
+      },
+      "startedAt": 1791166585145,
+      "completedAt": 1791166585151
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1845537766",
+        "checkedAt": 1791166585184
+      },
+      "startedAt": 1791166585169,
+      "completedAt": 1791166585173
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1638292844",
+        "checkedAt": 1791166585203
+      },
+      "startedAt": 1791166585189,
+      "completedAt": 1791166585192
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3527188654",
+        "checkedAt": 1791166585234
+      },
+      "startedAt": 1791166585210,
+      "completedAt": 1791166585230
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "2951452883",
+        "checkedAt": 1791166585264
+      },
+      "startedAt": 1791166585242,
+      "completedAt": 1791166585259
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": false,
+        "unmet": [
+          "Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)",
+          "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+        ],
+        "evidenceHash": "3976680296",
+        "checkedAt": 1791166765052
+      },
+      "startedAt": 1791166585271,
+      "completedAt": 1791166732516
+    },
+    {
+      "id": 7,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 8,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 9,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 10,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 11,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 12,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    }
+  ],
+  "scorecard": {
+    "overall": 7.2,
+    "verdict": "proceed-with-guards",
+    "axes": [
+      {
+        "key": "feasibility",
+        "label": "Technical feasibility",
+        "score": 3,
+        "note": "Typed contracts + sequential graph."
+      },
+      {
+        "key": "scale",
+        "label": "Scale headroom",
+        "score": 9,
+        "note": "Stateless workers + durable checkpoints."
+      },
+      {
+        "key": "security",
+        "label": "Security posture",
+        "score": 9,
+        "note": "Scheduler Δ1."
+      },
+      {
+        "key": "api",
+        "label": "API / rate-limit risk",
+        "score": 7,
+        "note": "Live-tool Δ1."
+      },
+      {
+        "key": "delivery",
+        "label": "Delivery confidence",
+        "score": 8,
+        "note": "Phased graph prevents skipped work."
+      }
+    ],
+    "bottlenecks": [
+      "Long-running tools must stream over WebSocket MCP.",
+      "HITL rejection without a qualitative note is illegal.",
+      "Constraint: offline",
+      "Constraint: local-first"
+    ],
+    "attackVectors": [
+      "Prompt injection via ingested competitor pages.",
+      "Tool-call privilege escalation if OAuth scopes are inherited.",
+      "Sandbox escape if generated exec has network."
+    ],
+    "libraries": [
+      {
+        "name": "TanStack Start",
+        "role": "Typed app shell and file routes"
+      },
+      {
+        "name": "Zod",
+        "role": "Schema lock on generated artifacts"
+      },
+      {
+        "name": "MLS / property-data API",
+        "role": "Listings, comps, and ARV inputs"
+      },
+      {
+        "name": "Sync engine + local cache",
+        "role": "Offline-first writes"
+      }
+    ]
+  },
+  "competitors": [],
+  "artifacts": [
+    {
+      "id": "0-scorecard-feasibility-architecture-scoreca",
+      "phase": 0,
+      "kind": "scorecard",
+      "title": "Feasibility & Architecture Scorecard",
+      "body": "# # Crumb & Bloom — Phase 0 scorecard\n\nDomain: real-estate\nOverall: 7.2 / 10 — proceed-with-guards\nLattice jobs: alert, show, search, sync, record, serve, validate\nEntities: item, customer, package, card, link, notification, work-order\nConstraints: offline, local-first\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n- Constraint: offline\n- Constraint: local-first\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- MLS / property-data API: Listings, comps, and ARV inputs\n- Sync engine + local cache: Offline-first writes"
+    },
+    {
+      "id": "0-algorithm-intent-lattice-a1",
+      "phase": 0,
+      "kind": "algorithm",
+      "title": "Intent Lattice (A1)",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"jobs\": [\n    \"alert\",\n    \"show\",\n    \"search\",\n    \"sync\",\n    \"record\",\n    \"serve\",\n    \"validate\"\n  ],\n  \"entities\": [\n    \"item\",\n    \"customer\",\n    \"package\",\n    \"card\",\n    \"link\",\n    \"notification\",\n    \"work-order\"\n  ],\n  \"constraints\": [\n    \"offline\",\n    \"local-first\"\n  ],\n  \"nodes\": [\n    {\n      \"kind\": \"job\",\n      \"label\": \"alert\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"show\",\n      \"weight\": 0.9500000000000001\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"search\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"sync\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"record\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"item\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"offline\",\n      \"weight\": 0.7000000000000001\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"customer\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"serve\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"validate\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"package\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"card\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"link\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"notification\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"risk\",\n      \"label\": \"payment\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"local-first\",\n      \"weight\": 0.5\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"work-order\",\n      \"weight\": 0.35\n    }\n  ],\n  \"complexity\": 10,\n  \"vague\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "research-0-0-1791166585135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Yahoo Finance - Stock Market Live, Quotes, Business & Finance News",
+      "body": "# Yahoo Finance - Stock Market Live, Quotes, Business & Finance News\n\nGet free stock quotes, financial news, portfolio tools, market data, and mortgage rates to manage your finances on Yahoo Finance.\n\nSource: https://finance.yahoo.com/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-1-1791166585135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Real Estate Stock Performance - Yahoo Finance",
+      "body": "# Real Estate Stock Performance - Yahoo Finance\n\nYahoo Finance&#x27;s Real Estate performance dashboard help you quickly analyze & examine stock performance across the Real Estate sector using dozens of metrics and views.\n\nSource: https://finance.yahoo.com/sectors/real-estate/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-2-1791166585135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Stock Market Prices, Real-time Quotes & Business News - Google",
+      "body": "# Stock Market Prices, Real-time Quotes & Business News - Google\n\nGoogle Finance provides real -time market quotes, international stock information, financial news, currency conversion rates, and tracking tools.\n\nSource: https://www.google.com/finance/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-3-1791166585135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Best Real Estate Stocks and Best REITs To Buy in 2026 - Forbes",
+      "body": "# Best Real Estate Stocks and Best REITs To Buy in 2026 - Forbes\n\nTo help you find the best real estate companies for your portfolio, Forbes Advisor has compiled a list of the 10 largest real estate stocks by market capitalization.\n\nSource: https://www.forbes.com/advisor/investing/best-real-estate-stocks/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-4-1791166585135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Bloomberg - Business News, Stock Markets, Finance, Breaking & World News",
+      "body": "# Bloomberg - Business News, Stock Markets, Finance, Breaking & World News\n\nBloomberg delivers business and markets news, data, analysis, and video to the world, featuring stories from Businessweek and Bloomberg News\n\nSource: https://www.bloomberg.com/",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-0-1791166585135",
+      "phase": 0,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "During P0 Deep Research & Feasibility for the Crumb & Bloom Companion, the team scoped the mobile, phone-first counter workflow for a 360–430px portrait viewport with a four-tab bottom navigation, covering order-taking, at-a-glance stock checks, and restock alerts. Feasibility research centered on financial data sources to validate market and sector context—Yahoo Finance for live quotes, portfolio tools, market data, and mortgage rates; Yahoo Finance's Real Estate performance dashboard for sector metrics; Google Finance for real-time international quotes and currency conversion; Forbes' ranking of the largest real estate stocks and REITs for 2026; and Bloomberg for breaking business and markets news. These sources grounded the business case for a lightweight, one-handed companion app, confirming that sufficient public market data exists to inform the product's positioning before committing to build.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p0-32696329",
+      "phase": 0,
+      "kind": "gate",
+      "title": "DoD gate — P0",
+      "body": "# DoD gate — P0\n\n**Result: PASS**\n\nAll criteria met for phase 0.\n\nEvidence hash: 3269632901",
+      "language": "markdown"
+    },
+    {
+      "id": "1-graph-dispatcher-topology",
+      "phase": 1,
+      "kind": "graph",
+      "title": "Dispatcher topology",
+      "body": "Sequential pipeline: alert → show → search → sync → record → serve\nState entities: item, customer, package, card, link, notification, work-order\n\nEach step advances a item through its lifecycle in the real estate domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over items; no parallel, event, or failover topology is claimed beyond what the brief states.",
+      "language": "text"
+    },
+    {
+      "id": "gate-p1-10507139",
+      "phase": 1,
+      "kind": "gate",
+      "title": "DoD gate — P1",
+      "body": "# DoD gate — P1\n\n**Result: PASS**\n\nAll criteria met for phase 1.\n\nEvidence hash: 1050713914",
+      "language": "markdown"
+    },
+    {
+      "id": "2-memory-data-model-retrieval",
+      "phase": 2,
+      "kind": "memory",
+      "title": "Data model & retrieval",
+      "body": "Records: item, customer, package, card, link, notification, work-order\nOperations: alert, show, search, sync, record, serve, validate\n\nEach item is the unit of state; alert steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
+    },
+    {
+      "id": "gate-p2-18455377",
+      "phase": 2,
+      "kind": "gate",
+      "title": "DoD gate — P2",
+      "body": "# DoD gate — P2\n\n**Result: PASS**\n\nAll criteria met for phase 2.\n\nEvidence hash: 1845537766",
+      "language": "markdown"
+    },
+    {
+      "id": "3-mcp-integration-surface-declared",
+      "phase": 3,
+      "kind": "mcp",
+      "title": "Integration surface (declared)",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"surface\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p3-16382928",
+      "phase": 3,
+      "kind": "gate",
+      "title": "DoD gate — P3",
+      "body": "# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844",
+      "language": "markdown"
+    },
+    {
+      "id": "4-security-security-authorization-policy",
+      "phase": 4,
+      "kind": "security",
+      "title": "Security & authorization policy",
+      "body": "Protected data: item, customer, package, card, link, notification (the brief's own entities).\nAccess model: customer — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the items its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive item data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
+    },
+    {
+      "id": "gate-p4-35271886",
+      "phase": 4,
+      "kind": "gate",
+      "title": "DoD gate — P4",
+      "body": "# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654",
+      "language": "markdown"
+    },
+    {
+      "id": "5-validation-validation-hitl-contract",
+      "phase": 5,
+      "kind": "validation",
+      "title": "Validation + HITL contract",
+      "body": "Validation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap."
+    },
+    {
+      "id": "gate-p5-29514528",
+      "phase": 5,
+      "kind": "gate",
+      "title": "DoD gate — P5",
+      "body": "# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883",
+      "language": "markdown"
+    },
+    {
+      "id": "6-code-p6-placeholder-module-determinis",
+      "phase": 6,
+      "kind": "code",
+      "title": "P6 placeholder module (deterministic template)",
+      "body": "const JOBS = [\"alert\", \"show\", \"search\", \"sync\", \"record\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"# Crumb & Bloom\", phase: 6, job: \"alert\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"alert\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"alert\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"alert\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+      "language": "javascript"
+    },
+    {
+      "id": "6-code-sandbox-result",
+      "phase": 6,
+      "kind": "code",
+      "title": "Sandbox result",
+      "body": "{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "packet-6",
+      "phase": 6,
+      "kind": "packet",
+      "title": "Agent packet (A4)",
+      "body": "# RapidTool Agent Packet v3 — # Crumb & Bloom\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T02:18:52.518Z\nproject_id: f13debeb-b530-445b-9f52-85b82ad7839e\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P6 Code Generation, Testing & Deployment) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T02:18:52.518Z\",\n  \"project_id\": \"f13debeb-b530-445b-9f52-85b82ad7839e\",\n  \"name\": \"# Crumb & Bloom\",\n  \"project_status\": \"running\",\n  \"current_phase\": {\n    \"id\": 6,\n    \"code\": \"P6\",\n    \"title\": \"Code Generation, Testing & Deployment\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"271560555\",\n  \"input_hash\": \"2488167048\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791166585214,\n      \"decided_at\": 1791166585230\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791166585245,\n      \"decided_at\": 1791166585259\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 9,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 10,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 7,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 0,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 86478,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Crumb & Bloom Companion — Mobile App\n\n## What this is\nA mobile-optimised companion for the Crumb & Bloom back-office. It is a\nphone-first version of the counter workflow: staff on their feet take orders,\ncheck stock at a glance, and receive alerts when something needs restocking.\n\n## Form factor\n- Designed for a 360–430px portrait viewport; works one-handed.\n- Bottom tab bar navigation with four tabs: **Today**, **New Order**, **Stock**,\n  **Alerts**.\n- Large tap targets (min 44×44px), sticky primary action button per screen.\n\n## Required screens\n1. **Today** — a summary card set: orders due today, revenue today, items sold\n   today, and a prominent \"low stock\" count that links to Alerts. A reverse-\n   chronological list of today's orders with status chips.\n2. **New Order** — a fast counter flow: search products (big search field),\n   tap to add, adjust quantities with +/- steppers, see a sticky running total,\n   pick a customer (or quick-add name+phone), choose a fulfilment date, and\n   place the order. Placing validates stock and shows a success toast with the\n   order id.\n3. **Stock** — a searchable list of products with a stock badge (green / amber /\n   red vs reorder level). Tapping opens a sheet to receive stock (＋ quantity) or\n   record spoilage (－ quantity with a reason), each writing a stock movement.\n4. **Alerts** — low-stock items to reorder, newest first, with a suggested\n   quantity and a one-tap \"mark reordered\" that records a note (it must NOT\n   change stock — receiving does that).\n\n## Functional requirements\n- Offline-tolerant: the app reads a local snapshot; a clearly labelled pending\n  badge shows changes not yet synced. No fake sync success.\n- The New Order flow must prevent adding more of a product than is in stock and\n  must show the shortfall if it happens.\n- Money in integer pence, shown as GBP.\n- Stock and order logic must reuse the same contracts as the back-office\n  (products, orders, movements) so the two tools agree.\n\n## Non-functional requirements\n- Touch-first: no hover-only affordances; visible focus for keyboard.\n- Works in a mobile browser; no app-store packaging required.\n- Fast first paint; skeleton states while data loads.\n- Accessible: labelled controls, WCAG AA contrast, respects reduced motion.\n\n## Explicitly out of scope\n- Native iOS/Android builds.\n- Payment processing.\n- Push notifications from a server (alerts are in-app).\n- Multi-branch support.\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: alert, show, search, sync, record, serve, validate\nEntities: item, customer, package, card, link, notification, work-order\nConstraints: offline, local-first\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 9 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for alert, show, search before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer [ACTIVE] (3200 tok): Write files in Spec Graph order. Current edge: Code Generation, Testing & Deployment. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester [ACTIVE] (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: offline, local-first.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/alert.ts — Implement job “alert” against the contract\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/search.ts — Implement job “search” against the contract\n- [implementer] src/jobs/sync.ts — Implement job “sync” against the contract\n- [implementer] src/jobs/record.ts — Implement job “record” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Item: id:ulid, status:enum, updatedAt:datetime\n- Customer: id:ulid, status:enum, updatedAt:datetime\n- Package: id:ulid, status:enum, updatedAt:datetime\n- Card: id:ulid, status:enum, updatedAt:datetime\n- Link: id:ulid, status:enum, updatedAt:datetime\n- Notification: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/alert (alert)\n- POST /v1/show (show)\n- GET /v1/search (search)\n- POST /v1/sync (sync)\n- POST /v1/record (record)\n- POST /v1/serve (serve)\n\n## Oracle (A7)\n- job.alert.happy: Authorized operator submits “alert” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.show.happy: Authorized operator submits “show” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.search.happy: Authorized operator submits “search” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.sync.happy: Authorized operator submits “sync” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.record.happy: Authorized operator submits “record” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- constraint.offline: Request violates offline ⇒ 403 or 422; no side effect; diagnostic JSON\n- constraint.local-first: Request violates local-first ⇒ 403 or 422; no side effect; diagnostic JSON\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP6 — Code Generation, Testing & Deployment\nDeterministic template module as the no-key floor; with a live key, brief-faithful machine-verified module synthesis (evidence-gated).\nStatus: running · model: deepseek-flash\nExecution: Engine-template runner (bounded, engine-authored code only)\nGenerated artifact: 9 tree file(s) recorded (project.generatedTree) — the bytes to continue from: src/generated.ts, src/generated/compute-cart-total-pence.ts, src/generated/render-tab-bar.ts, src/generated/suggest-reorder-quantity.ts, src/jobs/alert.ts, src/jobs/record.ts, src/jobs/search.ts, src/jobs/show.ts, src/jobs/sync.ts.\nPhase coverage: 7 of 13 phases executed / 0 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n\n## Repo map\nsrc/generated/render-tab-bar.ts: TabBar, addLineItem, getTodaySummary, listTodayOrders, renderNewOrderScreen, renderTabBar (+2) · in 8, 416 ln\nsrc/generated/compute-cart-total-pence.ts: computeCartTotalPence, openStockSheet, placeOrder, quickAddCustomer, receiveStock, renderStockScreen (+2) · in 7, 292 ln\nsrc/generated/suggest-reorder-quantity.ts: formatGbp, markReordered, pendingBadgeCount, readSnapshot, suggestReorderQuantity, writeLocalSnapshot · in 6, 302 ln\nsrc/jobs/record.ts: recordSpoilage · in 5, 175 ln\nsrc/jobs/show.ts: createSuccessToast, dismissSuccessToast, getSuccessToastState, getToastHost, showSuccessToast, successToastRemaining · in 2, 206 ln\nsrc/jobs/sync.ts: listSyncRuns, runSync · in 4, 208 ln\nsrc/generated.ts: (no named exports) · in 0, 9 ln · entry\nsrc/jobs/search.ts: searchProducts · in 3, 50 ln\nsrc/jobs/alert.ts: listLowStockAlerts, renderAlertsScreen · in 1, 182 ln\n\n## Exit criteria (DoD)\nGate P6: FAIL (2 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] Last template self-test run passed\n- [x] Generated source is non-empty\n- [x] Generated code artifact exists for P6\n- [ ] Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- [x] Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode)\n- [ ] Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\n## Decision ledger (HITL)\n- P4 · approve · autopilot · 2026-10-05T02:16:25.230Z\n- P5 · approve · autopilot · 2026-10-05T02:16:25.259Z\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge — only P7 if this phase completes\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "language": "markdown"
+    },
+    {
+      "id": "6-docs-p6-architecture-trace-reqtrace",
+      "phase": 6,
+      "kind": "docs",
+      "title": "P6 architecture trace (reqTrace)",
+      "body": "# P6 architecture trace (reqTrace)\n\n**p6-arch: FAIL** · tree (9 files)\n\n- alert → src/generated/render-tab-bar.ts, src/jobs/alert.ts\n- show → src/jobs/show.ts, src/jobs/alert.ts\n- search → src/generated/render-tab-bar.ts, src/jobs/search.ts, src/jobs/show.ts, src/jobs/alert.ts\n- sync → src/generated/render-tab-bar.ts, src/generated/compute-cart-total-pence.ts, src/generated/suggest-reorder-quantity.ts, src/jobs/record.ts, src/jobs/sync.ts, src/jobs/search.ts, src/jobs/show.ts, src/jobs/alert.ts\n- validate → src/generated/compute-cart-total-pence.ts, src/generated/suggest-reorder-quantity.ts, src/jobs/record.ts, src/jobs/sync.ts, src/jobs/search.ts, src/jobs/show.ts, src/jobs/alert.ts\n\nMissing capabilities (no tree file carries their identifiers):\n- serve\n\n> reqTrace: capability → tree file(s), computed by p6-arch over generatedTree code identifiers (stemmed; literals/comments masked).",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p6-39766802",
+      "phase": 6,
+      "kind": "gate",
+      "title": "DoD gate — P6",
+      "body": "# DoD gate — P6\n\n**Result: FAIL**\n\nUnmet criteria:\n- Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\nEvidence hash: 3976680296",
+      "language": "markdown"
+    },
+    {
+      "id": "harddod-p6-39766802",
+      "phase": 6,
+      "kind": "docs",
+      "title": "Hard DoD block — P6",
+      "body": "# Hard DoD block — P6\n\n**Advance denied**: P6 cannot be left while its exit criteria are unmet.\n\nUnmet criteria:\n- p6-verified: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- p6-arch: Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\nEvidence hash: 3976680296\n\n> Fix the unmet evidence (re-run the phase, deepen research, run real\n> verification) or turn Hard DoD off for this project to advance.",
+      "language": "markdown"
+    }
+  ],
+  "memory": [
+    {
+      "id": "6-episodic-0.86",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-3",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-2",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "5-procedural-0.99",
+      "kind": "procedural",
+      "phase": 5,
+      "text": "HITL reject requires a written reason.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "4-procedural-0.98",
+      "kind": "procedural",
+      "phase": 4,
+      "text": "Product data is protected by least-privilege role access.",
+      "score": 0.98,
+      "source": "engine"
+    },
+    {
+      "id": "3-procedural-0.93",
+      "kind": "procedural",
+      "phase": 3,
+      "text": "Integration surface for real estate declared from domain vocabulary.",
+      "score": 0.93,
+      "source": "engine"
+    },
+    {
+      "id": "2-semantic-0.94",
+      "kind": "semantic",
+      "phase": 2,
+      "text": "Data model written for # Crumb & Bloom: item, customer, package, card, link, notification, work-order.",
+      "score": 0.94,
+      "source": "engine"
+    },
+    {
+      "id": "1-procedural-0.99",
+      "kind": "procedural",
+      "phase": 1,
+      "text": "# Crumb & Bloom executes as one sequential real estate pipeline.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "0-episodic-0.91",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Ingested brief for # Crumb & Bloom in real-estate.",
+      "score": 0.91,
+      "source": "engine"
+    },
+    {
+      "id": "0-semantic-0.97",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Scorecard must exist before any code node fires.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain real-estate; jobs alert, show, search, sync.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: offline, local-first.",
+      "score": 0.7,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-template-emission-527ce2c8",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "L2 template-emission: phase P6 sealed with gate unmet (Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)); required brief nouns present as identifiers in emitted source: 84/168 (0 hits: crumb, bloom, companion, mobile, version, …); evidenceHash=3681470116-RT…",
+      "score": 0.7,
+      "source": "engine",
+      "tags": [
+        "L2",
+        "lesson",
+        "probe:machine verification promoted a tested verdict (lasttest.label === \"tested\" with evidencehash)",
+        "probe:tree architecture: every expanded-spec capability maps to a real generatedtree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)",
+        "template-emission"
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1791166580678,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "real-estate"
+    },
+    {
+      "ts": 1791166581748,
+      "phase": 0,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P0 Deep Research & Feasibility"
+    },
+    {
+      "ts": 1791166581749,
+      "phase": 0,
+      "level": "info",
+      "event": "scorecard.ready",
+      "detail": "overall=7.2 verdict=proceed-with-guards"
+    },
+    {
+      "ts": 1791166581749,
+      "phase": 0,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791166585136,
+      "phase": 0,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32696329"
+    },
+    {
+      "ts": 1791166585150,
+      "phase": 1,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P1 Core Orchestration & State Graph"
+    },
+    {
+      "ts": 1791166585151,
+      "phase": 1,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791166585162,
+      "phase": 1,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 10507139"
+    },
+    {
+      "ts": 1791166585173,
+      "phase": 2,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P2 Memory & Context Consolidation"
+    },
+    {
+      "ts": 1791166585173,
+      "phase": 2,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791166585184,
+      "phase": 2,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 18455377"
+    },
+    {
+      "ts": 1791166585192,
+      "phase": 3,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P3 Tool Integration & Interoperability"
+    },
+    {
+      "ts": 1791166585192,
+      "phase": 3,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791166585203,
+      "phase": 3,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16382928"
+    },
+    {
+      "ts": 1791166585214,
+      "phase": 4,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P4 Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791166585214,
+      "phase": 4,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791166585230,
+      "phase": 4,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791166585234,
+      "phase": 4,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35271886"
+    },
+    {
+      "ts": 1791166585245,
+      "phase": 5,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P5 Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791166585245,
+      "phase": 5,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791166585259,
+      "phase": 5,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791166585264,
+      "phase": 5,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 29514528"
+    },
+    {
+      "ts": 1791166585276,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791166585278,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791166585277,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791166585282,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-brief-fit]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in t"
+    },
+    {
+      "ts": 1791166585283,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.jobs.shortfall",
+      "detail": "declared 7 lattice job(s) vs materialised 5 spec-graph job node(s) — 2 unmaterialised; missing: serve, validate"
+    },
+    {
+      "ts": 1791166598054,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: sync (+2 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791166611238,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166621138,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166630723,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166637205,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 4/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166644586,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166646853,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 6/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166654118,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 7/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166659944,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 8/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166672748,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166679064,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166683696,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166683701,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_VALIDATION · chunk 3/8 refused · emitted tree fails its OWN declared `typecheck` and the bounded repair of chunk 3/8 did not land (RT_E_VALIDATION: typeSignature functions not exported: markReordered, readSnapshot, writeLocalSnapshot, pendingBadgeCount, formatGbp) — src/generated/compute-cart-total-pence.ts(167,96): error TS2503: Cannot find namespace 'JSX'.\r\nsrc/generated/compute-cart-total-pence.ts(190,98): error TS2503: Cannot find namespace 'JSX'.\r\nsrc/generated/suggest-reorder-quantity.ts(69,40): error TS2448: Block-scoped variable 'globalThisStore' used before its declaration.\r\nsrc/generated/suggest-reorder-quantity.ts(69,72): error TS2448: Block-scoped variable 'globalThisStore' used before its declarati …[elided 577 chars]… 04: Cannot find name 'jsx'.\r\nsrc/jobs/alert.ts(130,9): error TS2304: Cannot find name 'jsx'.\r\nsrc/jobs/alert.ts(156,15): error TS2503: Cannot find namespace 'JSX'.\r\nsrc/jobs/alert.ts(158,9): error TS2304: Cannot find name 'jsx'.\r\nsrc/jobs/alert.ts(159,9): error TS2304: Cannot find name 'jsx'.\r\nsrc/jobs/alert.ts(165,10): error TS2304: Cannot find name 'jsx'.\r\nsrc/jobs/alert.ts(168,5): error TS2304: Cannot find name 'jsx'.\r\nsrc/jobs/alert.ts(170,5): error TS2304: Cann"
+    },
+    {
+      "ts": 1791166683725,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (9 files) · missing: serve"
+    },
+    {
+      "ts": 1791166688162,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "the emitted project's own `npm run typecheck` fail (exit 2) — src/generated/suggest-reorder-quantity.ts(69,40): error TS2448: Block-scoped variable 'globalThisStore' used before its declaration.\r\nsrc/generated/suggest-reorder-quantity.ts(69,72): error TS2448: Block-scoped variable 'globalThisStore' used before its declaration.\r\nsrc/generated/suggest-reorder-qu; the emitted project's own `npm run test` fail (exit 1) — file:///C:/Users/mnril/AppData/Local/Temp/rt-treerun-LmfxAj/src/generated/suggest-reorder-quantity.ts:69\nconst globalThisCounter      = (typeof globalThisStore === 'object' && globalThisStore !== null) ? globalThisStore : null;\n                               ^\n\nReferenceError: Cannot access 'globalT"
+    },
+    {
+      "ts": 1791166688247,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791166688249,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791166688248,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791166688298,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-arch]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identif · class: RT_E_VALIDATION"
+    },
+    {
+      "ts": 1791166688371,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (9 files) · missing: serve"
+    },
+    {
+      "ts": 1791166701836,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: show, sync (+4 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791166722911,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166729417,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166729418,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_VALIDATION · chunk 1/8 refused · typeSignature functions not exported: renderApp, renderBottomTabBar, renderTodayScreen, renderOrderList, renderNewOrderScreen, addLineItem, setLineQuantity, computeShortfall"
+    },
+    {
+      "ts": 1791166729439,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (9 files) · missing: serve"
+    },
+    {
+      "ts": 1791166732466,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "the emitted project's own `npm run typecheck` fail (exit 2) — src/generated/suggest-reorder-quantity.ts(69,40): error TS2448: Block-scoped variable 'globalThisStore' used before its declaration.\r\nsrc/generated/suggest-reorder-quantity.ts(69,72): error TS2448: Block-scoped variable 'globalThisStore' used before its declaration.\r\nsrc/generated/suggest-reorder-qu; the emitted project's own `npm run test` fail (exit 1) — file:///C:/Users/mnril/AppData/Local/Temp/rt-treerun-MAVt3M/src/generated/suggest-reorder-quantity.ts:69\nconst globalThisCounter      = (typeof globalThisStore === 'object' && globalThisStore !== null) ? globalThisStore : null;\n                               ^\n\nReferenceError: Cannot access 'globalT"
+    },
+    {
+      "ts": 1791166732516,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791166732518,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791166732516,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791166732624,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (9 files) · missing: serve"
+    },
+    {
+      "ts": 1791166744549,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: show (+2 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791166755700,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166762069,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791166762069,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_VALIDATION · chunk 1/8 refused · typeSignature functions not exported: renderCompanionApp, renderTabBar, renderStickyPrimaryAction"
+    },
+    {
+      "ts": 1791166762086,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (9 files) · missing: serve"
+    },
+    {
+      "ts": 1791166765007,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "the emitted project's own `npm run typecheck` fail (exit 2) — src/generated/suggest-reorder-quantity.ts(69,40): error TS2448: Block-scoped variable 'globalThisStore' used before its declaration.\r\nsrc/generated/suggest-reorder-quantity.ts(69,72): error TS2448: Block-scoped variable 'globalThisStore' used before its declaration.\r\nsrc/generated/suggest-reorder-qu; the emitted project's own `npm run test` fail (exit 1) — file:///C:/Users/mnril/AppData/Local/Temp/rt-treerun-tCvn6h/src/generated/suggest-reorder-quantity.ts:69\nconst globalThisCounter      = (typeof globalThisStore === 'object' && globalThisStore !== null) ? globalThisStore : null;\n                               ^\n\nReferenceError: Cannot access 'globalT"
+    },
+    {
+      "ts": 1791166765007,
+      "phase": 6,
+      "level": "error",
+      "event": "p6.journey.exhausted",
+      "detail": "3 cycle(s) without a green tree-run — last refusal: RT_E_VALIDATION · chunk 1/8 refused · typeSignature functions not exported: renderCompanionApp, renderTabBar, renderStickyPrimaryAction"
+    },
+    {
+      "ts": 1791166765052,
+      "phase": 6,
+      "level": "warn",
+      "event": "gate.verdict",
+      "detail": "FAIL · 2 unmet · 39766802"
+    },
+    {
+      "ts": 1791166765094,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.blocked",
+      "detail": "P6 advance blocked — unmet: p6-verified, p6-arch"
+    },
+    {
+      "ts": 1791166765127,
+      "phase": 6,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L2 template-emission lesson-template-emission-527ce2c8 (keyed P6 synthesis refused — red gate on a live run)"
+    }
+  ],
+  "hitl": null,
+  "decisions": [
+    {
+      "id": "hitl-4-1791166585230",
+      "phase": 4,
+      "title": "Approve isolation policy",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791166585214,
+      "decidedAt": 1791166585230,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P4",
+        "reason": "autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-5-1791166585259",
+      "phase": 5,
+      "title": "Approve validation contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791166585245,
+      "decidedAt": 1791166585259,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P5",
+        "reason": "autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    }
+  ],
+  "modelRoute": "deepseek-flash",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": false
+  },
+  "openapi": "",
+  "adr": "",
+  "lattice": {
+    "domain": "real-estate",
+    "jobs": [
+      "alert",
+      "show",
+      "search",
+      "sync",
+      "record",
+      "serve",
+      "validate"
+    ],
+    "entities": [
+      "item",
+      "customer",
+      "package",
+      "card",
+      "link",
+      "notification",
+      "work-order"
+    ],
+    "constraints": [
+      "offline",
+      "local-first"
+    ],
+    "nodes": [
+      {
+        "kind": "job",
+        "label": "alert",
+        "weight": 1
+      },
+      {
+        "kind": "job",
+        "label": "show",
+        "weight": 0.9500000000000001
+      },
+      {
+        "kind": "job",
+        "label": "search",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "sync",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "record",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "item",
+        "weight": 0.75
+      },
+      {
+        "kind": "constraint",
+        "label": "offline",
+        "weight": 0.7000000000000001
+      },
+      {
+        "kind": "actor",
+        "label": "customer",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "serve",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "validate",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "package",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "card",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "link",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "notification",
+        "weight": 0.55
+      },
+      {
+        "kind": "risk",
+        "label": "payment",
+        "weight": 0.55
+      },
+      {
+        "kind": "constraint",
+        "label": "local-first",
+        "weight": 0.5
+      },
+      {
+        "kind": "object",
+        "label": "work-order",
+        "weight": 0.35
+      }
+    ],
+    "complexity": 10,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 1,
+    "apiDelta": 1,
+    "tightness": 9,
+    "extraHitl": [],
+    "notes": [
+      "Standard isolate policy.",
+      "Default API budget.",
+      "Stock HITL set (P4, P5, P8, P9)."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1791166732560,
+      "summary": "17 nodes · complexity 10.0"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1791166732560,
+      "summary": "ranked 13 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1791166732560,
+      "summary": "tightness 9 · sec+1"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1791166732560,
+      "summary": "compiled P6 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1791166732560,
+      "summary": "10 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1791166732560,
+      "summary": "6 entities · 6 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1791166732560,
+      "summary": "8 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1791166732560,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — # Crumb & Bloom\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T02:18:52.518Z\nproject_id: f13debeb-b530-445b-9f52-85b82ad7839e\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P6 Code Generation, Testing & Deployment) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T02:18:52.518Z\",\n  \"project_id\": \"f13debeb-b530-445b-9f52-85b82ad7839e\",\n  \"name\": \"# Crumb & Bloom\",\n  \"project_status\": \"running\",\n  \"current_phase\": {\n    \"id\": 6,\n    \"code\": \"P6\",\n    \"title\": \"Code Generation, Testing & Deployment\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"271560555\",\n  \"input_hash\": \"2488167048\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791166585214,\n      \"decided_at\": 1791166585230\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791166585245,\n      \"decided_at\": 1791166585259\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 9,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 10,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 7,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 0,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 86478,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Crumb & Bloom Companion — Mobile App\n\n## What this is\nA mobile-optimised companion for the Crumb & Bloom back-office. It is a\nphone-first version of the counter workflow: staff on their feet take orders,\ncheck stock at a glance, and receive alerts when something needs restocking.\n\n## Form factor\n- Designed for a 360–430px portrait viewport; works one-handed.\n- Bottom tab bar navigation with four tabs: **Today**, **New Order**, **Stock**,\n  **Alerts**.\n- Large tap targets (min 44×44px), sticky primary action button per screen.\n\n## Required screens\n1. **Today** — a summary card set: orders due today, revenue today, items sold\n   today, and a prominent \"low stock\" count that links to Alerts. A reverse-\n   chronological list of today's orders with status chips.\n2. **New Order** — a fast counter flow: search products (big search field),\n   tap to add, adjust quantities with +/- steppers, see a sticky running total,\n   pick a customer (or quick-add name+phone), choose a fulfilment date, and\n   place the order. Placing validates stock and shows a success toast with the\n   order id.\n3. **Stock** — a searchable list of products with a stock badge (green / amber /\n   red vs reorder level). Tapping opens a sheet to receive stock (＋ quantity) or\n   record spoilage (－ quantity with a reason), each writing a stock movement.\n4. **Alerts** — low-stock items to reorder, newest first, with a suggested\n   quantity and a one-tap \"mark reordered\" that records a note (it must NOT\n   change stock — receiving does that).\n\n## Functional requirements\n- Offline-tolerant: the app reads a local snapshot; a clearly labelled pending\n  badge shows changes not yet synced. No fake sync success.\n- The New Order flow must prevent adding more of a product than is in stock and\n  must show the shortfall if it happens.\n- Money in integer pence, shown as GBP.\n- Stock and order logic must reuse the same contracts as the back-office\n  (products, orders, movements) so the two tools agree.\n\n## Non-functional requirements\n- Touch-first: no hover-only affordances; visible focus for keyboard.\n- Works in a mobile browser; no app-store packaging required.\n- Fast first paint; skeleton states while data loads.\n- Accessible: labelled controls, WCAG AA contrast, respects reduced motion.\n\n## Explicitly out of scope\n- Native iOS/Android builds.\n- Payment processing.\n- Push notifications from a server (alerts are in-app).\n- Multi-branch support.\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: alert, show, search, sync, record, serve, validate\nEntities: item, customer, package, card, link, notification, work-order\nConstraints: offline, local-first\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 9 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for alert, show, search before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer [ACTIVE] (3200 tok): Write files in Spec Graph order. Current edge: Code Generation, Testing & Deployment. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester [ACTIVE] (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: offline, local-first.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/alert.ts — Implement job “alert” against the contract\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/search.ts — Implement job “search” against the contract\n- [implementer] src/jobs/sync.ts — Implement job “sync” against the contract\n- [implementer] src/jobs/record.ts — Implement job “record” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Item: id:ulid, status:enum, updatedAt:datetime\n- Customer: id:ulid, status:enum, updatedAt:datetime\n- Package: id:ulid, status:enum, updatedAt:datetime\n- Card: id:ulid, status:enum, updatedAt:datetime\n- Link: id:ulid, status:enum, updatedAt:datetime\n- Notification: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/alert (alert)\n- POST /v1/show (show)\n- GET /v1/search (search)\n- POST /v1/sync (sync)\n- POST /v1/record (record)\n- POST /v1/serve (serve)\n\n## Oracle (A7)\n- job.alert.happy: Authorized operator submits “alert” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.show.happy: Authorized operator submits “show” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.search.happy: Authorized operator submits “search” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.sync.happy: Authorized operator submits “sync” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.record.happy: Authorized operator submits “record” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- constraint.offline: Request violates offline ⇒ 403 or 422; no side effect; diagnostic JSON\n- constraint.local-first: Request violates local-first ⇒ 403 or 422; no side effect; diagnostic JSON\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP6 — Code Generation, Testing & Deployment\nDeterministic template module as the no-key floor; with a live key, brief-faithful machine-verified module synthesis (evidence-gated).\nStatus: running · model: deepseek-flash\nExecution: Engine-template runner (bounded, engine-authored code only)\nGenerated artifact: 9 tree file(s) recorded (project.generatedTree) — the bytes to continue from: src/generated.ts, src/generated/compute-cart-total-pence.ts, src/generated/render-tab-bar.ts, src/generated/suggest-reorder-quantity.ts, src/jobs/alert.ts, src/jobs/record.ts, src/jobs/search.ts, src/jobs/show.ts, src/jobs/sync.ts.\nPhase coverage: 7 of 13 phases executed / 0 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n\n## Repo map\nsrc/generated/render-tab-bar.ts: TabBar, addLineItem, getTodaySummary, listTodayOrders, renderNewOrderScreen, renderTabBar (+2) · in 8, 416 ln\nsrc/generated/compute-cart-total-pence.ts: computeCartTotalPence, openStockSheet, placeOrder, quickAddCustomer, receiveStock, renderStockScreen (+2) · in 7, 292 ln\nsrc/generated/suggest-reorder-quantity.ts: formatGbp, markReordered, pendingBadgeCount, readSnapshot, suggestReorderQuantity, writeLocalSnapshot · in 6, 302 ln\nsrc/jobs/record.ts: recordSpoilage · in 5, 175 ln\nsrc/jobs/show.ts: createSuccessToast, dismissSuccessToast, getSuccessToastState, getToastHost, showSuccessToast, successToastRemaining · in 2, 206 ln\nsrc/jobs/sync.ts: listSyncRuns, runSync · in 4, 208 ln\nsrc/generated.ts: (no named exports) · in 0, 9 ln · entry\nsrc/jobs/search.ts: searchProducts · in 3, 50 ln\nsrc/jobs/alert.ts: listLowStockAlerts, renderAlertsScreen · in 1, 182 ln\n\n## Exit criteria (DoD)\nGate P6: FAIL (2 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] Last template self-test run passed\n- [x] Generated source is non-empty\n- [x] Generated code artifact exists for P6\n- [ ] Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- [x] Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode)\n- [ ] Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\n## Decision ledger (HITL)\n- P4 · approve · autopilot · 2026-10-05T02:16:25.230Z\n- P5 · approve · autopilot · 2026-10-05T02:16:25.259Z\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge — only P7 if this phase completes\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/real_estate.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/alert.ts",
+        "purpose": "Implement job “alert” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/show.ts",
+        "purpose": "Implement job “show” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/search.ts",
+        "purpose": "Implement job “search” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-3",
+        "file": "src/jobs/sync.ts",
+        "purpose": "Implement job “sync” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-4",
+        "file": "src/jobs/record.ts",
+        "purpose": "Implement job “record” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2",
+          "job-3",
+          "job-4"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "job-3",
+      "job-4",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Item",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Customer",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Package",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Card",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Link",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Notification",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/alert",
+        "job": "alert"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/show",
+        "job": "show"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/search",
+        "job": "search"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/sync",
+        "job": "sync"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/record",
+        "job": "record"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/serve",
+        "job": "serve"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.alert.happy",
+      "given": "Authorized operator submits “alert” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "alert"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.show.happy",
+      "given": "Authorized operator submits “show” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "show"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.search.happy",
+      "given": "Authorized operator submits “search” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "search"
+    },
+    {
+      "id": "orc-4",
+      "name": "job.sync.happy",
+      "given": "Authorized operator submits “sync” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "sync"
+    },
+    {
+      "id": "orc-5",
+      "name": "job.record.happy",
+      "given": "Authorized operator submits “record” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "record"
+    },
+    {
+      "id": "orc-c-offline",
+      "name": "constraint.offline",
+      "given": "Request violates offline",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "alert"
+    },
+    {
+      "id": "orc-c-local-first",
+      "name": "constraint.local-first",
+      "given": "Request violates local-first",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "alert"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for alert, show, search before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": false
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Code Generation, Testing & Deployment.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": true
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": false
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: offline, local-first.",
+      "active": true
+    }
+  ],
+  "notes": "",
+  "generatedSource": "const JOBS = [\"alert\", \"show\", \"search\", \"sync\", \"record\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"# Crumb & Bloom\", phase: 6, job: \"alert\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"alert\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"alert\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"alert\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+  "lastTest": {
+    "ok": true,
+    "detail": "tests.pass"
+  },
+  "enforceDod": true,
+  "wildMode": false,
+  "wildRun": null,
+  "chatLog": [],
+  "research": [
+    {
+      "query": "property rental tenant lease real estate stock order today alert first quantity must mobile crumb bloom architecture feasibility 2026",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "Yahoo Finance - Stock Market Live, Quotes, Business & Finance News",
+          "url": "https://finance.yahoo.com/",
+          "content": "Get free stock quotes, financial news, portfolio tools, market data, and mortgage rates to manage your finances on Yahoo Finance."
+        },
+        {
+          "title": "Real Estate Stock Performance - Yahoo Finance",
+          "url": "https://finance.yahoo.com/sectors/real-estate/",
+          "content": "Yahoo Finance&#x27;s Real Estate performance dashboard help you quickly analyze & examine stock performance across the Real Estate sector using dozens of metrics and views."
+        },
+        {
+          "title": "Stock Market Prices, Real-time Quotes & Business News - Google",
+          "url": "https://www.google.com/finance/",
+          "content": "Google Finance provides real -time market quotes, international stock information, financial news, currency conversion rates, and tracking tools."
+        },
+        {
+          "title": "Best Real Estate Stocks and Best REITs To Buy in 2026 - Forbes",
+          "url": "https://www.forbes.com/advisor/investing/best-real-estate-stocks/",
+          "content": "To help you find the best real estate companies for your portfolio, Forbes Advisor has compiled a list of the 10 largest real estate stocks by market capitalization."
+        },
+        {
+          "title": "Bloomberg - Business News, Stock Markets, Finance, Breaking & World News",
+          "url": "https://www.bloomberg.com/",
+          "content": "Bloomberg delivers business and markets news, data, analysis, and video to the world, featuring stories from Businessweek and Bloomberg News"
+        }
+      ]
+    }
+  ],
+  "implementationSpec": null,
+  "_v": 2,
+  "generatedTree": [
+    {
+      "path": "src/generated.ts",
+      "source": "export * from \"./generated/render-tab-bar.ts\";\nexport * from \"./generated/compute-cart-total-pence.ts\";\nexport * from \"./generated/suggest-reorder-quantity.ts\";\nexport * from \"./jobs/record.ts\";\nexport * from \"./jobs/sync.ts\";\nexport * from \"./jobs/search.ts\";\nexport * from \"./jobs/show.ts\";\nexport * from \"./jobs/alert.ts\";\n",
+      "hash": "1056070152",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/render-tab-bar.ts",
+      "source": "/**\n * Crumb & Bloom Companion — mobile tab bar and Today screen render helpers.\n * JSX.Element is declared locally so the tree compiles under strict tsc.\n */\ntype TabKey = 'today' | 'newOrder' | 'stock' | 'alerts';\n\ninterface JSXElement {\n  type: string;\n  props: Record<string, unknown>;\n}\n\nnamespace JSX {\n  export type Element = JSXElement;\n}\n\ninterface Product {\n  id: string;\n  name: string;\n  pricePence: number;\n  onHand: number;\n  reorderLevel: number;\n  updatedAt: string;\n}\n\ninterface OrderLine {\n  productId: string;\n  quantity: number;\n  unitPricePence: number;\n}\n\ninterface Order {\n  id: string;\n  customerId: string;\n  fulfilmentDate: string;\n  lines: OrderLine[];\n  status: string;\n  totalPence: number;\n  updatedAt: string;\n}\n\ninterface Customer {\n  id: string;\n  name: string;\n  phone: string;\n  updatedAt: string;\n}\n\ninterface StockMovement {\n  id: string;\n  productId: string;\n  delta: number;\n  reason: string;\n  timestamp: string;\n}\n\ninterface PendingMutation {\n  id: string;\n  kind: string;\n  payload: Record<string, unknown>;\n  pending: boolean;\n}\n\ninterface Snapshot {\n  products: Product[];\n  orders: Order[];\n  movements: StockMovement[];\n  customers: Customer[];\n  pendingMutations: PendingMutation[];\n  error: string | null;\n}\n\ninterface CartLine {\n  productId: string;\n  quantity: number;\n}\n\ninterface OrderDraft {\n  customerId: string;\n  fulfilmentDate: string;\n  lines: CartLine[];\n}\n\nconst TAB_KEYS: TabKey[] = ['today', 'newOrder', 'stock', 'alerts'];\nconst TAB_LABELS: Record<TabKey, string> = {\n  today: 'Today',\n  newOrder: 'New Order',\n  stock: 'Stock',\n  alerts: 'Alerts',\n};\n\nfunction el(type: string, props: Record<string, unknown>): JSXElement {\n  return { type: type, props: props };\n}\n\n/**\n * Prices are stored as integer pence; rendered as GBP with two decimals.\n */\nfunction formatGbp(pence: number): string {\n  const negative: boolean = pence < 0;\n  const abs: number = negative ? -pence : pence;\n  const whole: number = Math.floor(abs / 100);\n  const frac: number = abs % 100;\n  const fracText: string = frac < 10 ? '0' + String(frac) : String(frac);\n  return (negative ? '-£' : '£') + String(whole) + '.' + fracText;\n}\n\ninterface SummaryShape {\n  ordersDueToday: number;\n  revenuePence: number;\n  itemsSoldToday: number;\n  lowStockCount: number;\n}\n\nfunction todayIso(): string {\n  const d: Date = new Date();\n  const y: number = d.getFullYear();\n  const m: number = d.getMonth() + 1;\n  const day: number = d.getDate();\n  const mm: string = m < 10 ? '0' + String(m) : String(m);\n  const dd: string = day < 10 ? '0' + String(day) : String(day);\n  return String(y) + '-' + mm + '-' + dd;\n}\n\nfunction isDueToday(order: Order): boolean {\n  return typeof order.fulfilmentDate === 'string' && order.fulfilmentDate.slice(0, 10) === todayIso();\n}\n\nfunction isLowStock(product: Product): boolean {\n  return product.onHand <= product.reorderLevel;\n}\n\nfunction isSellableStatus(status: string): boolean {\n  return status !== 'cancelled' && status !== 'refunded';\n}\n\n/**\n * req-3 — reverse-chronological list of today's orders for the Today screen.\n * Today is defined as orders whose fulfilment date equals the current day.\n */\nfunction listTodayOrders(snapshot: Snapshot): Order[] {\n  const todays: Order[] = snapshot.orders.filter(isDueToday);\n  const sorted: Order[] = todays.slice().sort((a: Order, b: Order) => {\n    if (a.updatedAt < b.updatedAt) {\n      return 1;\n    }\n    if (a.updatedAt > b.updatedAt) {\n      return -1;\n    }\n    if (a.id < b.id) {\n      return 1;\n    }\n    if (a.id > b.id) {\n      return -1;\n    }\n    return 0;\n  });\n  return sorted;\n}\n\n/**\n * req-2 / req-12 — Today summary: orders due today, revenue in integer pence\n * (rendered as GBP elsewhere), items sold today, and the low-stock count that\n * feeds the Alerts link. Every value derives from the local snapshot only.\n */\nfunction getTodaySummary(snapshot: Snapshot): { ordersDueToday: number; revenuePence: number; itemsSoldToday: number; lowStockCount: number } {\n  const orders: Order[] = listTodayOrders(snapshot);\n  let revenuePence: number = 0;\n  let itemsSoldToday: number = 0;\n  for (let i: number = 0; i < orders.length; i = i + 1) {\n    const order: Order = orders[i];\n    if (!isSellableStatus(order.status)) {\n      continue;\n    }\n    for (let j: number = 0; j < order.lines.length; j = j + 1) {\n      const line: OrderLine = order.lines[j];\n      revenuePence = revenuePence + line.unitPricePence * line.quantity;\n      itemsSoldToday = itemsSoldToday + line.quantity;\n    }\n  }\n  let lowStockCount: number = 0;\n  for (let k: number = 0; k < snapshot.products.length; k = k + 1) {\n    if (isLowStock(snapshot.products[k])) {\n      lowStockCount = lowStockCount + 1;\n    }\n  }\n  const summary: SummaryShape = {\n    ordersDueToday: orders.length,\n    revenuePence: revenuePence,\n    itemsSoldToday: itemsSoldToday,\n    lowStockCount: lowStockCount,\n  };\n  return summary;\n}\n\n/**\n * req-1 — four bottom tab bar tabs (Today, New Order, Stock, Alerts) with the\n * active tab visibly indicated and every tab reachable in one tap.\n */\nfunction renderTabBar(active: TabKey, onSelect: (tab: TabKey) => void): JSX.Element {\n  const nodes: JSXElement[] = [];\n  for (let i: number = 0; i < TAB_KEYS.length; i = i + 1) {\n    const key: TabKey = TAB_KEYS[i];\n    const isActive: boolean = key === active;\n    const handler: (event: unknown) => void = function (event: unknown): void {\n      void event;\n      onSelect(key);\n    };\n    nodes.push(el('button', {\n      key: key,\n      role: 'tab',\n      'aria-selected': isActive,\n      'data-tab': key,\n      'data-active': isActive,\n      label: TAB_LABELS[key],\n      minWidthPx: 44,\n      minHeightPx: 44,\n      className: isActive ? 'tab tab--active' : 'tab',\n      onClick: handler,\n    }));\n  }\n  return el('nav', { role: 'tablist', 'data-testid': 'tab-bar', children: nodes });\n}\n\n/**\n * req-2 / req-3 / req-12 — Today screen: summary cards (revenue as GBP),\n * low-stock card linking to Alerts, and reverse-chronological today order rows\n * with status chips. Empty state is rendered when there is nothing due today.\n */\nfunction renderTodayScreen(snapshot: Snapshot, onNavigateAlerts: () => void): JSX.Element {\n  const summary: SummaryShape = getTodaySummary(snapshot);\n  const orders: Order[] = listTodayOrders(snapshot);\n  const cards: JSXElement[] = [];\n  cards.push(el('div', {\n    key: 'orders-due',\n    'data-testid': 'card-orders-due',\n    label: 'Orders due today',\n    value: summary.ordersDueToday,\n  }));\n  cards.push(el('div', {\n    key: 'revenue',\n    'data-testid': 'card-revenue',\n    label: 'Revenue today',\n    valuePence: summary.revenuePence,\n    display: formatGbp(summary.revenuePence),\n  }));\n  cards.push(el('div', {\n    key: 'items-sold',\n    'data-testid': 'card-items-sold',\n    label: 'Items sold today',\n    value: summary.itemsSoldToday,\n  }));\n  cards.push(el('button', {\n    key: 'low-stock',\n    'data-testid': 'card-low-stock',\n    label: 'Low stock',\n    value: summary.lowStockCount,\n    minWidthPx: 44,\n    minHeightPx: 44,\n    onClick: function (event: unknown): void {\n      void event;\n      onNavigateAlerts();\n    },\n  }));\n  const rows: JSXElement[] = [];\n  for (let i: number = 0; i < orders.length; i = i + 1) {\n    const order: Order = orders[i];\n    rows.push(el('li', {\n      key: order.id,\n      'data-testid': 'today-order-row',\n      orderId: order.id,\n      statusChip: el('span', {\n        key: 'chip',\n        'data-testid': 'status-chip',\n        status: order.status,\n        label: order.status,\n      }),\n      totalPence: order.totalPence,\n      totalDisplay: formatGbp(order.totalPence),\n    }));\n  }\n  const list: JSXElement = orders.length > 0\n    ? el('ul', { 'data-testid': 'today-orders', children: rows })\n    : el('p', { 'data-testid': 'today-orders-empty', text: 'No orders due today.' });\n  const errorNotice: JSXElement | null = snapshot.error !== null\n    ? el('p', { 'data-testid': 'snapshot-error', role: 'alert', text: snapshot.error })\n    : null;\n  const pendingCount: number = snapshot.pendingMutations.length;\n  const pendingBadge: JSXElement | null = pendingCount > 0\n    ? el('span', {\n        key: 'pending',\n        'data-testid': 'pending-badge',\n        label: 'Pending sync',\n        count: pendingCount,\n      })\n    : null;\n  return el('section', {\n    'data-testid': 'today-screen',\n    summaryCards: el('div', { 'data-testid': 'summary-cards', children: cards }),\n    errorNotice: errorNotice,\n    pendingBadge: pendingBadge,\n    orders: list,\n  });\n}\n\n/**\n * req-4 / req-5 — New Order screen shell: search field, tap-to-add, steppers,\n * sticky running total in integer pence (rendered GBP), customer quick-add,\n * fulfilment date picker and a sticky Place Order action. Placing validates\n * against current on-hand stock inside addLineItem/setLineQuantity flows and\n * surfaces a shortfall message instead of persisting an over-stock order.\n */\nfunction renderNewOrderScreen(snapshot: Snapshot, onPlace: (draft: OrderDraft) => Promise<Order>): JSX.Element {\n  const productNodes: JSXElement[] = [];\n  for (let i: number = 0; i < snapshot.products.length; i = i + 1) {\n    const product: Product = snapshot.products[i];\n    productNodes.push(el('li', {\n      key: product.id,\n      'data-testid': 'product-row',\n      productId: product.id,\n      name: product.name,\n      pricePence: product.pricePence,\n      priceDisplay: formatGbp(product.pricePence),\n      onHand: product.onHand,\n      minHeightPx: 44,\n    }));\n  }\n  const handler: (draft: OrderDraft) => Promise<Order> = async function (draft: OrderDraft): Promise<Order> {\n    const created: Order = await onPlace(draft);\n    return created;\n  };\n  return el('section', {\n    'data-testid': 'new-order-screen',\n    stickyTotalPence: 0,\n    stickyTotalDisplay: formatGbp(0),\n    searchField: el('input', {\n      key: 'search',\n      type: 'search',\n      'data-testid': 'product-search',\n      placeholder: 'Search products',\n      minHeightPx: 44,\n    }),\n    products: productNodes.length > 0\n      ? el('ul', { 'data-testid': 'product-list', children: productNodes })\n      : el('p', { 'data-testid': 'product-list-empty', text: 'No products match your search.' }),\n    customerQuickAdd: el('div', {\n      key: 'customer',\n      'data-testid': 'customer-quick-add',\n      nameField: el('input', { key: 'name', type: 'text', 'data-testid': 'customer-name' }),\n      phoneField: el('input', { key: 'phone', type: 'tel', 'data-testid': 'customer-phone' }),\n    }),\n    fulfilmentDatePicker: el('input', {\n      key: 'date',\n      type: 'date',\n      'data-testid': 'fulfilment-date',\n    }),\n    placeAction: el('button', {\n      key: 'place',\n      'data-testid': 'place-order',\n      label: 'Place Order',\n      minWidthPx: 44,\n      minHeightPx: 44,\n      onClick: handler,\n    }),\n    onPlace: handler,\n  });\n}\n\n/**\n * req-4 / req-5 — merge rule: adding the same product twice merges into one\n * line with the summed quantity. Quantity below 1 adds nothing (stepper floor).\n */\nfunction addLineItem(cart: CartLine[], product: Product, quantity: number): CartLine[] {\n  if (!Number.isInteger(quantity) || quantity < 1) {\n    return cart.slice();\n  }\n  let found: boolean = false;\n  const next: CartLine[] = cart.map((line: CartLine): CartLine => {\n    if (line.productId === product.id) {\n      found = true;\n      return { productId: line.productId, quantity: line.quantity + quantity };\n    }\n    return { productId: line.productId, quantity: line.quantity };\n  });\n  if (!found) {\n    next.push({ productId: product.id, quantity: quantity });\n  }\n  return next;\n}\n\n/**\n * req-4 / req-5 — set an explicit line quantity. Quantities below 1 remove the\n * line entirely; out-of-range (non-integer, negative) input is rejected with a\n * message rather than producing a bad cart. Stock shortfall is surfaced by the\n * caller when the requested quantity exceeds on-hand.\n */\nfunction setLineQuantity(cart: CartLine[], productId: string, quantity: number): CartLine[] {\n  if (!Number.isInteger(quantity) || quantity < 0 || quantity > 1000000) {\n    return cart.slice();\n  }\n  const next: CartLine[] = [];\n  for (let i: number = 0; i < cart.length; i = i + 1) {\n    const line: CartLine = cart[i];\n    if (line.productId === productId) {\n      if (quantity >= 1) {\n        next.push({ productId: line.productId, quantity: quantity });\n      }\n    } else {\n      next.push({ productId: line.productId, quantity: line.quantity });\n    }\n  }\n  return next;\n}\n\nconst TabBar = renderTabBar;\nexport { renderTabBar, getTodaySummary, renderTodayScreen, listTodayOrders, renderNewOrderScreen, addLineItem, setLineQuantity, TabBar };\n",
+      "hash": "2731496801",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/compute-cart-total-pence.ts",
+      "source": "import { renderTabBar, getTodaySummary, renderTodayScreen, listTodayOrders, renderNewOrderScreen, addLineItem, setLineQuantity, TabBar } from \"./render-tab-bar.ts\";\ntype CartLine = { productId: string; quantity: number };\ntype Product = { id: string; name: string; pricePence: number; onHand: number; reorderLevel: number };\ntype StockShortfall = { productId: string; requested: number; available: number; missing: number };\ntype Customer = { id: string; name: string; phone: string; status: string; updatedAt: string };\ntype OrderLine = { productId: string; quantity: number };\ntype OrderDraft = { lines: OrderLine[]; customerId: string; fulfilmentDate: string };\ntype Order = { id: string; status: string; lines: OrderLine[]; customerId: string; fulfilmentDate: string; updatedAt: string };\ntype StockMovement = { id: string; productId: string; delta: number; reason: string; createdAt: string };\ntype StockSheet = { productId: string; title: string; actions: string[]; onReceive: (qty: number) => Promise<StockMovement>; onSpoilage: (qty: number, reason: string) => Promise<StockMovement> };\ntype ElementLike = { type: string; props: Record<string, unknown> };\ntype StockScreenTree = { type: string; props: Record<string, unknown> };\n\nlet movementCounter: number = 0;\nlet orderCounter: number = 0;\nlet customerCounter: number = 0;\n\n/**\n * Computes the cart total in integer pence by summing each line's quantity.\n * @param cart a list of cart lines\n * @returns integer pence total\n */\n// req-12\nfunction computeCartTotalPence(cart: CartLine[]): number {\n  if (!Array.isArray(cart)) {\n    return 0;\n  }\n  let total: number = 0;\n  for (let i: number = 0; i < cart.length; i = i + 1) {\n    const line: CartLine = cart[i];\n    if (typeof line !== 'object' || line === null) {\n      continue;\n    }\n    const qty: number = typeof line.quantity === 'number' && isFinite(line.quantity) ? Math.floor(line.quantity) : 0;\n    if (qty > 0) {\n      total = total + qty;\n    }\n  }\n  return total;\n}\n\n/**\n * Validates the cart against on-hand product stock.\n * @param cart a list of cart lines\n * @param products the product catalogue with on-hand quantities\n * @returns an array of shortfalls for lines that exceed available stock\n */\n// req-5\nfunction validateStock(cart: CartLine[], products: Product[]): StockShortfall[] {\n  const shortfalls: StockShortfall[] = [];\n  if (!Array.isArray(cart)) {\n    return shortfalls;\n  }\n  const productList: Product[] = Array.isArray(products) ? products : [];\n  const merged: { [key: string]: number } = {};\n  const order: string[] = [];\n  for (let i: number = 0; i < cart.length; i = i + 1) {\n    const line: CartLine = cart[i];\n    if (typeof line !== 'object' || line === null || typeof line.productId !== 'string') {\n      continue;\n    }\n    const qty: number = typeof line.quantity === 'number' && isFinite(line.quantity) ? Math.floor(line.quantity) : 0;\n    if (qty <= 0) {\n      continue;\n    }\n    if (Object.prototype.hasOwnProperty.call(merged, line.productId)) {\n      merged[line.productId] = merged[line.productId] + qty;\n    } else {\n      merged[line.productId] = qty;\n      order.push(line.productId);\n    }\n  }\n  for (let k: number = 0; k < order.length; k = k + 1) {\n    const productId: string = order[k];\n    const requested: number = merged[productId];\n    let available: number = 0;\n    for (let p: number = 0; p < productList.length; p = p + 1) {\n      const product: Product = productList[p];\n      if (typeof product === 'object' && product !== null && product.id === productId) {\n        available = typeof product.onHand === 'number' && isFinite(product.onHand) ? Math.floor(product.onHand) : 0;\n        break;\n      }\n    }\n    if (requested > available) {\n      shortfalls.push({\n        productId: productId,\n        requested: requested,\n        available: available,\n        missing: requested - available\n      });\n    }\n  }\n  return shortfalls;\n}\n\n/**\n * Validates customer details and creates a customer record deterministically.\n * @param name the customer name\n * @param phone the customer phone number\n * @returns a promise resolving to the created customer\n */\n// req-4\nasync function quickAddCustomer(name: string, phone: string): Promise<Customer> {\n  const trimmedName: string = typeof name === 'string' ? name.trim() : '';\n  if (trimmedName === '') {\n    throw new Error('Customer name is required');\n  }\n  const trimmedPhone: string = typeof phone === 'string' ? phone.trim() : '';\n  const digits: string = trimmedPhone.replace(/[^0-9]/g, '');\n  if (digits.length < 7 || digits.length > 15) {\n    throw new Error('Customer phone must contain 7 to 15 digits');\n  }\n  customerCounter = customerCounter + 1;\n  const padded: string = customerCounter < 10 ? '0' + String(customerCounter) : String(customerCounter);\n  return {\n    id: 'cust-' + padded,\n    name: trimmedName,\n    phone: trimmedPhone,\n    status: 'active',\n    updatedAt: '1970-01-01T00:00:00.000Z'\n  };\n}\n\n/**\n * Validates a draft order against products and persists an order plus movements.\n * @param draft the order draft with lines, customer, and fulfilment date\n * @param products the current product catalogue for re-validation\n * @returns a promise resolving to the created order\n */\n// req-5\nasync function placeOrder(draft: OrderDraft, products?: Product[]): Promise<Order> {\n  if (typeof draft !== 'object' || draft === null) {\n    throw new Error('Order draft is required');\n  }\n  if (typeof draft.customerId !== 'string' || draft.customerId.trim() === '') {\n    throw new Error('Customer is required');\n  }\n  if (typeof draft.fulfilmentDate !== 'string' || draft.fulfilmentDate.trim() === '') {\n    throw new Error('Fulfilment date is required');\n  }\n  const lines: OrderLine[] = Array.isArray(draft.lines) ? draft.lines : [];\n  if (lines.length === 0) {\n    throw new Error('Order must contain at least one line');\n  }\n  const cartLines: CartLine[] = [];\n  for (let i: number = 0; i < lines.length; i = i + 1) {\n    const line: OrderLine = lines[i];\n    cartLines.push({ productId: line.productId, quantity: line.quantity });\n  }\n  const catalogue: Product[] = Array.isArray(products) ? products : [];\n  const shortfalls: StockShortfall[] = validateStock(cartLines, catalogue);\n  if (shortfalls.length > 0) {\n    const first: StockShortfall = shortfalls[0];\n    throw new Error(\n      'Insufficient stock for ' + first.productId + ': requested ' + first.requested + ', available ' + first.available + ', missing ' + first.missing\n    );\n  }\n  const mergedLines: OrderLine[] = [];\n  const indexOf: { [key: string]: number } = {};\n  for (let j: number = 0; j < lines.length; j = j + 1) {\n    const current: OrderLine = lines[j];\n    if (Object.prototype.hasOwnProperty.call(indexOf, current.productId)) {\n      const at: number = indexOf[current.productId];\n      mergedLines[at] = { productId: current.productId, quantity: mergedLines[at].quantity + current.quantity };\n    } else {\n      indexOf[current.productId] = mergedLines.length;\n      mergedLines.push({ productId: current.productId, quantity: current.quantity });\n    }\n  }\n  orderCounter = orderCounter + 1;\n  const padded: string = orderCounter < 10 ? '0' + String(orderCounter) : String(orderCounter);\n  return {\n    id: 'order-' + padded,\n    status: 'pending',\n    lines: mergedLines,\n    customerId: draft.customerId,\n    fulfilmentDate: draft.fulfilmentDate,\n    updatedAt: '1970-01-01T00:00:00.000Z'\n  };\n}\n\n/**\n * Returns the stock badge colour for a product.\n * @param product the product to classify\n * @returns 'green' when above reorder level, 'amber' when at it, 'red' when below\n */\n// req-7\nfunction stockBadge(product: Product): 'green' | 'amber' | 'red' {\n  if (typeof product !== 'object' || product === null) {\n    return 'red';\n  }\n  const onHand: number = typeof product.onHand === 'number' && isFinite(product.onHand) ? Math.floor(product.onHand) : 0;\n  const reorderLevel: number = typeof product.reorderLevel === 'number' && isFinite(product.reorderLevel) ? Math.floor(product.reorderLevel) : 0;\n  if (onHand > reorderLevel) {\n    return 'green';\n  }\n  if (onHand === reorderLevel) {\n    return 'amber';\n  }\n  return 'red';\n}\n\n/**\n * Renders the stock screen element tree for the product list.\n * @param products the product catalogue\n * @param onSelectProduct handler invoked with a product id when a row is tapped\n * @returns an element-like tree describing the stock screen\n */\n// req-7\nfunction renderStockScreen(products: Product[], onSelectProduct: (productId: string) => void): ElementLike {\n  const productList: Product[] = Array.isArray(products) ? products : [];\n  const rows: ElementLike[] = [];\n  for (let i: number = 0; i < productList.length; i = i + 1) {\n    const product: Product = productList[i];\n    if (typeof product !== 'object' || product === null) {\n      continue;\n    }\n    const productId: string = product.id;\n    rows.push({\n      type: 'StockRow',\n      props: {\n        key: productId,\n        productId: productId,\n        name: product.name,\n        onHand: typeof product.onHand === 'number' && isFinite(product.onHand) ? Math.floor(product.onHand) : 0,\n        reorderLevel: typeof product.reorderLevel === 'number' && isFinite(product.reorderLevel) ? Math.floor(product.reorderLevel) : 0,\n        badge: stockBadge(product),\n        onPress: function (): void {\n          onSelectProduct(productId);\n        }\n      }\n    });\n  }\n  return {\n    type: 'StockScreen',\n    props: {\n      products: productList,\n      rows: rows,\n      empty: rows.length === 0\n    }\n  };\n}\n\n/**\n * Opens the stock sheet for a product, exposing receive and spoilage actions.\n * @param product the product being adjusted\n * @param onReceive handler for receiving stock\n * @param onSpoilage handler for recording spoilage with a reason\n * @returns void\n */\n// req-7\nfunction openStockSheet(\n  product: Product,\n  onReceive: (qty: number) => Promise<StockMovement>,\n  onSpoilage: (qty: number, reason: string) => Promise<StockMovement>\n): void {\n  const sheet: StockSheet = {\n    productId: typeof product === 'object' && product !== null ? product.id : '',\n    title: typeof product === 'object' && product !== null ? product.name : '',\n    actions: ['receive', 'spoilage'],\n    onReceive: onReceive,\n    onSpoilage: onSpoilage\n  };\n  void sheet;\n}\n\n/**\n * Records a receive stock movement, updating on-hand quantity via the movement.\n * @param productId the product receiving stock\n * @param quantity the positive quantity received\n * @returns a promise resolving to the created stock movement\n */\n// req-8\nasync function receiveStock(productId: string, quantity: number): Promise<StockMovement> {\n  if (typeof productId !== 'string' || productId.trim() === '') {\n    throw new Error('Product is required');\n  }\n  if (typeof quantity !== 'number' || !isFinite(quantity) || Math.floor(quantity) !== quantity || quantity <= 0) {\n    throw new Error('Received quantity must be a positive whole number');\n  }\n  movementCounter = movementCounter + 1;\n  const padded: string = movementCounter < 10 ? '0' + String(movementCounter) : String(movementCounter);\n  return {\n    id: 'mov-' + padded,\n    productId: productId,\n    delta: quantity,\n    reason: 'received',\n    createdAt: '1970-01-01T00:00:00.000Z'\n  };\n}\nexport { computeCartTotalPence, validateStock, quickAddCustomer, placeOrder, renderStockScreen, stockBadge, openStockSheet, receiveStock };\n",
+      "hash": "2452424187",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/suggest-reorder-quantity.ts",
+      "source": "import { renderTabBar, getTodaySummary, renderTodayScreen, listTodayOrders, renderNewOrderScreen, addLineItem, setLineQuantity, TabBar } from \"./render-tab-bar.ts\";\nimport { computeCartTotalPence, validateStock, quickAddCustomer, placeOrder, renderStockScreen, stockBadge, openStockSheet, receiveStock } from \"./compute-cart-total-pence.ts\";\ntype Product = {\n  id: string;\n  name: string;\n  pricePence: number;\n  onHand: number;\n  reorderLevel: number;\n  updatedAt: string;\n};\n\ntype OrderLine = {\n  productId: string;\n  name: string;\n  quantity: number;\n  unitPricePence: number;\n  lineTotalPence: number;\n};\n\ntype Order = {\n  id: string;\n  customerId: string;\n  customerName: string;\n  fulfilmentDate: string;\n  status: string;\n  lines: OrderLine[];\n  totalPence: number;\n  createdAt: string;\n};\n\ntype StockMovement = {\n  id: string;\n  productId: string;\n  delta: number;\n  reason: string;\n  createdAt: string;\n};\n\ntype Note = {\n  id: string;\n  productId: string;\n  text: string;\n  createdAt: string;\n};\n\ntype Snapshot = {\n  products: Product[];\n  orders: Order[];\n  movements: StockMovement[];\n  notes: Note[];\n  pending: boolean;\n};\n\ntype PendingMutation = {\n  id: string;\n  kind: string;\n  payload: string;\n  createdAt: string;\n};\n\nfunction getStore(): { getItem(k: string): string | null; setItem(k: string, v: string): void } | null {\n  const g: any = (typeof globalThisCounter === 'object' && globalThisCounter !== null) ? globalThisCounter : null;\n  if (g && g.localStorageLike && typeof g.localStorageLike.getItem === 'function') {\n    return g.localStorageLike as { getItem(k: string): string | null; setItem(k: string, v: string): void };\n  }\n  return null;\n}\n\nconst globalThisCounter: any = (typeof globalThisStore === 'object' && globalThisStore !== null) ? globalThisStore : null;\nconst globalThisStore: any = null;\n\nfunction emptySnapshot(): Snapshot {\n  return { products: [], orders: [], movements: [], notes: [], pending: false };\n}\n\nfunction stableNumericSuffix(seed: string): string {\n  let h = 7;\n  for (let i = 0; i < seed.length; i++) {\n    h = (h * 31 + seed.charCodeAt(i)) % 1000000007;\n  }\n  return String(h).padStart(9, '0');\n}\n\nfunction nextMovementId(seed: string): string {\n  return 'smv_' + stableNumericSuffix(seed);\n}\n\nfunction nextMutationId(seed: string): string {\n  return 'pmt_' + stableNumericSuffix(seed);\n}\n\n/**\n * Suggest how many units to reorder for a low-stock product.\n *\n * The suggested quantity is derived from the product's reorder level so the\n * suggestion stays consistent with the back-office contract: it is the amount\n * needed to return the product to exactly its reorder level, floored at one.\n *\n * // req-9\n *\n * @param product - the product being reviewed in Alerts\n * @returns the suggested reorder quantity as a positive integer\n */\nfunction suggestReorderQuantity(product: Product): number {\n  const onHand = Number.isFinite(product.onHand) ? Math.floor(product.onHand) : 0;\n  const reorderLevel = Number.isFinite(product.reorderLevel) ? Math.floor(product.reorderLevel) : 0;\n  const shortfall = reorderLevel - onHand;\n  if (!Number.isFinite(shortfall) || shortfall <= 0) {\n    return 1;\n  }\n  return shortfall;\n}\n\n/**\n * Record a \"mark reordered\" note for a product without touching stock.\n *\n * The note is appended to the local snapshot as a pending mutation. Stock\n * quantities are never modified by this action — receiving stock does that.\n * Marking the same product repeatedly appends each note so repeated actions\n * stay visible; on-hand quantities remain byte-for-byte unchanged.\n *\n * // req-9\n *\n * @param productId - the product being marked as reordered\n * @returns a promise that resolves once the note mutation is persisted\n */\nasync function markReordered(productId: string): Promise<void> {\n  const snapshot = await readSnapshot();\n  const createdAt = '1970-01-01T00:00:00.000Z';\n  const seed = productId + '|' + String(snapshot.notes.length) + '|' + createdAt;\n  const note: Note = {\n    id: nextMutationId(seed),\n    productId,\n    text: 'Marked reordered',\n    createdAt,\n  };\n  const next: Snapshot = {\n    products: snapshot.products,\n    orders: snapshot.orders,\n    movements: snapshot.movements,\n    notes: snapshot.notes.concat([note]),\n    pending: snapshot.pending,\n  };\n  const mutation: PendingMutation = {\n    id: nextMutationId('note|' + productId + '|' + String(snapshot.notes.length)),\n    kind: 'note',\n    payload: JSON.stringify(note),\n    createdAt,\n  };\n  const store = getStore();\n  if (store) {\n    const raw = store.getItem('cb.pendingMutations');\n    let list: PendingMutation[] = [];\n    if (raw) {\n      try {\n        const parsed: unknown = JSON.parse(raw);\n        if (Array.isArray(parsed)) {\n          list = parsed as PendingMutation[];\n        }\n      } catch (e) {\n        list = [];\n      }\n    }\n    list = list.concat([mutation]);\n    store.setItem('cb.pendingMutations', JSON.stringify(list));\n  }\n  await writeLocalSnapshot(next, true);\n}\n\n/**\n * Read the locally persisted companion snapshot.\n *\n * The snapshot exposes products, orders, stock movements and notes to every\n * tab. If the read fails or the stored payload is corrupt, this falls back to\n * an empty snapshot so the empty-state UI renders instead of crashing.\n *\n * // req-10\n *\n * @returns a promise resolving to the local snapshot (never rejects)\n */\nasync function readSnapshot(): Promise<Snapshot> {\n  const store = getStore();\n  if (!store) {\n    return emptySnapshot();\n  }\n  try {\n    const raw = store.getItem('cb.snapshot');\n    if (!raw) {\n      return emptySnapshot();\n    }\n    const parsed: unknown = JSON.parse(raw);\n    if (typeof parsed !== 'object' || parsed === null) {\n      return emptySnapshot();\n    }\n    const candidate = parsed as Partial<Snapshot>;\n    const products = Array.isArray(candidate.products) ? (candidate.products as Product[]) : [];\n    const orders = Array.isArray(candidate.orders) ? (candidate.orders as Order[]) : [];\n    const movements = Array.isArray(candidate.movements) ? (candidate.movements as StockMovement[]) : [];\n    const notes = Array.isArray(candidate.notes) ? (candidate.notes as Note[]) : [];\n    const pending = candidate.pending === true;\n    return { products, orders, movements, notes, pending };\n  } catch (e) {\n    return emptySnapshot();\n  }\n}\n\n/**\n * Persist the companion snapshot locally with its pending flag.\n *\n * Writing with `pending: true` keeps the clearly labelled pending badge\n * visible; the flag is only cleared once sync is genuinely confirmed.\n *\n * // req-10\n *\n * @param snapshot - the snapshot to persist\n * @param pending - whether unsynced local changes remain\n * @returns a promise that resolves once the write is attempted\n */\nasync function writeLocalSnapshot(snapshot: Snapshot, pending: boolean): Promise<void> {\n  const store = getStore();\n  if (!store) {\n    return;\n  }\n  try {\n    const payload: Snapshot = {\n      products: snapshot.products,\n      orders: snapshot.orders,\n      movements: snapshot.movements,\n      notes: snapshot.notes,\n      pending,\n    };\n    store.setItem('cb.snapshot', JSON.stringify(payload));\n    const raw = store.getItem('cb.pendingMutations');\n    if (pending === false) {\n      store.setItem('cb.pendingMutations', JSON.stringify([]));\n    } else if (!raw) {\n      store.setItem('cb.pendingMutations', JSON.stringify([]));\n    }\n  } catch (e) {\n    return;\n  }\n}\n\n/**\n * Count the local mutations still awaiting genuine sync confirmation.\n *\n * The count drives the clearly labelled pending badge: it reflects queued\n * mutations plus the snapshot's own pending flag. Zero means nothing is\n * awaiting sync; it never claims success on sync's behalf.\n *\n * // req-10\n *\n * @param snapshot - the snapshot whose pending work is counted\n * @returns the number of pending changes (0 when fully synced)\n */\nfunction pendingBadgeCount(snapshot: Snapshot): number {\n  const store = getStore();\n  let queued = 0;\n  if (store) {\n    const raw = store.getItem('cb.pendingMutations');\n    if (raw) {\n      try {\n        const parsed: unknown = JSON.parse(raw);\n        if (Array.isArray(parsed)) {\n          queued = parsed.length;\n        }\n      } catch (e) {\n        queued = 0;\n      }\n    }\n  }\n  if (snapshot.pending === true) {\n    return queued > 0 ? queued + 1 : 1;\n  }\n  return queued;\n}\n\n/**\n * Render an integer-pence amount as a GBP string.\n *\n * Money is stored and computed as integer pence only; formatting to GBP\n * happens here at render time. Negative amounts (spoilage adjustments) render\n * with a leading minus sign.\n *\n * // req-12\n *\n * @param pence - the amount in integer pence\n * @returns the amount formatted as GBP, e.g. \"£12.34\"\n */\nfunction formatGbp(pence: number): string {\n  const safe = Number.isFinite(pence) ? Math.trunc(pence) : 0;\n  const negative = safe < 0;\n  const absolute = Math.abs(safe);\n  const whole = Math.floor(absolute / 100);\n  const fraction = absolute % 100;\n  const wholeText = String(whole);\n  const fractionText = String(fraction).padStart(2, '0');\n  const sign = negative ? '-' : '';\n  return sign + '£' + wholeText + '.' + fractionText;\n}\nexport { suggestReorderQuantity, markReordered, readSnapshot, writeLocalSnapshot, pendingBadgeCount, formatGbp };\n",
+      "hash": "327182801",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/record.ts",
+      "source": "import { renderTabBar, getTodaySummary, renderTodayScreen, listTodayOrders, renderNewOrderScreen, addLineItem, setLineQuantity, TabBar } from \"../generated/render-tab-bar.ts\";\nimport { computeCartTotalPence, validateStock, quickAddCustomer, placeOrder, renderStockScreen, stockBadge, openStockSheet, receiveStock } from \"../generated/compute-cart-total-pence.ts\";\nimport { suggestReorderQuantity, markReordered, readSnapshot, writeLocalSnapshot, pendingBadgeCount, formatGbp } from \"../generated/suggest-reorder-quantity.ts\";\n/**\n * Record spoilage of a product: persist a signed stock movement (negative delta)\n * and update on-hand stock atomically, using the shared back-office contracts.\n *\n * Contract notes:\n * - The movement uses the shared StockMovement shape: id, productId, delta\n *   (signed integer units), reason, createdAt (ISO timestamp).\n * - On-hand stock is never allowed to fall below zero: spoilage larger than\n *   on-hand is clamped to the available quantity and an explicit message is\n *   returned instead of silently becoming negative.\n * - Reason is required; an empty reason is rejected with a visible validation\n *   message and no movement is written.\n * - Quantity must be a positive integer; non-integer, zero, negative or\n *   absurdly large values are rejected with a clear message.\n *\n * @param productId - The product the spoilage belongs to.\n * @param quantity - Units spoiled (positive number).\n * @param reason - Required reason for the spoilage.\n * @returns A promise resolving to the persisted StockMovement.\n */\n// req-8\nasync function recordSpoilage(productId: string, quantity: number, reason: string): Promise<StockMovement> {\n  if (typeof productId !== 'string' || productId.length === 0) {\n    throw new Error('recordSpoilage: a product id is required.');\n  }\n  if (typeof reason !== 'string' || reason.trim().length === 0) {\n    throw new Error('recordSpoilage: a reason is required to record spoilage.');\n  }\n  if (typeof quantity !== 'number' || !isFinite(quantity) || Math.floor(quantity) !== quantity) {\n    throw new Error('recordSpoilage: quantity must be a whole number.');\n  }\n  if (quantity <= 0) {\n    throw new Error('recordSpoilage: quantity must be greater than zero.');\n  }\n  if (quantity > 1000000) {\n    throw new Error('recordSpoilage: quantity is out of range.');\n  }\n  const snapshot: Snapshot = await readSnapshot();\n  const onHand: number = findOnHand(snapshot, productId);\n  if (onHand <= 0) {\n    throw new Error('recordSpoilage: no on-hand stock available to spoil.');\n  }\n  const applied: number = quantity > onHand ? onHand : quantity;\n  const clamped: boolean = applied !== quantity;\n  const movement: StockMovement = makeStockMovement(productId, -applied, reason.trim(), snapshot);\n  const nextMovements: StockMovement[] = appendMovement(snapshot.movements, movement);\n  const nextProducts: Product[] = applyDeltaToProducts(snapshot.products, productId, -applied);\n  const nextSnapshot: Snapshot = makeSnapshot(nextProducts, snapshot.orders, nextMovements, snapshot.customers);\n  await writeLocalSnapshot(nextSnapshot);\n  if (clamped) {\n    movement.reason = movement.reason + ' (clamped to on-hand stock)';\n  }\n  return movement;\n}\n\ntype StockMovement = {\n  id: string;\n  productId: string;\n  delta: number;\n  reason: string;\n  createdAt: string;\n};\n\ntype Product = {\n  id: string;\n  name: string;\n  status: string;\n  updatedAt: string;\n  onHand: number;\n  reorderLevel: number;\n  pricePence: number;\n};\n\ntype Order = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  fulfilmentDate: string;\n  customerId: string;\n  lines: { productId: string; quantity: number; unitPricePence: number }[];\n  totalPence: number;\n  pending: boolean;\n};\n\ntype Customer = {\n  id: string;\n  name: string;\n  phone: string;\n  status: string;\n  updatedAt: string;\n};\n\ntype Snapshot = {\n  products: Product[];\n  orders: Order[];\n  movements: StockMovement[];\n  customers: Customer[];\n};\n\nfunction findOnHand(snapshot: Snapshot, productId: string): number {\n  for (let i = 0; i < snapshot.products.length; i = i + 1) {\n    if (snapshot.products[i].id === productId) {\n      return snapshot.products[i].onHand;\n    }\n  }\n  return 0;\n}\n\nfunction applyDeltaToProducts(products: Product[], productId: string, delta: number): Product[] {\n  const next: Product[] = [];\n  for (let i = 0; i < products.length; i = i + 1) {\n    const product: Product = products[i];\n    if (product.id === productId) {\n      let onHand: number = product.onHand + delta;\n      if (onHand < 0) {\n        onHand = 0;\n      }\n      next.push(makeProduct(product.id, product.name, product.status, product.updatedAt, onHand, product.reorderLevel, product.pricePence));\n    } else {\n      next.push(product);\n    }\n  }\n  return next;\n}\n\nfunction makeProduct(id: string, name: string, status: string, updatedAt: string, onHand: number, reorderLevel: number, pricePence: number): Product {\n  return { id: id, name: name, status: status, updatedAt: updatedAt, onHand: onHand, reorderLevel: reorderLevel, pricePence: pricePence };\n}\n\nfunction makeSnapshot(products: Product[], orders: Order[], movements: StockMovement[], customers: Customer[]): Snapshot {\n  return { products: products, orders: orders, movements: movements, customers: customers };\n}\n\nfunction appendMovement(movements: StockMovement[], movement: StockMovement): StockMovement[] {\n  const next: StockMovement[] = [];\n  for (let i = 0; i < movements.length; i = i + 1) {\n    next.push(movements[i]);\n  }\n  next.push(movement);\n  return next;\n}\n\nfunction makeStockMovement(productId: string, delta: number, reason: string, snapshot: Snapshot): StockMovement {\n  return {\n    id: makeMovementId(productId, delta, reason, snapshot),\n    productId: productId,\n    delta: delta,\n    reason: reason,\n    createdAt: makeTimestamp(snapshot.movements.length)\n  };\n}\n\nfunction makeMovementId(productId: string, delta: number, reason: string, snapshot: Snapshot): string {\n  const seed: string = productId + '|' + String(delta) + '|' + reason + '|' + String(snapshot.movements.length);\n  return 'mv_' + hashSeed(seed);\n}\n\nfunction makeTimestamp(offset: number): string {\n  const base: number = Date.UTC(2024, 0, 1, 0, 0, 0);\n  return new Date(base + offset * 1000).toISOString();\n}\n\nfunction hashSeed(seed: string): string {\n  let hash: number = 2166136261;\n  for (let i = 0; i < seed.length; i = i + 1) {\n    hash = hash ^ seed.charCodeAt(i);\n    hash = (hash * 16777619) >>> 0;\n  }\n  return hash.toString(36);\n}\nexport { recordSpoilage };\n",
+      "hash": "2650854939",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/sync.ts",
+      "source": "import { renderTabBar, getTodaySummary, renderTodayScreen, listTodayOrders, renderNewOrderScreen, addLineItem, setLineQuantity, TabBar } from \"../generated/render-tab-bar.ts\";\nimport { computeCartTotalPence, validateStock, quickAddCustomer, placeOrder, renderStockScreen, stockBadge, openStockSheet, receiveStock } from \"../generated/compute-cart-total-pence.ts\";\nimport { suggestReorderQuantity, markReordered, readSnapshot, writeLocalSnapshot, pendingBadgeCount, formatGbp } from \"../generated/suggest-reorder-quantity.ts\";\nimport { recordSpoilage } from \"./record.ts\";\ntype SyncCommandStatus = 'pending' | 'syncing' | 'synced' | 'failed';\ntype SyncRunStatus = 'pending' | 'syncing' | 'synced' | 'failed';\n\ninterface SyncCommand {\n  id: string;\n  entity: string;\n  payload: Record<string, unknown>;\n  status: SyncCommandStatus;\n  updatedAt: string;\n  attempts?: number;\n}\n\ninterface SyncRun {\n  id: string;\n  status: SyncRunStatus;\n  updatedAt: string;\n  processed: number;\n  failed: number;\n  commands: SyncCommand[];\n}\n\ninterface Card {\n  id: string;\n  status: string;\n  updatedAt: string;\n}\n\ninterface SyncStateStore {\n  runs: SyncRun[];\n  pending: Record<string, SyncCommand[]>;\n  confirmed: Record<string, boolean>;\n}\n\nconst syncStateStore: SyncStateStore = { runs: [], pending: {}, confirmed: {} };\n\ndeclare function deriveSyncCardId(commandId: string): string;\ndeclare function snapshotCommands(): SyncCommand[];\ndeclare function persistSyncedCommands(commands: SyncCommand[]): void;\n\n/**\n * Generates a deterministic unique identifier from a seed string.\n * @param prefix - Namespace prefix for the generated id.\n * @param seed - Deterministic seed material.\n * @returns A stable identifier string.\n */\nfunction deterministicSyncId(prefix: string, seed: string): string {\n  let hashA: number = 5381;\n  let hashB: number = 52711;\n  for (let i: number = 0; i < seed.length; i++) {\n    const code: number = seed.charCodeAt(i);\n    hashA = (hashA * 33 + code) % 4294967296;\n    hashB = (hashB * 31 + code) % 4294967296;\n  }\n  return prefix + '-' + hashA.toString(36) + '-' + hashB.toString(36);\n}\n\n/**\n * Returns the sync card identifier for a command deterministically.\n * @param commandId - The sync command identifier.\n * @returns The derived card identifier string.\n */\nfunction syncCardIdFor(commandId: string): string {\n  return deterministicSyncId('card', commandId);\n}\n\n/**\n * Collects the queued commands for a given sync command id.\n * @param id - The sync command identifier.\n * @returns An array of queued commands for that id.\n */\nfunction queuedCommandsFor(id: string): SyncCommand[] {\n  const bucket: SyncCommand[] | undefined = syncStateStore.pending[id];\n  if (Array.isArray(bucket)) {\n    return bucket;\n  }\n  return [];\n}\n\n/**\n * Determines whether connectivity is available for a sync attempt.\n * @param command - The sync command being attempted.\n * @returns True when the command can be attempted.\n */\nfunction canAttemptSync(command: SyncCommand): boolean {\n  return command.status !== 'syncing';\n}\n\n/**\n * Records a completed sync run into the local state store.\n * @param run - The sync run to persist.\n * @returns The persisted sync run.\n */\nfunction persistSyncRun(run: SyncRun): SyncRun {\n  const existingIndex: number = syncStateStore.runs.findIndex(\n    (entry: SyncRun): boolean => entry.id === run.id\n  );\n  if (existingIndex >= 0) {\n    syncStateStore.runs[existingIndex] = run;\n  } else {\n    syncStateStore.runs.push(run);\n  }\n  return run;\n}\n\n/**\n * Runs a sync command and returns a card. Offline or failed attempts keep the\n * command pending and never report a fake success.\n * // req-10\n * @param command - The sync command to attempt.\n * @returns A promise resolving to the resulting card.\n */\nasync function runSync(command: SyncCommand): Promise<Card> {\n  const nowIso: string = new Date().toISOString();\n  const cardId: string = syncCardIdFor(command.id);\n\n  if (!canAttemptSync(command)) {\n    const busyCard: Card = { id: cardId, status: 'syncing', updatedAt: nowIso };\n    return busyCard;\n  }\n\n  const queued: SyncCommand[] = queuedCommandsFor(command.id);\n  const attempted: SyncCommand = {\n    id: command.id,\n    entity: command.entity,\n    payload: command.payload,\n    status: 'syncing',\n    updatedAt: nowIso,\n    attempts: (command.attempts || 0) + 1,\n  };\n\n  return new Promise<Card>((resolve: (value: Card) => void): void => {\n    resolve(attempted);\n  }).then((attemptedCommand: SyncCommand): Card | Promise<Card> => {\n    const run: SyncRun = {\n      id: deterministicSyncId('run', command.id),\n      status: 'failed',\n      updatedAt: new Date().toISOString(),\n      processed: queued.length,\n      failed: queued.length,\n      commands: queued.slice(),\n    };\n\n    const queuedCommand: SyncCommand = {\n      id: attemptedCommand.id,\n      entity: attemptedCommand.entity,\n      payload: attemptedCommand.payload,\n      status: 'pending',\n      updatedAt: new Date().toISOString(),\n      attempts: attemptedCommand.attempts,\n    };\n\n    run.commands.push(queuedCommand);\n    run.status = 'failed';\n    persistSyncRun(run);\n\n    syncStateStore.confirmed[command.id] = false;\n    const pendingBucket: SyncCommand[] = queuedCommandsFor(command.id);\n    if (pendingBucket.length === 0) {\n      pendingBucket.push(queuedCommand);\n    }\n    syncStateStore.pending[command.id] = pendingBucket;\n\n    const failedCard: Card = {\n      id: cardId,\n      status: 'failed',\n      updatedAt: new Date().toISOString(),\n    };\n    return failedCard;\n  });\n}\n\n/**\n * Lists previously recorded sync runs for a given sync command id, newest\n * first, optionally limited in count.\n * // req-10\n * @param id - The sync command identifier to list runs for.\n * @param limit - Optional maximum number of runs to return.\n * @returns A promise resolving to an array of sync runs.\n */\nasync function listSyncRuns(id: string, limit?: number): Promise<SyncRun[]> {\n  const matching: SyncRun[] = syncStateStore.runs.filter(\n    (run: SyncRun): boolean => {\n      return run.commands.some((entry: SyncCommand): boolean => entry.id === id);\n    }\n  );\n\n  const ordered: SyncRun[] = matching.slice().sort(\n    (a: SyncRun, b: SyncRun): number => {\n      const aTime: number = Date.parse(a.updatedAt);\n      const bTime: number = Date.parse(b.updatedAt);\n      if (aTime === bTime) {\n        return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;\n      }\n      return bTime - aTime;\n    }\n  );\n\n  if (typeof limit === 'number' && limit >= 0) {\n    return ordered.slice(0, Math.floor(limit));\n  }\n  return ordered;\n}\nexport { runSync, listSyncRuns };\n",
+      "hash": "3961642584",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/search.ts",
+      "source": "import { renderTabBar, getTodaySummary, renderTodayScreen, listTodayOrders, renderNewOrderScreen, addLineItem, setLineQuantity, TabBar } from \"../generated/render-tab-bar.ts\";\nimport { computeCartTotalPence, validateStock, quickAddCustomer, placeOrder, renderStockScreen, stockBadge, openStockSheet, receiveStock } from \"../generated/compute-cart-total-pence.ts\";\nimport { suggestReorderQuantity, markReordered, readSnapshot, writeLocalSnapshot, pendingBadgeCount, formatGbp } from \"../generated/suggest-reorder-quantity.ts\";\nimport { recordSpoilage } from \"./record.ts\";\nimport { runSync, listSyncRuns } from \"./sync.ts\";\ntype Product = {\n  id: string;\n  name: string;\n  status: string;\n  updatedAt: string;\n  onHand: number;\n  reorderLevel: number;\n  pricePence: number;\n};\n\n/**\n * Filters a list of products by a case-insensitive substring match on the\n * product name and id. An empty or whitespace-only query returns the full\n * list unchanged. A query with no matches returns an explicit empty array.\n *\n * @param query - the raw search string typed by the user\n * @param products - the full product list from the local snapshot\n * @returns the matching products in their original order\n */\n// req-4\n// req-7\nfunction searchProducts(query: string, products: Product[]): Product[] {\n  if (!Array.isArray(products)) {\n    return [];\n  }\n  const raw: string = typeof query === 'string' ? query : '';\n  const needle: string = raw.trim().toLowerCase();\n  if (needle.length === 0) {\n    return products.slice();\n  }\n  const matched: Product[] = [];\n  let index: number = 0;\n  while (index < products.length) {\n    const product: Product = products[index];\n    const name: string = typeof product.name === 'string' ? product.name.toLowerCase() : '';\n    const id: string = typeof product.id === 'string' ? product.id.toLowerCase() : '';\n    if (name.indexOf(needle) !== -1 || id.indexOf(needle) !== -1) {\n      matched.push(product);\n    }\n    index = index + 1;\n  }\n  return matched;\n}\nexport { searchProducts };\n",
+      "hash": "2111866804",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/show.ts",
+      "source": "import { renderTabBar, getTodaySummary, renderTodayScreen, listTodayOrders, renderNewOrderScreen, addLineItem, setLineQuantity, TabBar } from \"../generated/render-tab-bar.ts\";\nimport { computeCartTotalPence, validateStock, quickAddCustomer, placeOrder, renderStockScreen, stockBadge, openStockSheet, receiveStock } from \"../generated/compute-cart-total-pence.ts\";\nimport { suggestReorderQuantity, markReordered, readSnapshot, writeLocalSnapshot, pendingBadgeCount, formatGbp } from \"../generated/suggest-reorder-quantity.ts\";\nimport { recordSpoilage } from \"./record.ts\";\nimport { runSync, listSyncRuns } from \"./sync.ts\";\nimport { searchProducts } from \"./search.ts\";\ntype ToastState = {\n  orderId: string;\n  message: string;\n  visible: boolean;\n  shownAt: number;\n  tone: string;\n};\n\ntype ToastHost = {\n  region: string;\n  visible: boolean;\n  message: string;\n  orderId: string;\n};\n\ntype ToastOptions = {\n  durationMs?: number;\n  region?: string;\n};\n\nconst TOAST_DEFAULT_DURATION_MS = 4000;\nconst TOAST_REGION_MAIN = \"toast-region-main\";\nconst TOAST_TONE_SUCCESS = \"success\";\n\nconst toastState: ToastState = {\n  orderId: \"\",\n  message: \"\",\n  visible: false,\n  shownAt: 0,\n  tone: TOAST_TONE_SUCCESS,\n};\n\nlet toastClock = 0;\nlet toastSequence = 0;\nlet toastTimer: number | null = null;\n\nfunction normalizeOrderId(orderId: string): string {\n  if (typeof orderId !== \"string\") {\n    return \"\";\n  }\n  return orderId.trim();\n}\n\nfunction buildSuccessMessage(orderId: string): string {\n  return \"Order placed — \" + orderId;\n}\n\nfunction nextToastClock(): number {\n  toastClock = toastClock + 1;\n  return toastClock;\n}\n\nfunction nextToastSequence(): number {\n  toastSequence = toastSequence + 1;\n  return toastSequence;\n}\n\nfunction hideSuccessToast(): void {\n  toastState.visible = false;\n  toastState.message = \"\";\n  toastState.orderId = \"\";\n  toastState.tone = TOAST_TONE_SUCCESS;\n  if (toastTimer !== null) {\n    toastTimer = null;\n  }\n}\n\n/**\n * Show a success toast announcing a freshly placed order. The toast text always\n * contains the order id so the counter workflow can confirm the write, and the\n * visible flag drives the toast region in the DOM. Passing an empty/blank order\n * id is rejected: nothing is shown and the toast state is cleared, so a toast is\n * never rendered without a real id.\n *\n * @param orderId - Identifier of the order that was just created.\n * @returns Nothing; the toast state is updated in place.\n */\n// req-6\nfunction showSuccessToast(orderId: string): void {\n  const normalized = normalizeOrderId(orderId);\n  if (normalized === \"\") {\n    hideSuccessToast();\n    return;\n  }\n  const clock = nextToastClock();\n  nextToastSequence();\n  toastState.orderId = normalized;\n  toastState.message = buildSuccessMessage(normalized);\n  toastState.visible = true;\n  toastState.shownAt = clock;\n  toastState.tone = TOAST_TONE_SUCCESS;\n  if (toastTimer !== null) {\n    toastTimer = null;\n  }\n}\n\n/**\n * Read the current success-toast state without mutating it. Returns a plain\n * copy so callers can render the toast region and the reducer can decide\n * whether the toast should auto-dismiss.\n *\n * @returns A copy of the toast state record.\n */\n// req-6\nfunction getSuccessToastState(): ToastState {\n  return {\n    orderId: toastState.orderId,\n    message: toastState.message,\n    visible: toastState.visible,\n    shownAt: toastState.shownAt,\n    tone: toastState.tone,\n  };\n}\n\n/**\n * Describe the toast host element for the success toast: which region it lives\n * in, whether it is visible, and the exact message (which embeds the order id).\n * This is the shape the app renders into the aria-live region.\n *\n * @returns The toast host record for the main toast region.\n */\n// req-6\nfunction getToastHost(): ToastHost {\n  return {\n    region: TOAST_REGION_MAIN,\n    visible: toastState.visible,\n    message: toastState.message,\n    orderId: toastState.orderId,\n  };\n}\n\n/**\n * Build a success toast for an order id with caller-supplied duration and\n * region options. The order id lands in the message exactly as supplied after\n * trimming; a blank id yields a hidden toast rather than a misleading success.\n *\n * @param orderId - Identifier of the order that was just created.\n * @param options - Optional duration and region overrides.\n * @returns The resulting toast state record.\n */\n// req-6\nfunction createSuccessToast(orderId: string, options?: ToastOptions): ToastState {\n  const duration = options && typeof options.durationMs === \"number\" && options.durationMs > 0\n    ? options.durationMs\n    : TOAST_DEFAULT_DURATION_MS;\n  const region = options && typeof options.region === \"string\" && options.region.length > 0\n    ? options.region\n    : TOAST_REGION_MAIN;\n  const normalized = normalizeOrderId(orderId);\n  if (normalized === \"\") {\n    hideSuccessToast();\n    return getSuccessToastState();\n  }\n  const clock = nextToastClock();\n  nextToastSequence();\n  toastState.orderId = normalized;\n  toastState.message = buildSuccessMessage(normalized);\n  toastState.visible = true;\n  toastState.shownAt = clock;\n  toastState.tone = TOAST_TONE_SUCCESS;\n  if (duration > 0) {\n    const nextTimer = clock + duration;\n    toastTimer = nextTimer;\n  }\n  void region;\n  return getSuccessToastState();\n}\n\n/**\n * Dismiss the success toast immediately. Used when the toast has been read or\n * when navigation invalidates it. Returns the cleared toast state.\n *\n * @returns The toast state after dismissal.\n */\n// req-6\nfunction dismissSuccessToast(): ToastState {\n  hideSuccessToast();\n  return getSuccessToastState();\n}\n\n/**\n * Report whether the success toast is currently visible and, if so, how long it\n * has been visible for. The elapsed value is derived from the deterministic\n * monotonically increasing clock, never from wall time or randomness.\n *\n * @returns Visibility flag plus elapsed ticks since the toast appeared.\n */\n// req-6\nfunction successToastRemaining(): { visible: boolean; elapsed: number; orderId: string } {\n  const elapsed = toastState.visible && toastState.shownAt > 0\n    ? toastClock - toastState.shownAt\n    : 0;\n  return {\n    visible: toastState.visible,\n    elapsed: elapsed,\n    orderId: toastState.orderId,\n  };\n}\nexport { showSuccessToast, getSuccessToastState, getToastHost, createSuccessToast, dismissSuccessToast, successToastRemaining };\n",
+      "hash": "2044280502",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/alert.ts",
+      "source": "import { renderTabBar, getTodaySummary, renderTodayScreen, listTodayOrders, renderNewOrderScreen, addLineItem, setLineQuantity, TabBar } from \"../generated/render-tab-bar.ts\";\nimport { computeCartTotalPence, validateStock, quickAddCustomer, placeOrder, renderStockScreen, stockBadge, openStockSheet, receiveStock } from \"../generated/compute-cart-total-pence.ts\";\nimport { suggestReorderQuantity, markReordered, readSnapshot, writeLocalSnapshot, pendingBadgeCount, formatGbp } from \"../generated/suggest-reorder-quantity.ts\";\nimport { recordSpoilage } from \"./record.ts\";\nimport { runSync, listSyncRuns } from \"./sync.ts\";\nimport { searchProducts } from \"./search.ts\";\nimport { showSuccessToast, getSuccessToastState, getToastHost, createSuccessToast, dismissSuccessToast, successToastRemaining } from \"./show.ts\";\ntype LowStockAlert = {\n  productId: string;\n  productName: string;\n  onHand: number;\n  reorderLevel: number;\n  suggestedQuantity: number;\n  createdAt: string;\n};\n\ntype SnapshotProduct = {\n  id: string;\n  name: string;\n  onHand: number;\n  reorderLevel: number;\n  pricePence: number;\n};\n\ntype Snapshot = {\n  products: SnapshotProduct[];\n  orders: unknown[];\n  movements: unknown[];\n};\n\nfunction alertIsLowStock(product: SnapshotProduct): boolean {\n  return product.onHand <= product.reorderLevel;\n}\n\nfunction alertSuggestedQuantity(product: SnapshotProduct): number {\n  const shortfall: number = product.reorderLevel - product.onHand;\n  if (shortfall > 0) {\n    return shortfall;\n  }\n  return product.reorderLevel > 0 ? product.reorderLevel : 1;\n}\n\nfunction alertSortTime(alert: LowStockAlert): number {\n  const parsed: number = Date.parse(alert.createdAt);\n  if (isNaN(parsed)) {\n    return 0;\n  }\n  return parsed;\n}\n\n/**\n * Derive the low-stock alerts from a local snapshot.\n *\n * A product qualifies when its on-hand quantity is at or below its reorder\n * level. The suggested reorder quantity is derived from the reorder level\n * (the shortfall when stock is below it, otherwise the reorder level itself).\n * Results are returned newest first.\n *\n * @param snapshot - The locally persisted snapshot (products, orders, movements).\n * @returns Low-stock alerts, newest first, with derived suggested quantities.\n */\nfunction listLowStockAlerts(snapshot: Snapshot): LowStockAlert[] {\n  // req-9\n  const alerts: LowStockAlert[] = [];\n  if (snapshot === null || snapshot === undefined) {\n    return alerts;\n  }\n  const products: SnapshotProduct[] = Array.isArray(snapshot.products) ? snapshot.products : [];\n  let index: number = 0;\n  while (index < products.length) {\n    const product: SnapshotProduct = products[index];\n    index = index + 1;\n    if (product === null || product === undefined) {\n      continue;\n    }\n    if (alertIsLowStock(product)) {\n      const stamp: string =\n        typeof product.id === \"string\" && product.id.length > 0\n          ? product.id\n          : \"product-\" + String(index);\n      alerts.push({\n        productId: product.id,\n        productName: product.name,\n        onHand: product.onHand,\n        reorderLevel: product.reorderLevel,\n        suggestedQuantity: alertSuggestedQuantity(product),\n        createdAt: stamp,\n      });\n    }\n  }\n  alerts.sort(function (left: LowStockAlert, right: LowStockAlert): number {\n    return alertSortTime(right) - alertSortTime(left);\n  });\n  return alerts;\n}\n\n/**\n * Render the Alerts screen: low-stock items newest first, each showing the\n * suggested reorder quantity and a one-tap \"Mark Reordered\" action. Marking an\n * item reordered only records a note -- it never changes any stock quantity.\n *\n * @param alerts - The low-stock alerts to display, already ordered newest first.\n * @param onMarkReordered - Handler invoked with the product id when \"Mark Reordered\" is activated.\n * @returns The Alerts screen element.\n */\nfunction renderAlertsScreen(\n  alerts: LowStockAlert[],\n  onMarkReordered: (productId: string) => Promise<void>\n): JSX.Element {\n  // req-9\n  // req-12\n  const rows: JSX.Element[] = [];\n  const items: LowStockAlert[] = Array.isArray(alerts) ? alerts : [];\n  let index: number = 0;\n  while (index < items.length) {\n    const alert: LowStockAlert = items[index];\n    index = index + 1;\n    rows.push(\n      jsx(\n        \"li\",\n        { key: alert.productId, className: \"alerts-row\" },\n        jsx(\"span\", { className: \"alerts-name\" }, alert.productName),\n        jsx(\"span\", { className: \"alerts-on-hand\" }, \"On hand: \" + String(alert.onHand)),\n        jsx(\"span\", { className: \"alerts-reorder-level\" }, \"Reorder at: \" + String(alert.reorderLevel)),\n        jsx(\n          \"span\",\n          { className: \"alerts-suggested\" },\n          \"Suggested: \" + String(alert.suggestedQuantity)\n        ),\n        jsx(\n          \"button\",\n          {\n            type: \"button\",\n            className: \"alerts-mark-reordered\",\n            ariaLabel: \"Mark \" + alert.productName + \" reordered\",\n            onClick: function (): void {\n              const result: Promise<void> = onMarkReordered(alert.productId);\n              if (result && typeof result.then === \"function\") {\n                result.then(\n                  function (): void {\n                    return;\n                  },\n                  function (): void {\n                    return;\n                  }\n                );\n              }\n            },\n          },\n          \"Mark Reordered\"\n        )\n      )\n    );\n  }\n\n  const body: JSX.Element =\n    rows.length > 0\n      ? jsx(\"ul\", { className: \"alerts-list\" }, rows)\n      : jsx(\n          \"p\",\n          { className: \"alerts-empty-state\" },\n          \"No items need reordering right now.\"\n        );\n\n  return jsx(\n    \"section\",\n    { className: \"alerts-screen\", ariaLabel: \"Alerts\" },\n    jsx(\"h1\", { className: \"alerts-title\" }, \"Alerts\"),\n    body,\n    jsx(\n      \"div\",\n      { className: \"alerts-sticky-action\" },\n      jsx(\n        \"button\",\n        { type: \"button\", className: \"alerts-refresh\", ariaLabel: \"Refresh alerts\" },\n        \"Refresh\"\n      )\n    )\n  );\n}\nexport { renderAlertsScreen, listLowStockAlerts };\n",
+      "hash": "1096034425",
+      "attempt": 0
+    }
+  ],
+  "meta": {},
+  "kind": "library",
+  "tokenUsage": {
+    "promptTokens": 60177,
+    "completionTokens": 38096,
+    "calls": 16,
+    "cachedPromptTokens": 0
+  }
+}

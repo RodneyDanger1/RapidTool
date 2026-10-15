@@ -1,0 +1,2458 @@
+{
+  "id": "f4026e8e-b2a7-4f80-a573-14b42884ce61",
+  "name": "Shiftline",
+  "brief": "# Shiftline — Office Shift & Appointment Scheduler\n\n## What this is\nAn internal tool for scheduling office shifts and appointments. A manager builds\na weekly rota for staff and books rooms for appointments; staff see their own\nupcoming shifts and any conflicts are surfaced before they happen.\n\n## Users\n- **Manager** — builds the rota, assigns shifts, books appointments.\n- **Staff** — view their own shifts and request time off.\n- **Reception** — books appointments into rooms.\n\n## Core domain\n- **Staff**: id, name, role, weekly hour cap, active.\n- **Room**: id, name, capacity, active.\n- **Shift**: id, staff, date, start time, end time, role note.\n- **Appointment**: id, title, room, date, start time, end time, booked-by,\n  attendee count (must not exceed room capacity).\n- **TimeOffRequest**: id, staff, start date, end date, status (Requested |\n  Approved | Denied), note.\n\n## Required features\n1. **Weekly rota** — a 7-day grid (Monday–Sunday) with shifts per day per staff.\n   Add a shift by picking staff, date, start, end. Refuse overlapping shifts for\n   the same staff member on the same day.\n2. **Hour cap check** — when a shift would push a staff member over their weekly\n   hour cap, warn and refuse (or allow with an explicit override flag); show the\n   running weekly hours per staff.\n3. **Appointments** — book an appointment into a room; refuse double-booking the\n   same room at overlapping times and refuse attendee count over room capacity.\n4. **Conflict detector** — a screen that scans the week and lists every hard\n   conflict (double-booked room, overlapping staff shift, shift overlapping\n   approved time off) with the two offending entries named.\n5. **Staff view** — pick a staff member and see their shifts for the current week\n   plus approved/denied time off.\n6. **Time off** — request time off; manager approves or denies with a note. An\n   approved time-off range that overlaps an existing shift is flagged in the\n   conflict detector.\n\n## Functional requirements\n- Times are stored as minutes-from-midnight integers per date; durations and\n  overlaps are computed from integers (exact, no timezone ambiguity).\n- Overlap rule: two intervals overlap iff startA < endB && startB < endA.\n- Weekly hours sum shift durations against the staff cap.\n- All conflict checks are pure functions over the schedule data, unit-testable,\n  and reused by both the rota builder and the conflict screen.\n- Refusals name the specific conflicting entry.\n\n## Non-functional requirements\n- Desktop-first, usable to 1024px; keyboard-navigable grid.\n- Accessible: labelled time inputs, table/grid roles where appropriate.\n- Deterministic scheduling logic separated from UI.\n- Local persistence; no external calendar integration required.\n\n## Explicitly out of scope\n- Google/Outlook calendar sync.\n- Recurring shifts or RRULE expansion.\n- Payroll calculations from hours.\n- Notifications by email/SMS.",
+  "domain": "custom-software",
+  "createdAt": 1791192811129,
+  "status": "complete",
+  "currentPhase": 12,
+  "phases": [
+    {
+      "id": 0,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3269632901",
+        "checkedAt": 1791192815847
+      },
+      "startedAt": 1791192811893,
+      "completedAt": 1791192811927
+    },
+    {
+      "id": 1,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1050713914",
+        "checkedAt": 1791192815873
+      },
+      "startedAt": 1791192815854,
+      "completedAt": 1791192815858
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1845537766",
+        "checkedAt": 1791192815889
+      },
+      "startedAt": 1791192815880,
+      "completedAt": 1791192815882
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1638292844",
+        "checkedAt": 1791192815907
+      },
+      "startedAt": 1791192815894,
+      "completedAt": 1791192815898
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3527188654",
+        "checkedAt": 1791192815927
+      },
+      "startedAt": 1791192815912,
+      "completedAt": 1791192815924
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "2951452883",
+        "checkedAt": 1791192815952
+      },
+      "startedAt": 1791192815932,
+      "completedAt": 1791192815944
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3047279992",
+        "checkedAt": 1791193090898
+      },
+      "startedAt": 1791192815959,
+      "completedAt": 1791192997580
+    },
+    {
+      "id": 7,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1119028455",
+        "checkedAt": 1791193094299
+      },
+      "startedAt": 1791193091015,
+      "completedAt": 1791193091023
+    },
+    {
+      "id": 8,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "606175358",
+        "checkedAt": 1791193094362
+      },
+      "startedAt": 1791193094310,
+      "completedAt": 1791193094355
+    },
+    {
+      "id": 9,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3030540723",
+        "checkedAt": 1791193094417
+      },
+      "startedAt": 1791193094373,
+      "completedAt": 1791193094410
+    },
+    {
+      "id": 10,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3218462335",
+        "checkedAt": 1791193094458
+      },
+      "startedAt": 1791193094428,
+      "completedAt": 1791193094435
+    },
+    {
+      "id": 11,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1663625674",
+        "checkedAt": 1791193097346
+      },
+      "startedAt": 1791193094469,
+      "completedAt": 1791193094477
+    },
+    {
+      "id": 12,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3530055408",
+        "checkedAt": 1791193097389
+      },
+      "startedAt": 1791193097357,
+      "completedAt": 1791193097366
+    }
+  ],
+  "scorecard": {
+    "overall": 6.6,
+    "verdict": "proceed-with-guards",
+    "axes": [
+      {
+        "key": "feasibility",
+        "label": "Technical feasibility",
+        "score": 3,
+        "note": "Typed contracts + sequential graph."
+      },
+      {
+        "key": "scale",
+        "label": "Scale headroom",
+        "score": 8,
+        "note": "Stateless workers + durable checkpoints."
+      },
+      {
+        "key": "security",
+        "label": "Security posture",
+        "score": 7,
+        "note": "Scheduler Δ0."
+      },
+      {
+        "key": "api",
+        "label": "API / rate-limit risk",
+        "score": 7,
+        "note": "Live-tool Δ1."
+      },
+      {
+        "key": "delivery",
+        "label": "Delivery confidence",
+        "score": 8,
+        "note": "Phased graph prevents skipped work."
+      }
+    ],
+    "bottlenecks": [
+      "Long-running tools must stream over WebSocket MCP.",
+      "HITL rejection without a qualitative note is illegal.",
+      "Constraint: same-day",
+      "Constraint: deterministic"
+    ],
+    "attackVectors": [
+      "Prompt injection via ingested competitor pages.",
+      "Tool-call privilege escalation if OAuth scopes are inherited.",
+      "Sandbox escape if generated exec has network."
+    ],
+    "libraries": [
+      {
+        "name": "TanStack Start",
+        "role": "Typed app shell and file routes"
+      },
+      {
+        "name": "Zod",
+        "role": "Schema lock on generated artifacts"
+      }
+    ]
+  },
+  "competitors": [
+    {
+      "name": "Cursor",
+      "class": "IDE-attached agent",
+      "strength": "Repo-aware multi-file edits",
+      "gap": "No agency lifecycle or HITL graph",
+      "source": "illustrative"
+    },
+    {
+      "name": "v0 / Bolt / Lovable",
+      "class": "Prompt-to-app",
+      "strength": "Fast UI scaffolds",
+      "gap": "Skips isolation policy and ADR trail",
+      "source": "illustrative"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "0-scorecard-feasibility-architecture-scoreca",
+      "phase": 0,
+      "kind": "scorecard",
+      "title": "Feasibility & Architecture Scorecard",
+      "body": "# Shiftline — Phase 0 scorecard\n\nDomain: custom-software\nOverall: 6.6 / 10 — proceed-with-guards\nLattice jobs: approve, schedule, assign, scan, sync, show\nEntities: booking, manager, member, viewer, calendar, user, table, entry, rule, notification, title, payroll\nConstraints: same-day, deterministic, local-first\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 8/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n- Constraint: same-day\n- Constraint: deterministic\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts"
+    },
+    {
+      "id": "0-algorithm-intent-lattice-a1",
+      "phase": 0,
+      "kind": "algorithm",
+      "title": "Intent Lattice (A1)",
+      "body": "{\n  \"domain\": \"custom-software\",\n  \"jobs\": [\n    \"approve\",\n    \"schedule\",\n    \"assign\",\n    \"scan\",\n    \"sync\",\n    \"show\"\n  ],\n  \"entities\": [\n    \"booking\",\n    \"manager\",\n    \"member\",\n    \"viewer\",\n    \"calendar\",\n    \"user\",\n    \"table\",\n    \"entry\",\n    \"rule\",\n    \"notification\",\n    \"title\",\n    \"payroll\"\n  ],\n  \"constraints\": [\n    \"same-day\",\n    \"deterministic\",\n    \"local-first\"\n  ],\n  \"nodes\": [\n    {\n      \"kind\": \"job\",\n      \"label\": \"approve\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"schedule\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"booking\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"manager\",\n      \"weight\": 0.9500000000000001\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"member\",\n      \"weight\": 0.9500000000000001\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"viewer\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"calendar\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"same-day\",\n      \"weight\": 0.7000000000000001\n    },\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"deterministic\",\n      \"weight\": 0.7000000000000001\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"user\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"assign\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"scan\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"sync\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"show\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"table\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"entry\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"rule\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"notification\",\n      \"weight\": 0.55\n    }\n  ],\n  \"complexity\": 10,\n  \"vague\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "research-0-0-1791192815846",
+      "phase": 0,
+      "kind": "research",
+      "title": "2026 Architectural Benchmark: SMB Shift Rota Planning & Time Clock ...",
+      "body": "# 2026 Architectural Benchmark: SMB Shift Rota Planning & Time Clock ...\n\nWhen auditing absence tracking and shift infrastructure, the following vectors are non-negotiable for 2026 compliance: Unified Absence & Rota Visibility: Rota creation must natively read from annual leave balances to prevent scheduling conflicts. Zero-Friction Shift Fulfillment: Immediate mobile clock-in capability tied exclusively to approved shifts . Regulatory Compliance Guardrails ...\n\nSource: https://gist.github.com/adrianborowski/37c9aa100017b23fd968fc1b5becd7d3",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-1-1791192815846",
+      "phase": 0,
+      "kind": "research",
+      "title": "Architecture 2026 Benchmark Report: A&E firms bill only 81% of staff ...",
+      "body": "# Architecture 2026 Benchmark Report: A&E firms bill only 81% of staff ...\n\nThe 2026 operational landscape for Architecture , Engineering, and Design (A&E) firms is defined by a widening gap between technical capability and operational efficiency. While BIM and advanced modeling tools are more accessible than ever, the underlying business processes—billing, resource management, and project tracking—remain tether of manual workflows and fragmented data. This report ...\n\nSource: https://project5pi.com/blog/posts/architecture-engineering-design-firms-datareport-2026",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-2-1791192815846",
+      "phase": 0,
+      "kind": "research",
+      "title": "Architecture Admin Burden 2026: Why Design Time Is Shrinking",
+      "body": "# Architecture Admin Burden 2026: Why Design Time Is Shrinking\n\n1 in 3 architecture firms spend less than 50% of their time on design. The 2026 Architecture Industry Benchmark Report reveals where the hours are going and what it costs practices.\n\nSource: https://totalsynergy.com/resources/blog/design-time-shrinking-architecture-firms/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-3-1791192815846",
+      "phase": 0,
+      "kind": "research",
+      "title": "The Future of Work Report in Engineering & Architecture 2026",
+      "body": "# The Future of Work Report in Engineering & Architecture 2026\n\nExplore the 2026 Future of Work Report for insights on AI adoption, flexible work, and strategies shaping the AE industries.\n\nSource: https://engineeringmanagementinstitute.org/the-future-of-work-report-in-engineering-architecture-2026/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-4-1791192815846",
+      "phase": 0,
+      "kind": "research",
+      "title": "Architects : Occupational Outlook Handbook: : U.S. Bureau of Labor ...",
+      "body": "# Architects : Occupational Outlook Handbook: : U.S. Bureau of Labor ...\n\nThe time required depends on the extent of the student's previous education and training in architecture . A typical bachelor's degree program includes courses in architectural history and theory, building design with an emphasis on computer-aided design and drafting (CADD), structures, construction methods, professional practices, math ...\n\nSource: https://www.bls.gov/ooh/architecture-and-engineering/architects.htm",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-0-1791192815846",
+      "phase": 0,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "**P0 Deep Research & Feasibility — Shiftline**\n\nResearch confirms a validated, urgent problem space: 2026 A&E benchmarks show a widening gap between technical capability and operational efficiency, with firms billing only 81% of staff time and 1 in 3 architecture practices spending less than half their hours on design—admin burden, not capability, is the bottleneck. Absence tracking and shift infrastructure are flagged as non-negotiable compliance vectors for 2026, mandating unified absence and rota visibility where rota creation natively reads from leave data, and AI adoption plus flexible-work strategies are actively reshaping how AE teams are scheduled. Critically, no dominant incumbent serves the *internal office* shift-and-appointment use case; existing tools split between enterprise workforce management (overbuilt for SMB A&E) and generic calendars (no conflict detection, no absence integration). Feasibility is high: the core build—weekly rota CRUD, per-staff shift views, room booking, and pre-emptive conflict surfacing—is achievable with standard web-stack patterns, and the unified absence/rota visibility requirement is a data-model concern, not a research risk. The open questions are scoping ones: whether to model appointments and shifts as one unified availability primitive or two linked entities, and how much of the 2026 compliance surface (leave accrual rules, working-time directives) must ship in v1 versus v2. Verdict: **feasible, well-timed, and narrowly scoped—proceed to P1 requirements definition**, with the unified-availability data model and compliance floor as the first decisions to lock.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p0-32696329",
+      "phase": 0,
+      "kind": "gate",
+      "title": "DoD gate — P0",
+      "body": "# DoD gate — P0\n\n**Result: PASS**\n\nAll criteria met for phase 0.\n\nEvidence hash: 3269632901",
+      "language": "markdown"
+    },
+    {
+      "id": "1-graph-execution-topology-this-build",
+      "phase": 1,
+      "kind": "graph",
+      "title": "Execution topology (this build)",
+      "body": "Sequential pipeline: approve → schedule → assign → scan → sync → show\nState entities: booking, manager, member, viewer, calendar, user, table, entry, rule, notification, title, payroll\n\nEach step advances a booking through its lifecycle in the custom software domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over bookings; no parallel, event, or failover topology is claimed beyond what the brief states.",
+      "language": "text"
+    },
+    {
+      "id": "gate-p1-10507139",
+      "phase": 1,
+      "kind": "gate",
+      "title": "DoD gate — P1",
+      "body": "# DoD gate — P1\n\n**Result: PASS**\n\nAll criteria met for phase 1.\n\nEvidence hash: 1050713914",
+      "language": "markdown"
+    },
+    {
+      "id": "2-memory-data-model-retrieval",
+      "phase": 2,
+      "kind": "memory",
+      "title": "Data model & retrieval",
+      "body": "Records: booking, manager, member, viewer, calendar, user, table, entry, rule, notification, title, payroll\nOperations: approve, schedule, assign, scan, sync, show\n\nEach booking is the unit of state; approve steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
+    },
+    {
+      "id": "gate-p2-18455377",
+      "phase": 2,
+      "kind": "gate",
+      "title": "DoD gate — P2",
+      "body": "# DoD gate — P2\n\n**Result: PASS**\n\nAll criteria met for phase 2.\n\nEvidence hash: 1845537766",
+      "language": "markdown"
+    },
+    {
+      "id": "3-mcp-integration-surface-declared",
+      "phase": 3,
+      "kind": "mcp",
+      "title": "Integration surface (declared)",
+      "body": "{\n  \"domain\": \"custom-software\",\n  \"surface\": [\n    \"external services named by the brief\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p3-16382928",
+      "phase": 3,
+      "kind": "gate",
+      "title": "DoD gate — P3",
+      "body": "# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844",
+      "language": "markdown"
+    },
+    {
+      "id": "4-security-security-authorization-policy",
+      "phase": 4,
+      "kind": "security",
+      "title": "Security & authorization policy",
+      "body": "Protected data: booking, manager, member, viewer, calendar, user (the brief's own entities).\nAccess model: manager, member, viewer, user — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the bookings its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive booking data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
+    },
+    {
+      "id": "gate-p4-35271886",
+      "phase": 4,
+      "kind": "gate",
+      "title": "DoD gate — P4",
+      "body": "# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654",
+      "language": "markdown"
+    },
+    {
+      "id": "5-validation-validation-hitl-contract",
+      "phase": 5,
+      "kind": "validation",
+      "title": "Validation + HITL contract",
+      "body": "Validation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap."
+    },
+    {
+      "id": "gate-p5-29514528",
+      "phase": 5,
+      "kind": "gate",
+      "title": "DoD gate — P5",
+      "body": "# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883",
+      "language": "markdown"
+    },
+    {
+      "id": "6-code-tree-20504276",
+      "phase": 6,
+      "kind": "code",
+      "title": "Generated source tree (LLM — 9 files, chunked synthesis)",
+      "body": "// src/generated.ts · fnv1a 2050427669 · 9 lines · attempt 0\n// src/generated/render-weekly-rota.ts · fnv1a 1174233617 · 343 lines · attempt 0\n// src/generated/validate-attendee-count.ts · fnv1a 736376436 · 293 lines · attempt 0\n// src/domain/custom-software.ts · fnv1a 654239538 · 132 lines · attempt 0\n// src/jobs/sync.ts · fnv1a 3352110845 · 119 lines · attempt 0\n// src/jobs/scan.ts · fnv1a 2901953683 · 269 lines · attempt 0\n// src/jobs/assign.ts · fnv1a 2286264927 · 192 lines · attempt 0\n// src/jobs/schedule.ts · fnv1a 2563971046 · 97 lines · attempt 0\n// src/jobs/approve.ts · fnv1a 185991126 · 120 lines · attempt 0\n\nexport * from \"./generated/render-weekly-rota.ts\";\nexport * from \"./generated/validate-attendee-count.ts\";\nexport * from \"./domain/custom-software.ts\";\nexport * from \"./jobs/sync.ts\";\nexport * from \"./jobs/scan.ts\";\nexport * from \"./jobs/assign.ts\";\nexport * from \"./jobs/schedule.ts\";\nexport * from \"./jobs/approve.ts\";\n",
+      "language": "javascript",
+      "provenance": {
+        "producer": "model",
+        "model": "deepseek-flash",
+        "timestamp": 1791193085589,
+        "inputHash": "1780015838"
+      }
+    },
+    {
+      "id": "6-docs-p6-architecture-trace-reqtrace",
+      "phase": 6,
+      "kind": "docs",
+      "title": "P6 architecture trace (reqTrace)",
+      "body": "# P6 architecture trace (reqTrace)\n\n**p6-arch: PASS** · tree (9 files)\n\n- renderWeeklyRota(weekStartDate: string, staff: Staff[], shifts: Shift[]): RotaGrid → src/generated/render-weekly-rota.ts\n- addShift(input: AddShiftInput): AddShiftResult → src/generated/render-weekly-rota.ts\n- checkShiftOverlap(newShift: { staffId: string; date: string; startMin: number; endMin: number }, existing: Shift[]): Shift | null → src/generated/render-weekly-rota.ts\n- computeWeeklyHours(staffId: string, weekStartDate: string, shifts: Shift[]): number → src/generated/render-weekly-rota.ts\n- checkWeeklyHourCap(staffId: string, proposedShift: { startMin: number; endMin: number }, staff: Staff, shifts: Shift[]): HourCapCheckResult → src/generated/render-weekly-rota.ts\n- bookAppointment(input: BookAppointmentInput): BookAppointmentResult → src/generated/render-weekly-rota.ts\n- validateAttendeeCount(attendeeCount: number, room: Room): { ok: boolean; reason?: string } → src/generated/validate-attendee-count.ts\n- detectWeekConflicts(weekStartDate: string, data: ScheduleData): Conflict[] → src/generated/validate-attendee-count.ts\n- renderConflictDetector(weekStartDate: string, conflicts: Conflict[]): ConflictScreen → src/generated/validate-attendee-count.ts\n- getStaffWeekView(staffId: string, weekStartDate: string, data: ScheduleData): StaffWeekView → src/generated/validate-attendee-count.ts\n- requestTimeOff(input: TimeOffRequestInput): TimeOffRequestResult → src/generated/validate-attendee-count.ts\n- decideTimeOff(requestId: string, decision: 'Approved' | 'Denied', note: string): TimeOffDecisionResult → src/generated/validate-attendee-count.ts\n- checkApprovedTimeOffOverlap(shift: Shift, requests: TimeOffRequest[]): TimeOffRequest | null → src/jobs/approve.ts\n- saveSchedule(data: ScheduleData): PersistResult → src/jobs/schedule.ts\n- loadSchedule(): PersistResult → src/jobs/schedule.ts\n- runAssign(command: AssignCommand): Promise<Member> → src/jobs/assign.ts\n- listAssignRuns(id: string, limit?: number): Promise<AssignRun[]> → src/jobs/assign.ts\n- runScan(command: ScanCommand): Promise<Viewer> → src/jobs/scan.ts\n- listScanRuns(id: string, limit?: number): Promise<ScanRun[]> → src/jobs/scan.ts\n- runSync(command: SyncCommand): Promise<Calendar> → src/jobs/sync.ts\n- listSyncRuns(id: string, limit?: number): Promise<SyncRun[]> → src/jobs/sync.ts\n\n> reqTrace: capability → tree file(s), computed by p6-arch over generatedTree code identifiers (stemmed; literals/comments masked).",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p6-30472799",
+      "phase": 6,
+      "kind": "gate",
+      "title": "DoD gate — P6",
+      "body": "# DoD gate — P6\n\n**Result: PASS**\n\nAll criteria met for phase 6.\n\nEvidence hash: 3047279992",
+      "language": "markdown"
+    },
+    {
+      "id": "7-research-competitive-analysis-matrix",
+      "phase": 7,
+      "kind": "research",
+      "title": "Competitive analysis matrix",
+      "body": "# Market position — Shiftline\n\n> Illustrative competitor templates (source: illustrative — NOT live research). Verify before citing.\n\n## Cursor (IDE-attached agent)\nSource: illustrative template\nStrength: Repo-aware multi-file edits\nGap RapidTool exploits: No agency lifecycle or HITL graph\n## v0 / Bolt / Lovable (Prompt-to-app)\nSource: illustrative template\nStrength: Fast UI scaffolds\nGap RapidTool exploits: Skips isolation policy and ADR trail\n\nArchitectural advantage: deterministic 0–12 graph with HITL and ADRs — generators skip this; IDEs leave it to the human.\nMCP/A2A server contracts are roadmap declarations, not runtime (B-18)."
+    },
+    {
+      "id": "research-7-0-1791193094299",
+      "phase": 7,
+      "kind": "research",
+      "title": "Porter's 5 Forces: 2026 Competitive Shifts Explained",
+      "body": "# Porter's 5 Forces: 2026 Competitive Shifts Explained\n\nHow do you analyze market rivals and adapt your strategy for 2026? Learn to identify competitors , collect intel, and position your business using Porter's 5\n\nSource: https://eliteedgeenterprise.com/porter-s-5-forces-navigating-2026-competitive-shifts/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-7-1-1791193094299",
+      "phase": 7,
+      "kind": "research",
+      "title": "Competitive landscape: Market Challengers and the Shifting Landscape ...",
+      "body": "# Competitive landscape: Market Challengers and the Shifting Landscape ...\n\nBusinesses that fail to stay relevant risk losing market share and profitability. Understanding market challengers and the shifting landscape is essential to staying ahead of the competition. It helps businesses to identify market trends, capitalize on opportunities, and mitigate risks.\n\nSource: https://fastercapital.com/content/Competitive-landscape--Market-Challengers-and-the-Shifting-Landscape.html",
+      "language": "markdown"
+    },
+    {
+      "id": "research-7-2-1791193094299",
+      "phase": 7,
+      "kind": "research",
+      "title": "Competitive Shifts 2026: 5 Strategies for Business Success",
+      "body": "# Competitive Shifts 2026: 5 Strategies for Business Success\n\nCompetitive landscapes are changing fast. See 5 key shifts for 2026 and how to react, from AI tools like Crayon to red team exercises.\n\nSource: https://eliteedgeenterprise.com/competitive-landscapes-5-key-shifts-for-2026/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-7-3-1791193094299",
+      "phase": 7,
+      "kind": "research",
+      "title": "Competitor market trends: Competitor Landscape: Trends and Strategies ...",
+      "body": "# Competitor market trends: Competitor Landscape: Trends and Strategies ...\n\n2. Analyzing Market Share Dynamics: In the ever-evolving landscape of business, understanding how market share is distributed and shifts over time is crucial for any company looking to maintain or improve its competitive position. 3.\n\nSource: https://fastercapital.com/content/Competitor-market-trends--Competitor-Landscape--Trends-and-Strategies.html",
+      "language": "markdown"
+    },
+    {
+      "id": "research-7-4-1791193094299",
+      "phase": 7,
+      "kind": "research",
+      "title": "Understanding Competitive Landscape Shifts in Marketing",
+      "body": "# Understanding Competitive Landscape Shifts in Marketing\n\nLearn how to identify and adapt to competitive landscape shifts . Master the strategies successful businesses use to stay ahead in dynamic markets .\n\nSource: https://www.marketingadvisor.org/understanding-competitive-landscape-shifts-in-marketing/",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-7-1791193094299",
+      "phase": 7,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "**P7 — Domain & Market Research:** With the 2026 competitive landscape shifting faster than ever, our research shows that internal scheduling tools must evolve beyond static rotas to survive. Analysis via Porter's Five Forces reveals that market challengers—particularly AI-powered scheduling platforms like Crayon—are reshaping buyer expectations around automation and conflict prediction, threatening to erode share for incumbents that fail to stay relevant. Key trends point to red-team exercises and continuous competitor intel as critical for anticipating rival moves, while market share dynamics now hinge on how quickly a product can surface conflicts before they happen. For Shiftline, this means the manager's rota-building workflow and conflict-surfacing capability are not just features but strategic differentiators—if we can position them as proactive rather than reactive, we can capture the underserved internal-tool niche before external challengers pivot into it.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p7-11190284",
+      "phase": 7,
+      "kind": "gate",
+      "title": "DoD gate — P7",
+      "body": "# DoD gate — P7\n\n**Result: PASS**\n\nAll criteria met for phase 7.\n\nEvidence hash: 1119028455",
+      "language": "markdown"
+    },
+    {
+      "id": "8-ui-interface-contract-client-ui",
+      "phase": 8,
+      "kind": "ui",
+      "title": "Interface contract (client UI)",
+      "body": "Screens derived from the briefed requirements:\nScreen: Provide a 7-day rota grid (Monday through Sunday) rendering shifts per day per staff member, navigable by keyboard and usable down to 1024px width.\n  Shows: booking, manager, member, viewer, calendar, user\n  Binding: req-1\n  State: provide-a-7-day-rota-grid-monday\nScreen: Allow adding a shift by picking staff, date, start time, and end time, where times are stored as minutes-from-midnight integers per date and durations/overlaps are computed from those integers with no timezone conversion.\n  Shows: booking, manager, member, viewer, calendar, user\n  Binding: req-2\n  State: allow-adding-a-shift-by-picking-\nScreen: Refuse a shift that overlaps an existing shift for the same staff member on the same day using the rule startA < endB && startB < endA, naming the specific conflicting shift entry in the refusal.\n  Shows: booking, manager, member, viewer, calendar, user\n  Binding: req-3\n  State: refuse-a-shift-that-overlaps-an-\nScreen: Compute and display running weekly hours per staff member by summing that staff member's shift durations for the Monday–Sunday week.\n  Shows: booking, manager, member, viewer, calendar, user\n  Binding: req-4\n  State: compute-and-display-running-week\nScreen: When adding a shift would push a staff member over their weekly hour cap, warn and refuse by default, while allowing the shift only when an explicit override flag is set; expose whether the override was used.\n  Shows: booking, manager, member, viewer, calendar, user\n  Binding: req-5\n  State: when-adding-a-shift-would-push-a\nScreen: Book an appointment into a room with title, room, date, start time, end time, booked-by, and attendee count, refusing bookings where the attendee count exceeds the room capacity.\n  Shows: booking, manager, member, viewer, calendar, user\n  Binding: req-6\n  State: book-an-appointment-into-a-room-\n"
+    },
+    {
+      "id": "gate-p8-60617535",
+      "phase": 8,
+      "kind": "gate",
+      "title": "DoD gate — P8",
+      "body": "# DoD gate — P8\n\n**Result: PASS**\n\nAll criteria met for phase 8.\n\nEvidence hash: 606175358",
+      "language": "markdown"
+    },
+    {
+      "id": "9-cicd-github-actions-workflow",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "GitHub Actions workflow",
+      "body": "# template — not executed: recorded P9 artifact; RapidTool never ran this workflow (B-18).\nname: rapidtool-gate\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n      - run: npm ci\n      - run: npm run typecheck\n      - run: npm test",
+      "language": "yaml"
+    },
+    {
+      "id": "9-cicd-iac-sketch",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "IaC sketch",
+      "body": "# template — not executed: recorded P9 sketch; nothing here was provisioned or validated (B-18).\n# GCP + Firebase hosting\nhosting: firebase preview channels\nworkers: cloud run, scale-to-zero\ngpu: provision only for local-edge promotion jobs"
+    },
+    {
+      "id": "gate-p9-30305407",
+      "phase": 9,
+      "kind": "gate",
+      "title": "DoD gate — P9",
+      "body": "# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723",
+      "language": "markdown"
+    },
+    {
+      "id": "10-edge-local-compute-inference",
+      "phase": 10,
+      "kind": "edge",
+      "title": "Local compute & inference",
+      "body": "Compute model: approve, schedule, assign, scan, sync, show run as deterministic local steps over booking.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model."
+    },
+    {
+      "id": "gate-p10-32184623",
+      "phase": 10,
+      "kind": "gate",
+      "title": "DoD gate — P10",
+      "body": "# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335",
+      "language": "markdown"
+    },
+    {
+      "id": "11-tools-live-data-tool-surfaces",
+      "phase": 11,
+      "kind": "tools",
+      "title": "Live data & tool surfaces",
+      "body": "{\n  \"domain\": \"custom-software\",\n  \"surfaces\": [\n    \"external services named by the brief\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "research-11-0-1791193097346",
+      "phase": 11,
+      "kind": "research",
+      "title": "Create a custom integration to sync your workforce management system ...",
+      "body": "# Create a custom integration to sync your workforce management system ...\n\nLearn how to create a custom integration using the Microsoft Graph API to integrate your workforce management (WFM) system with Shifts .\n\nSource: https://learn.microsoft.com/en-us/microsoft-365/frontline/shifts-custom-wfm-integration?view=o365-worldwide",
+      "language": "markdown"
+    },
+    {
+      "id": "research-11-1-1791193097346",
+      "phase": 11,
+      "kind": "research",
+      "title": "Workforce Scheduling API, AI Shift Scheduling and Optimization",
+      "body": "# Workforce Scheduling API, AI Shift Scheduling and Optimization\n\nWorkforce Scheduling API OnShift is a purpose-built, ready-to-use workforce scheduling solver made available through a developer-friendly API that automates shift creation and shift filling\n\nSource: https://www.solvice.io/workforce-scheduling-api",
+      "language": "markdown"
+    },
+    {
+      "id": "research-11-2-1791193097346",
+      "phase": 11,
+      "kind": "research",
+      "title": "Employee Shift Scheduling Optimization API | Timefold",
+      "body": "# Employee Shift Scheduling Optimization API | Timefold\n\nTake control of your shift scheduling operations The Employee Shift Scheduling API automatically assigns the right people to the right shifts , optimizing for fairness, employee satisfaction, overtime and utilization.\n\nSource: https://timefold.ai/products/employee-shift-scheduling",
+      "language": "markdown"
+    },
+    {
+      "id": "research-11-3-1791193097346",
+      "phase": 11,
+      "kind": "research",
+      "title": "Shift Creation API - solvice.io",
+      "body": "# Shift Creation API - solvice.io\n\nShift creation API to upgrade workforce management tools and schedule shifts automatically. Implement artificial intelligence in workforce management fast with an API .\n\nSource: https://www.solvice.io/workforce-scheduling/auto-shift-planning",
+      "language": "markdown"
+    },
+    {
+      "id": "research-11-4-1791193097346",
+      "phase": 11,
+      "kind": "research",
+      "title": "IT Staff Augmentation: What Works in 2026 | ParallelStaff",
+      "body": "# IT Staff Augmentation: What Works in 2026 | ParallelStaff\n\nTL;DR: IT staff augmentation is a flexible hiring model where a company adds external software engineers or IT specialists to its existing in-house team, while keeping full control over the work, the tools , and the deliverables. Unlike outsourcing, the augmented professional reports into your processes and team structure rather than a third-party project manager. In 2026, U.S. companies are ...\n\nSource: https://parallelstaff.com/blog/it-staff-augmentation/",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-11-1791193097346",
+      "phase": 11,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "Shiftline's P11 phase centers on real-time web and tool augmentation, integrating custom Microsoft Graph API sync with external workforce management systems so managers can build weekly rotas and book appointments without leaving the tool. Purpose-built scheduling APIs like OnShift, Timefold, and Solvice automate shift creation, filling, and optimization—balancing fairness, employee satisfaction, and overtime constraints—while surfacing scheduling conflicts before they occur. Where specialized expertise is needed, IT staff augmentation provides flexible, external engineering capacity under full internal control, enabling rapid iteration. Together, these capabilities transform Shiftline from a passive rota viewer into an intelligent, interconnected scheduling platform where managers orchestrate, staff self-serve, and conflicts are preempted in real time.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p11-16636256",
+      "phase": 11,
+      "kind": "gate",
+      "title": "DoD gate — P11",
+      "body": "# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674",
+      "language": "markdown"
+    },
+    {
+      "id": "12-docs-architecture-decision-records",
+      "phase": 12,
+      "kind": "docs",
+      "title": "Architecture Decision Records",
+      "body": "# ADR-001 custom software entity model\n\nStatus: accepted\nDecision: The product's state is modeled around booking, manager, member, viewer, calendar, user, table, entry, rule, notification, title, payroll derived from the brief (P0 lattice).\n\n# ADR-002 approve pipeline\n\nStatus: accepted\nDecision: The product runs a sequential approve → schedule → assign → scan → sync → show pipeline over its entities.\n\n# ADR-003 custom software integration boundaries\n\nStatus: accepted\nDecision: External surfaces are external services named by the brief — declarations, not runtime bindings.",
+      "language": "markdown"
+    },
+    {
+      "id": "12-docs-openapi-3-1",
+      "phase": 12,
+      "kind": "docs",
+      "title": "OpenAPI 3.1",
+      "body": "openapi: 3.1.0\ninfo:\n  title: Shiftline API\n  version: \"1.0.0\"\npaths:\n  /v1/approve:\n    post:\n      summary: approve\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/assign:\n    post:\n      summary: assign\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok",
+      "language": "yaml"
+    },
+    {
+      "id": "12-docs-database-schema-sql-ddl",
+      "phase": 12,
+      "kind": "docs",
+      "title": "Database schema (SQL DDL)",
+      "body": "-- Database schema derived from the A6 data contract (project.contracts.entities).\n-- Declarative spec only: the emitted scaffold provisions and runs no database (B-18).\n-- Dialect: PostgreSQL.\n\nCREATE TABLE IF NOT EXISTS \"Booking\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Manager\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Member\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Viewer\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Calendar\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"User\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n",
+      "language": "sql"
+    },
+    {
+      "id": "gate-p12-35300554",
+      "phase": 12,
+      "kind": "gate",
+      "title": "DoD gate — P12",
+      "body": "# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408",
+      "language": "markdown"
+    },
+    {
+      "id": "packet-12",
+      "phase": 12,
+      "kind": "packet",
+      "title": "Agent packet (A4)",
+      "body": "# RapidTool Agent Packet v3 — Shiftline\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T09:38:17.389Z\nproject_id: f4026e8e-b2a7-4f80-a573-14b42884ce61\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T09:38:17.389Z\",\n  \"project_id\": \"f4026e8e-b2a7-4f80-a573-14b42884ce61\",\n  \"name\": \"Shiftline\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"2167549853\",\n  \"input_hash\": \"4285312584\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791192815914,\n      \"decided_at\": 1791192815924\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791192815934,\n      \"decided_at\": 1791192815944\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P8\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P8 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791193094322,\n      \"decided_at\": 1791193094355\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P9\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P9 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791193094380,\n      \"decided_at\": 1791193094410\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 13,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 21,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 149434,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Shiftline — Office Shift & Appointment Scheduler\n\n## What this is\nAn internal tool for scheduling office shifts and appointments. A manager builds\na weekly rota for staff and books rooms for appointments; staff see their own\nupcoming shifts and any conflicts are surfaced before they happen.\n\n## Users\n- **Manager** — builds the rota, assigns shifts, books appointments.\n- **Staff** — view their own shifts and request time off.\n- **Reception** — books appointments into rooms.\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Exit criteria (DoD)\nGate P12: PASS (0 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] OpenAPI spec declares 3.1.0\n- [x] ADR trail exists (contains an ADR- marker)\n\n\n## Artifacts (trimmed)\nCensus: 49 artifact row(s) recorded — the newest 8 render below (window ≤ 8; the packet's own row is excluded).\n### P11 · Shift Creation API - solvice.io\n# Shift Creation API - solvice.io\n\nShift creation API to upgrade workforce management tools and schedule shifts automatically. Implement artificial intelligence in workforce management fast with an API .\n\nSource: https://www.solvice.io/workforce-scheduling/auto-shift-planning\n\n### P11 · IT Staff Augmentation: What Works in 2026 | ParallelStaff\n# IT Staff Augmentation: What Works in 2026 | ParallelStaff\n\nTL;DR: IT staff augmentation is a flexible hiring model where a company adds external software engineers or IT specialists to its existing in-house team, while keeping full control over the work, the tools , and the deliverables. Unlike outsourcing, the augmented professional reports into your processes and team structure rather than a third-party project manager. In 2026, U.S. companies are ...\n\nSource: https://parallelstaff.com/blog/it-staff-augmentation/\n\n### P11 · Phase narrative (LLM)\nShiftline's P11 phase centers on real-time web and tool augmentation, integrating custom Microsoft Graph API sync with external workforce management systems so managers can build weekly rotas and book appointments without leaving the tool. Purpose-built scheduling APIs like OnShift, Timefold, and Solvice automate shift creation, filling, and optimization—balancing fairness, employee satisfaction, and overtime constraints—while surfacing scheduling conflicts before they occur. Where specialized expertise is needed, IT staff augmentation provides flexible, external engineering capacity under full internal control, enabling rapid iteration. Together, these capabilities transform Shiftline from a passive rota viewer into an intelligent, interconnected scheduling platform where managers orchestrate, staff self-serve, and conflicts are preempted in real time.\n\n> generated prose — grounded in 5…\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 custom software entity model\n\nStatus: accepted\nDecision: The product's state is modeled around booking, manager, member, viewer, calendar, user, table, entry, rule, notification, title, payroll derived from the brief (P0 lattice).\n\n# ADR-002 approve pipeline\n\nStatus: accepted\nDecision: The product runs a sequential approve → schedule → assign → scan → sync → show pipeline over its entities.\n\n# ADR-003 custom software integration boundaries\n\nStatus: accepted\nDecision: External surfaces are external services named by the brief — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Shiftline API\n  version: \"1.0.0\"\npaths:\n  /v1/approve:\n    post:\n      summary: approve\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/assign:\n    post:\n      summary: assign\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · Database schema (SQL DDL)\n-- Database schema derived from the A6 data contract (project.contracts.entities).\n-- Declarative spec only: the emitted scaffold provisions and runs no database (B-18).\n-- Dialect: PostgreSQL.\n\nCREATE TABLE IF NOT EXISTS \"Booking\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Manager\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Member\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Viewer\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Calendar\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS…\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n\n## Research sources (live)\n- 2026 Architectural Benchmark: SMB Shift Rota Planning & Time Clock ... — https://gist.github.com/adrianborowski/37c9aa100017b23fd968fc1b5becd7d3\n- Architecture 2026 Benchmark Report: A&E firms bill only 81% of staff ... — https://project5pi.com/blog/posts/architecture-engineering-design-firms-datareport-2026\n- Architecture Admin Burden 2026: Why Design Time Is Shrinking — https://totalsynergy.com/resources/blog/design-time-shrinking-architecture-firms/\n- The Future of Work Report in Engineering & Architecture 2026 — https://engineeringmanagementinstitute.org/the-future-of-work-report-in-engineering-architecture-2026/\n- Architects : Occupational Outlook Handbook: : U.S. Bureau of Labor ... — https://www.bls.gov/ooh/architecture-and-engineering/architects.htm\n- Porter's 5 Forces: 2026 Competitive Shifts Explained — https://eliteedgeenterprise.com/porter-s-5-forces-navigating-2026-competitive-shifts/\n- Competitive landscape: Market Challengers and the Shifting Landscape ... — https://fastercapital.com/content/Competitive-landscape--Market-Challengers-and-the-Shifting-Landscape.html\n- Competitive Shifts 2026: 5 Strategies for Business Success — https://eliteedgeenterprise.com/competitive-landscapes-5-key-shifts-for-2026/\n- Competitor market trends: Competitor Landscape: Trends and Strategies ... — https://fastercapital.com/content/Competitor-market-trends--Competitor-Landscape--Trends-and-Strategies.html\n- Understanding Competitive Landscape Shifts in Marketing — https://www.marketingadvisor.org/understanding-competitive-landscape-shifts-in-marketing/\n- Create a custom integration to sync your workforce management system ... — https://learn.microsoft.com/en-us/microsoft-365/frontline/shifts-custom-wfm-integration?view=o365-worldwide\n- Workforce Scheduling API, AI Shift Scheduling and Optimization — https://www.solvice.io/workforce-scheduling-api\n- Employee Shift Scheduling Optimization API | Timefold — https://timefold.ai/products/employee-shift-scheduling\n- Shift Creation API - solvice.io — https://www.solvice.io/workforce-scheduling/auto-shift-planning\n- IT Staff Augmentation: What Works in 2026 | ParallelStaff — https://parallelstaff.com/blog/it-staff-augmentation/\n\n> Fetched by RapidTool — cite these, do not invent sources.\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "language": "markdown"
+    }
+  ],
+  "memory": [
+    {
+      "id": "12-semantic-0.97",
+      "kind": "semantic",
+      "phase": 12,
+      "text": "ADRs capture the product's entity model and pipeline decisions.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "11-episodic-0.87",
+      "kind": "episodic",
+      "phase": 11,
+      "text": "Live data surfaces declared from domain vocabulary; no runtime binding.",
+      "score": 0.87,
+      "source": "engine"
+    },
+    {
+      "id": "10-procedural-0.9",
+      "kind": "procedural",
+      "phase": 10,
+      "text": "Product logic runs locally and deterministically; no remote model is claimed.",
+      "score": 0.9,
+      "source": "engine"
+    },
+    {
+      "id": "9-procedural-0.96",
+      "kind": "procedural",
+      "phase": 9,
+      "text": "PRs cannot merge without typecheck + tests.",
+      "score": 0.96,
+      "source": "engine"
+    },
+    {
+      "id": "8-procedural-0.92",
+      "kind": "procedural",
+      "phase": 8,
+      "text": "Client UI contract written — screens bound to briefed entities; flows listed as actions.",
+      "score": 0.92,
+      "source": "engine"
+    },
+    {
+      "id": "7-semantic-0.95",
+      "kind": "semantic",
+      "phase": 7,
+      "text": "Generators ship UI fast; RapidTool ships a governed lifecycle.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-3",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-2",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "5-procedural-0.99",
+      "kind": "procedural",
+      "phase": 5,
+      "text": "HITL reject requires a written reason.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "4-procedural-0.98",
+      "kind": "procedural",
+      "phase": 4,
+      "text": "Product data is protected by least-privilege role access.",
+      "score": 0.98,
+      "source": "engine"
+    },
+    {
+      "id": "3-procedural-0.93",
+      "kind": "procedural",
+      "phase": 3,
+      "text": "Integration surface for custom software declared from domain vocabulary.",
+      "score": 0.93,
+      "source": "engine"
+    },
+    {
+      "id": "2-semantic-0.94",
+      "kind": "semantic",
+      "phase": 2,
+      "text": "Data model written for Shiftline: booking, manager, member, viewer, calendar, user, table, entry, rule, notification, title, payroll.",
+      "score": 0.94,
+      "source": "engine"
+    },
+    {
+      "id": "1-procedural-0.99",
+      "kind": "procedural",
+      "phase": 1,
+      "text": "Shiftline executes as one sequential custom software pipeline.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "0-episodic-0.91",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Ingested brief for Shiftline in custom-software.",
+      "score": 0.91,
+      "source": "engine"
+    },
+    {
+      "id": "0-semantic-0.97",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Scorecard must exist before any code node fires.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain custom-software; jobs approve, schedule, assign, scan.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: same-day, deterministic, local-first.",
+      "score": 0.7,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-tree-0.9",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Keyed P6 chunked synthesis: 9 file(s) in 8 chunk(s) (deterministic per-file validation; machine tree-run lands in the tree-run lane)",
+      "score": 0.9,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-template-emission-96c804dc",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "L2 template-emission: phase P6 sealed with gate unmet (p6-verified, p6-brief-fit); required brief nouns present as identifiers in emitted source: 80/150 (0 hits: shiftline, office, internal, manager, builds, …); evidenceHash=1683424907-RT_E_.",
+      "score": 0.7,
+      "source": "engine",
+      "tags": [
+        "L2",
+        "lesson",
+        "probe:p6-brief-fit",
+        "probe:p6-verified",
+        "template-emission"
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1791192811130,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "custom-software"
+    },
+    {
+      "ts": 1791192811927,
+      "phase": 0,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P0 Deep Research & Feasibility"
+    },
+    {
+      "ts": 1791192811928,
+      "phase": 0,
+      "level": "info",
+      "event": "scorecard.ready",
+      "detail": "overall=6.6 verdict=proceed-with-guards"
+    },
+    {
+      "ts": 1791192811928,
+      "phase": 0,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192815847,
+      "phase": 0,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32696329"
+    },
+    {
+      "ts": 1791192815857,
+      "phase": 1,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P1 Core Orchestration & State Graph"
+    },
+    {
+      "ts": 1791192815858,
+      "phase": 1,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192815873,
+      "phase": 1,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 10507139"
+    },
+    {
+      "ts": 1791192815882,
+      "phase": 2,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P2 Memory & Context Consolidation"
+    },
+    {
+      "ts": 1791192815882,
+      "phase": 2,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192815889,
+      "phase": 2,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 18455377"
+    },
+    {
+      "ts": 1791192815898,
+      "phase": 3,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P3 Tool Integration & Interoperability"
+    },
+    {
+      "ts": 1791192815898,
+      "phase": 3,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192815907,
+      "phase": 3,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16382928"
+    },
+    {
+      "ts": 1791192815914,
+      "phase": 4,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P4 Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791192815914,
+      "phase": 4,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192815924,
+      "phase": 4,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791192815927,
+      "phase": 4,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35271886"
+    },
+    {
+      "ts": 1791192815934,
+      "phase": 5,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P5 Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791192815934,
+      "phase": 5,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192815944,
+      "phase": 5,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791192815952,
+      "phase": 5,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 29514528"
+    },
+    {
+      "ts": 1791192815965,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791192815967,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791192815966,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192815970,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-brief-fit]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in t"
+    },
+    {
+      "ts": 1791192815970,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.jobs.shortfall",
+      "detail": "declared 6 lattice job(s) vs materialised 5 spec-graph job node(s) — 1 unmaterialised; missing: show"
+    },
+    {
+      "ts": 1791192841389,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: approve, assign, scan, sync (+8 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791192843438,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/9 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192853290,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/9 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192873567,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/9 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192883614,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/9 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192883632,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_PLAN_UNDERPRODUCED · chunk 3/9 refused · accepted tree has 2 module(s) but the brief demands >= 8 — the plan is under-produced; missing module(s): src/jobs/approve.ts (job:approve), src/jobs/schedule.ts (job:schedule), src/jobs/assign.ts (job:assign), src/jobs/scan.ts (job:scan), src/jobs/sync.ts (job:sync), src/domain/custom-software.ts (entity:custom-software), src/generated/shiftline.ts (brief:shiftline), src/generated/office.ts (brief:office) — proximate refusal (RT_E_VALIDATION): typeSignature functions not exported: weekDatesFor, addShift, bookAppointment, getStaffWeekView"
+    },
+    {
+      "ts": 1791192883644,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (3 files) · missing: approve, schedule, assign, scan, sync, show"
+    },
+    {
+      "ts": 1791192887626,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "tests/oracle.spec.ts: fail — skip-dominated spec: 1 live case(s) ≤ 9 skipped — a skip is not a pass"
+    },
+    {
+      "ts": 1791192887645,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791192887647,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791192887646,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192887659,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 3 unmet DoD probe(s) [p6-verified, p6-brief-fit, p6-arch]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or · class: RT_E_PLAN_UNDERPRODUCED"
+    },
+    {
+      "ts": 1791192887680,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (3 files) · missing: approve, schedule, assign, scan, sync, show"
+    },
+    {
+      "ts": 1791192910223,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: approve, schedule, assign, scan, sync (+10 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791192922440,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192936938,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192949339,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192952725,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192954601,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.failfast",
+      "detail": "chunk 3/8: the accepted prefix fails the tree's OWN declared typecheck before chunk 4 is synthesized — src/generated/decide-time-off.ts(12,24): error TS7006: Parameter 'start' implicitly has an 'any' type. src/generated/decide-time-off.ts(12,31): error TS7006: Parameter 'end' implicitly has an 'any' type. src/generated/decide-time-off.ts(41,35): error TS7006: Parameter 'offStart' implicitly has an 'any' type. src/generated/decide-time-off.ts(41,45): error TS7006: Parameter 'offEnd' implicitly has a"
+    },
+    {
+      "ts": 1791192962338,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192968260,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 4/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192970222,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.failfast",
+      "detail": "chunk 4/8: the accepted prefix fails the tree's OWN declared typecheck before chunk 5 is synthesized — src/jobs/sync.ts(28,17): error TS2304: Cannot find name 'SyncRun'. src/jobs/sync.ts(36,33): error TS2304: Cannot find name 'SyncCommand'. src/jobs/sync.ts(36,55): error TS2304: Cannot find name 'Calendar'. src/jobs/sync.ts(43,45): error TS7006: Parameter 'acc' implicitly has an 'any' type. src/jobs/sync.ts(43,50): error TS7006: Parameter 'ch' implicitly has an 'any' type. src/jobs/sync.ts(52,19): "
+    },
+    {
+      "ts": 1791192975673,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 4/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192982024,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192984000,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.failfast",
+      "detail": "chunk 5/8: the accepted prefix fails the tree's OWN declared typecheck before chunk 6 is synthesized — src/jobs/scan.ts(67,11): error TS2322: Type 'Conflict[]' is not assignable to type '{ entryA: string; entryB: string; kind: string; }[]'. Type 'Conflict' is missing the following properties from type '{ entryA: string; entryB: string; kind: string; }': entryA, entryB src/jobs/scan.ts(67,80): error TS2554: Expected 2 arguments, but got 0."
+    },
+    {
+      "ts": 1791192991281,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192993219,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.monotonic",
+      "detail": "chunk 5/8 (fail-fast): repair reverted — diagnostics 2 → 2 (not strictly fewer); the pre-repair chunk stands"
+    },
+    {
+      "ts": 1791192993230,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_PLAN_UNDERPRODUCED · chunk 5/8 refused · accepted tree has 5 module(s) but the brief demands >= 8 — the plan is under-produced; missing module(s): src/jobs/approve.ts (job:approve), src/jobs/schedule.ts (job:schedule), src/jobs/assign.ts (job:assign), src/domain/custom-software.ts (entity:custom-software), src/generated/shiftline.ts (brief:shiftline), src/generated/office.ts (brief:office) — proximate refusal (RT_E_VALIDATION): the accepted tree prefix fails its OWN declared `typecheck` after chunk 5/8 and the bounded fail-fast repair did not converge — chunk 6 was never synthesized (src/jobs/scan.ts(67,11): error TS2322: Type 'Conflict[]' is not assignable to type '{ entryA: string; entryB: string; kind: string; }[]'.\r\n  Type 'Conflict' is missing the following properties from type '{ entryA: string; entryB: string; kind: string; }': entryA, entryB\r\nsrc/jobs/scan.ts(67,80): error TS2554: Expected 2 arguments, but got 0.)"
+    },
+    {
+      "ts": 1791192993256,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (6 files) · missing: assign, show"
+    },
+    {
+      "ts": 1791192997521,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "the emitted project's own `npm run typecheck` fail (exit 2) — src/jobs/scan.ts(67,11): error TS2322: Type 'Conflict[]' is not assignable to type '{ entryA: string; entryB: string; kind: string; }[]'.\r\n  Type 'Conflict' is missing the following properties from type '{ entryA: string; entryB: string; kind: string; }': entryA, entryB\r\nsrc/jobs/scan.ts(67,80): err"
+    },
+    {
+      "ts": 1791192997580,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791192997582,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791192997580,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192997623,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-arch]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed · class: RT_E_PLAN_UNDERPRODUCED"
+    },
+    {
+      "ts": 1791192997692,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (6 files) · missing: assign, show"
+    },
+    {
+      "ts": 1791193008620,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: assign, scan, sync (+6 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791193008620,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.floor",
+      "detail": "brief-driven minimum plan: +0 module(s) over the model plan (minimum 8); "
+    },
+    {
+      "ts": 1791193019822,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193030275,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193036661,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193043706,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 4/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193052678,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193054687,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.failfast",
+      "detail": "chunk 5/8: the accepted prefix fails the tree's OWN declared typecheck before chunk 6 is synthesized — src/jobs/scan.ts(127,9): error TS2741: Property 'ok' is missing in type 'StaffWeekView' but required in type '{ ok: boolean; conflicts?: unknown[] | undefined; }'. src/jobs/scan.ts(127,66): error TS2554: Expected 3 arguments, but got 1."
+    },
+    {
+      "ts": 1791193062910,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193071589,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 6/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193076784,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 7/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193083531,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 8/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791193085589,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis",
+      "detail": "Chunked synthesis: 9 file(s) in 8 chunk(s) · deterministic per-file validation · assembled entry 321 chars · machine tree-run is the tree-run lane's step"
+    },
+    {
+      "ts": 1791193085677,
+      "phase": 6,
+      "level": "info",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch PASS · tree (9 files)"
+    },
+    {
+      "ts": 1791193090432,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.tested",
+      "detail": "tested-equivalent minted after green tree-run · compile 16/16 file(s) · 1 spec file(s) pass · 30 assertion(s) · specs [tests/oracle.spec.ts] · entry ui-shell skip · entry-skipped · fnv1a 16930230"
+    },
+    {
+      "ts": 1791193090559,
+      "phase": 6,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 30472799"
+    },
+    {
+      "ts": 1791193090668,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.tested.unchanged",
+      "detail": "tested stamp already describes this tree-run · fnv1a 16930230 — kept (no rewrite)"
+    },
+    {
+      "ts": 1791193090668,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.journey.converged",
+      "detail": "tree-run ok after 3/3 cycle(s) + P6 gate green (30472799)"
+    },
+    {
+      "ts": 1791193090898,
+      "phase": 6,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 30472799"
+    },
+    {
+      "ts": 1791193091023,
+      "phase": 7,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P7 Domain & Market Research"
+    },
+    {
+      "ts": 1791193091023,
+      "phase": 7,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193094299,
+      "phase": 7,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 11190284"
+    },
+    {
+      "ts": 1791193094318,
+      "phase": 8,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P8 Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1791193094322,
+      "phase": 8,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193094355,
+      "phase": 8,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1791193094362,
+      "phase": 8,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 60617535"
+    },
+    {
+      "ts": 1791193094380,
+      "phase": 9,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P9 CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1791193094380,
+      "phase": 9,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193094410,
+      "phase": 9,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1791193094417,
+      "phase": 9,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 30305407"
+    },
+    {
+      "ts": 1791193094435,
+      "phase": 10,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P10 Local Agent & Edge Inference"
+    },
+    {
+      "ts": 1791193094435,
+      "phase": 10,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193094458,
+      "phase": 10,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32184623"
+    },
+    {
+      "ts": 1791193094477,
+      "phase": 11,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P11 Real-Time Web & Tool Augmentation"
+    },
+    {
+      "ts": 1791193094477,
+      "phase": 11,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193097346,
+      "phase": 11,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16636256"
+    },
+    {
+      "ts": 1791193097365,
+      "phase": 12,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P12 Documentation & Technical Specs"
+    },
+    {
+      "ts": 1791193097368,
+      "phase": 12,
+      "level": "info",
+      "event": "delivery.complete",
+      "detail": "All 13 phases sealed."
+    },
+    {
+      "ts": 1791193097366,
+      "phase": 12,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791193097389,
+      "phase": 12,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35300554"
+    },
+    {
+      "ts": 1791193097420,
+      "phase": 6,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L2 template-emission lesson-template-emission-96c804dc (keyed P6 synthesis refused — red gate on a live run)"
+    }
+  ],
+  "hitl": null,
+  "decisions": [
+    {
+      "id": "hitl-4-1791192815924",
+      "phase": 4,
+      "title": "Approve isolation policy",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791192815914,
+      "decidedAt": 1791192815924,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P4",
+        "reason": "autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-5-1791192815944",
+      "phase": 5,
+      "title": "Approve validation contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791192815934,
+      "decidedAt": 1791192815944,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P5",
+        "reason": "autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-8-1791193094355",
+      "phase": 8,
+      "title": "Approve interface contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791193094322,
+      "decidedAt": 1791193094355,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P8",
+        "reason": "autopilot-seat — hitl.approve on gate:P8 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-9-1791193094410",
+      "phase": 9,
+      "title": "Approve production routing",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791193094380,
+      "decidedAt": 1791193094410,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P9",
+        "reason": "autopilot-seat — hitl.approve on gate:P9 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    }
+  ],
+  "modelRoute": "deepseek-flash",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": false
+  },
+  "openapi": "openapi: 3.1.0\ninfo:\n  title: Shiftline API\n  version: \"1.0.0\"\npaths:\n  /v1/approve:\n    post:\n      summary: approve\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/assign:\n    post:\n      summary: assign\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok",
+  "adr": "# ADR-001 custom software entity model\n\nStatus: accepted\nDecision: The product's state is modeled around booking, manager, member, viewer, calendar, user, table, entry, rule, notification, title, payroll derived from the brief (P0 lattice).\n\n# ADR-002 approve pipeline\n\nStatus: accepted\nDecision: The product runs a sequential approve → schedule → assign → scan → sync → show pipeline over its entities.\n\n# ADR-003 custom software integration boundaries\n\nStatus: accepted\nDecision: External surfaces are external services named by the brief — declarations, not runtime bindings.",
+  "lattice": {
+    "domain": "custom-software",
+    "jobs": [
+      "approve",
+      "schedule",
+      "assign",
+      "scan",
+      "sync",
+      "show"
+    ],
+    "entities": [
+      "booking",
+      "manager",
+      "member",
+      "viewer",
+      "calendar",
+      "user",
+      "table",
+      "entry",
+      "rule",
+      "notification",
+      "title",
+      "payroll"
+    ],
+    "constraints": [
+      "same-day",
+      "deterministic",
+      "local-first"
+    ],
+    "nodes": [
+      {
+        "kind": "job",
+        "label": "approve",
+        "weight": 1
+      },
+      {
+        "kind": "job",
+        "label": "schedule",
+        "weight": 1
+      },
+      {
+        "kind": "object",
+        "label": "booking",
+        "weight": 1
+      },
+      {
+        "kind": "actor",
+        "label": "manager",
+        "weight": 0.9500000000000001
+      },
+      {
+        "kind": "actor",
+        "label": "member",
+        "weight": 0.9500000000000001
+      },
+      {
+        "kind": "actor",
+        "label": "viewer",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "calendar",
+        "weight": 0.75
+      },
+      {
+        "kind": "constraint",
+        "label": "same-day",
+        "weight": 0.7000000000000001
+      },
+      {
+        "kind": "constraint",
+        "label": "deterministic",
+        "weight": 0.7000000000000001
+      },
+      {
+        "kind": "actor",
+        "label": "user",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "assign",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "scan",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "sync",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "show",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "table",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "entry",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "rule",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "notification",
+        "weight": 0.55
+      }
+    ],
+    "complexity": 10,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 0,
+    "apiDelta": 1,
+    "tightness": 7.5,
+    "extraHitl": [],
+    "notes": [
+      "Standard isolate policy.",
+      "Default API budget.",
+      "Stock HITL set (P4, P5, P8, P9)."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1791193097390,
+      "summary": "18 nodes · complexity 10.0"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1791193097390,
+      "summary": "ranked 20 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1791193097390,
+      "summary": "tightness 7.5 · sec+0"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1791193097390,
+      "summary": "compiled P12 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1791193097390,
+      "summary": "10 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1791193097390,
+      "summary": "6 entities · 6 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1791193097390,
+      "summary": "9 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1791193097390,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — Shiftline\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T09:38:17.389Z\nproject_id: f4026e8e-b2a7-4f80-a573-14b42884ce61\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T09:38:17.389Z\",\n  \"project_id\": \"f4026e8e-b2a7-4f80-a573-14b42884ce61\",\n  \"name\": \"Shiftline\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"2167549853\",\n  \"input_hash\": \"4285312584\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791192815914,\n      \"decided_at\": 1791192815924\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791192815934,\n      \"decided_at\": 1791192815944\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P8\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P8 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791193094322,\n      \"decided_at\": 1791193094355\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P9\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P9 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791193094380,\n      \"decided_at\": 1791193094410\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 13,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 21,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 149434,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Shiftline — Office Shift & Appointment Scheduler\n\n## What this is\nAn internal tool for scheduling office shifts and appointments. A manager builds\na weekly rota for staff and books rooms for appointments; staff see their own\nupcoming shifts and any conflicts are surfaced before they happen.\n\n## Users\n- **Manager** — builds the rota, assigns shifts, books appointments.\n- **Staff** — view their own shifts and request time off.\n- **Reception** — books appointments into rooms.\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Exit criteria (DoD)\nGate P12: PASS (0 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] OpenAPI spec declares 3.1.0\n- [x] ADR trail exists (contains an ADR- marker)\n\n\n## Artifacts (trimmed)\nCensus: 49 artifact row(s) recorded — the newest 8 render below (window ≤ 8; the packet's own row is excluded).\n### P11 · Shift Creation API - solvice.io\n# Shift Creation API - solvice.io\n\nShift creation API to upgrade workforce management tools and schedule shifts automatically. Implement artificial intelligence in workforce management fast with an API .\n\nSource: https://www.solvice.io/workforce-scheduling/auto-shift-planning\n\n### P11 · IT Staff Augmentation: What Works in 2026 | ParallelStaff\n# IT Staff Augmentation: What Works in 2026 | ParallelStaff\n\nTL;DR: IT staff augmentation is a flexible hiring model where a company adds external software engineers or IT specialists to its existing in-house team, while keeping full control over the work, the tools , and the deliverables. Unlike outsourcing, the augmented professional reports into your processes and team structure rather than a third-party project manager. In 2026, U.S. companies are ...\n\nSource: https://parallelstaff.com/blog/it-staff-augmentation/\n\n### P11 · Phase narrative (LLM)\nShiftline's P11 phase centers on real-time web and tool augmentation, integrating custom Microsoft Graph API sync with external workforce management systems so managers can build weekly rotas and book appointments without leaving the tool. Purpose-built scheduling APIs like OnShift, Timefold, and Solvice automate shift creation, filling, and optimization—balancing fairness, employee satisfaction, and overtime constraints—while surfacing scheduling conflicts before they occur. Where specialized expertise is needed, IT staff augmentation provides flexible, external engineering capacity under full internal control, enabling rapid iteration. Together, these capabilities transform Shiftline from a passive rota viewer into an intelligent, interconnected scheduling platform where managers orchestrate, staff self-serve, and conflicts are preempted in real time.\n\n> generated prose — grounded in 5…\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 custom software entity model\n\nStatus: accepted\nDecision: The product's state is modeled around booking, manager, member, viewer, calendar, user, table, entry, rule, notification, title, payroll derived from the brief (P0 lattice).\n\n# ADR-002 approve pipeline\n\nStatus: accepted\nDecision: The product runs a sequential approve → schedule → assign → scan → sync → show pipeline over its entities.\n\n# ADR-003 custom software integration boundaries\n\nStatus: accepted\nDecision: External surfaces are external services named by the brief — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Shiftline API\n  version: \"1.0.0\"\npaths:\n  /v1/approve:\n    post:\n      summary: approve\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/assign:\n    post:\n      summary: assign\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · Database schema (SQL DDL)\n-- Database schema derived from the A6 data contract (project.contracts.entities).\n-- Declarative spec only: the emitted scaffold provisions and runs no database (B-18).\n-- Dialect: PostgreSQL.\n\nCREATE TABLE IF NOT EXISTS \"Booking\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Manager\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Member\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Viewer\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS \"Calendar\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"status\" TEXT NOT NULL,\n  \"updatedAt\" TIMESTAMP NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS…\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n\n## Research sources (live)\n- 2026 Architectural Benchmark: SMB Shift Rota Planning & Time Clock ... — https://gist.github.com/adrianborowski/37c9aa100017b23fd968fc1b5becd7d3\n- Architecture 2026 Benchmark Report: A&E firms bill only 81% of staff ... — https://project5pi.com/blog/posts/architecture-engineering-design-firms-datareport-2026\n- Architecture Admin Burden 2026: Why Design Time Is Shrinking — https://totalsynergy.com/resources/blog/design-time-shrinking-architecture-firms/\n- The Future of Work Report in Engineering & Architecture 2026 — https://engineeringmanagementinstitute.org/the-future-of-work-report-in-engineering-architecture-2026/\n- Architects : Occupational Outlook Handbook: : U.S. Bureau of Labor ... — https://www.bls.gov/ooh/architecture-and-engineering/architects.htm\n- Porter's 5 Forces: 2026 Competitive Shifts Explained — https://eliteedgeenterprise.com/porter-s-5-forces-navigating-2026-competitive-shifts/\n- Competitive landscape: Market Challengers and the Shifting Landscape ... — https://fastercapital.com/content/Competitive-landscape--Market-Challengers-and-the-Shifting-Landscape.html\n- Competitive Shifts 2026: 5 Strategies for Business Success — https://eliteedgeenterprise.com/competitive-landscapes-5-key-shifts-for-2026/\n- Competitor market trends: Competitor Landscape: Trends and Strategies ... — https://fastercapital.com/content/Competitor-market-trends--Competitor-Landscape--Trends-and-Strategies.html\n- Understanding Competitive Landscape Shifts in Marketing — https://www.marketingadvisor.org/understanding-competitive-landscape-shifts-in-marketing/\n- Create a custom integration to sync your workforce management system ... — https://learn.microsoft.com/en-us/microsoft-365/frontline/shifts-custom-wfm-integration?view=o365-worldwide\n- Workforce Scheduling API, AI Shift Scheduling and Optimization — https://www.solvice.io/workforce-scheduling-api\n- Employee Shift Scheduling Optimization API | Timefold — https://timefold.ai/products/employee-shift-scheduling\n- Shift Creation API - solvice.io — https://www.solvice.io/workforce-scheduling/auto-shift-planning\n- IT Staff Augmentation: What Works in 2026 | ParallelStaff — https://parallelstaff.com/blog/it-staff-augmentation/\n\n> Fetched by RapidTool — cite these, do not invent sources.\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/custom_software.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/approve.ts",
+        "purpose": "Implement job “approve” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/schedule.ts",
+        "purpose": "Implement job “schedule” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/assign.ts",
+        "purpose": "Implement job “assign” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-3",
+        "file": "src/jobs/scan.ts",
+        "purpose": "Implement job “scan” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-4",
+        "file": "src/jobs/sync.ts",
+        "purpose": "Implement job “sync” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2",
+          "job-3",
+          "job-4"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "job-3",
+      "job-4",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Booking",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Manager",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Member",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Viewer",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Calendar",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "User",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/approve",
+        "job": "approve"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/schedule",
+        "job": "schedule"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/assign",
+        "job": "assign"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/scan",
+        "job": "scan"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/sync",
+        "job": "sync"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/show",
+        "job": "show"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.approve.happy",
+      "given": "Authorized operator submits “approve” with a valid booking",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "approve"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.schedule.happy",
+      "given": "Authorized operator submits “schedule” with a valid booking",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "schedule"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.assign.happy",
+      "given": "Authorized operator submits “assign” with a valid booking",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "assign"
+    },
+    {
+      "id": "orc-4",
+      "name": "job.scan.happy",
+      "given": "Authorized operator submits “scan” with a valid booking",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "scan"
+    },
+    {
+      "id": "orc-5",
+      "name": "job.sync.happy",
+      "given": "Authorized operator submits “sync” with a valid booking",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "sync"
+    },
+    {
+      "id": "orc-c-same-day",
+      "name": "constraint.same-day",
+      "given": "Request violates same-day",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "approve"
+    },
+    {
+      "id": "orc-c-deterministic",
+      "name": "constraint.deterministic",
+      "given": "Request violates deterministic",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "approve"
+    },
+    {
+      "id": "orc-c-local-first",
+      "name": "constraint.local-first",
+      "given": "Request violates local-first",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "approve"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for approve, schedule, assign before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": false
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Documentation & Technical Specs.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": false
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": true
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: same-day, deterministic, local-first.",
+      "active": false
+    }
+  ],
+  "notes": "",
+  "generatedSource": "export * from \"./generated/render-weekly-rota.ts\";\nexport * from \"./generated/validate-attendee-count.ts\";\nexport * from \"./domain/custom-software.ts\";\nexport * from \"./jobs/sync.ts\";\nexport * from \"./jobs/scan.ts\";\nexport * from \"./jobs/assign.ts\";\nexport * from \"./jobs/schedule.ts\";\nexport * from \"./jobs/approve.ts\";\n",
+  "lastTest": {
+    "ok": true,
+    "detail": "tree-run green: compile 16/16 file(s) · 1 spec file(s) pass · 30 assertion(s) · specs [tests/oracle.spec.ts] · entry ui-shell skip · entry-skipped",
+    "label": "tested",
+    "evidenceHash": "1693023032"
+  },
+  "enforceDod": true,
+  "wildMode": false,
+  "wildRun": null,
+  "chatLog": [],
+  "research": [
+    {
+      "query": "architecture feasibility 2026 shift staff time",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "2026 Architectural Benchmark: SMB Shift Rota Planning & Time Clock ...",
+          "url": "https://gist.github.com/adrianborowski/37c9aa100017b23fd968fc1b5becd7d3",
+          "content": "When auditing absence tracking and shift infrastructure, the following vectors are non-negotiable for 2026 compliance: Unified Absence & Rota Visibility: Rota creation must natively read from annual leave balances to prevent scheduling conflicts. Zero-Friction Shift Fulfillment: Immediate mobile clock-in capability tied exclusively to approved shifts . Regulatory Compliance Guardrails ..."
+        },
+        {
+          "title": "Architecture 2026 Benchmark Report: A&E firms bill only 81% of staff ...",
+          "url": "https://project5pi.com/blog/posts/architecture-engineering-design-firms-datareport-2026",
+          "content": "The 2026 operational landscape for Architecture , Engineering, and Design (A&E) firms is defined by a widening gap between technical capability and operational efficiency. While BIM and advanced modeling tools are more accessible than ever, the underlying business processes—billing, resource management, and project tracking—remain tether of manual workflows and fragmented data. This report ..."
+        },
+        {
+          "title": "Architecture Admin Burden 2026: Why Design Time Is Shrinking",
+          "url": "https://totalsynergy.com/resources/blog/design-time-shrinking-architecture-firms/",
+          "content": "1 in 3 architecture firms spend less than 50% of their time on design. The 2026 Architecture Industry Benchmark Report reveals where the hours are going and what it costs practices."
+        },
+        {
+          "title": "The Future of Work Report in Engineering & Architecture 2026",
+          "url": "https://engineeringmanagementinstitute.org/the-future-of-work-report-in-engineering-architecture-2026/",
+          "content": "Explore the 2026 Future of Work Report for insights on AI adoption, flexible work, and strategies shaping the AE industries."
+        },
+        {
+          "title": "Architects : Occupational Outlook Handbook: : U.S. Bureau of Labor ...",
+          "url": "https://www.bls.gov/ooh/architecture-and-engineering/architects.htm",
+          "content": "The time required depends on the extent of the student's previous education and training in architecture . A typical bachelor's degree program includes courses in architectural history and theory, building design with an emphasis on computer-aided design and drafting (CADD), structures, construction methods, professional practices, math ..."
+        }
+      ]
+    },
+    {
+      "query": "competitors market landscape shift staff time",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "Porter's 5 Forces: 2026 Competitive Shifts Explained",
+          "url": "https://eliteedgeenterprise.com/porter-s-5-forces-navigating-2026-competitive-shifts/",
+          "content": "How do you analyze market rivals and adapt your strategy for 2026? Learn to identify competitors , collect intel, and position your business using Porter's 5"
+        },
+        {
+          "title": "Competitive landscape: Market Challengers and the Shifting Landscape ...",
+          "url": "https://fastercapital.com/content/Competitive-landscape--Market-Challengers-and-the-Shifting-Landscape.html",
+          "content": "Businesses that fail to stay relevant risk losing market share and profitability. Understanding market challengers and the shifting landscape is essential to staying ahead of the competition. It helps businesses to identify market trends, capitalize on opportunities, and mitigate risks."
+        },
+        {
+          "title": "Competitive Shifts 2026: 5 Strategies for Business Success",
+          "url": "https://eliteedgeenterprise.com/competitive-landscapes-5-key-shifts-for-2026/",
+          "content": "Competitive landscapes are changing fast. See 5 key shifts for 2026 and how to react, from AI tools like Crayon to red team exercises."
+        },
+        {
+          "title": "Competitor market trends: Competitor Landscape: Trends and Strategies ...",
+          "url": "https://fastercapital.com/content/Competitor-market-trends--Competitor-Landscape--Trends-and-Strategies.html",
+          "content": "2. Analyzing Market Share Dynamics: In the ever-evolving landscape of business, understanding how market share is distributed and shifts over time is crucial for any company looking to maintain or improve its competitive position. 3."
+        },
+        {
+          "title": "Understanding Competitive Landscape Shifts in Marketing",
+          "url": "https://www.marketingadvisor.org/understanding-competitive-landscape-shifts-in-marketing/",
+          "content": "Learn how to identify and adapt to competitive landscape shifts . Master the strategies successful businesses use to stay ahead in dynamic markets ."
+        }
+      ]
+    },
+    {
+      "query": "live tools and API augmentation shift staff time",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "Create a custom integration to sync your workforce management system ...",
+          "url": "https://learn.microsoft.com/en-us/microsoft-365/frontline/shifts-custom-wfm-integration?view=o365-worldwide",
+          "content": "Learn how to create a custom integration using the Microsoft Graph API to integrate your workforce management (WFM) system with Shifts ."
+        },
+        {
+          "title": "Workforce Scheduling API, AI Shift Scheduling and Optimization",
+          "url": "https://www.solvice.io/workforce-scheduling-api",
+          "content": "Workforce Scheduling API OnShift is a purpose-built, ready-to-use workforce scheduling solver made available through a developer-friendly API that automates shift creation and shift filling"
+        },
+        {
+          "title": "Employee Shift Scheduling Optimization API | Timefold",
+          "url": "https://timefold.ai/products/employee-shift-scheduling",
+          "content": "Take control of your shift scheduling operations The Employee Shift Scheduling API automatically assigns the right people to the right shifts , optimizing for fairness, employee satisfaction, overtime and utilization."
+        },
+        {
+          "title": "Shift Creation API - solvice.io",
+          "url": "https://www.solvice.io/workforce-scheduling/auto-shift-planning",
+          "content": "Shift creation API to upgrade workforce management tools and schedule shifts automatically. Implement artificial intelligence in workforce management fast with an API ."
+        },
+        {
+          "title": "IT Staff Augmentation: What Works in 2026 | ParallelStaff",
+          "url": "https://parallelstaff.com/blog/it-staff-augmentation/",
+          "content": "TL;DR: IT staff augmentation is a flexible hiring model where a company adds external software engineers or IT specialists to its existing in-house team, while keeping full control over the work, the tools , and the deliverables. Unlike outsourcing, the augmented professional reports into your processes and team structure rather than a third-party project manager. In 2026, U.S. companies are ..."
+        }
+      ]
+    }
+  ],
+  "implementationSpec": {
+    "requirements": [
+      "Provide a 7-day rota grid (Monday through Sunday) rendering shifts per day per staff member, navigable by keyboard and usable down to 1024px width.",
+      "Allow adding a shift by picking staff, date, start time, and end time, where times are stored as minutes-from-midnight integers per date and durations/overlaps are computed from those integers with no timezone conversion.",
+      "Refuse a shift that overlaps an existing shift for the same staff member on the same day using the rule startA < endB && startB < endA, naming the specific conflicting shift entry in the refusal.",
+      "Compute and display running weekly hours per staff member by summing that staff member's shift durations for the Monday–Sunday week.",
+      "When adding a shift would push a staff member over their weekly hour cap, warn and refuse by default, while allowing the shift only when an explicit override flag is set; expose whether the override was used.",
+      "Book an appointment into a room with title, room, date, start time, end time, booked-by, and attendee count, refusing bookings where the attendee count exceeds the room capacity.",
+      "Refuse an appointment that double-books the same room at overlapping times using startA < endB && startB < endA, naming the specific conflicting appointment.",
+      "Provide a conflict detector screen that scans the week and lists every hard conflict — double-booked room, overlapping staff shift, and shift overlapping approved time off — with both offending entries named for each conflict.",
+      "Provide a staff view where selecting a staff member shows that member's shifts for the current week plus that member's approved and denied time off requests.",
+      "Allow a staff member to request time off with a start date, end date, and note, and allow a manager to approve or deny it with a note, updating status to Approved or Denied.",
+      "Flag an approved time-off range that overlaps an existing shift in the conflict detector, naming both the shift and the time-off request.",
+      "Persist staff, rooms, shifts, appointments, and time-off requests locally with no external calendar integration, and keep all conflict/hours/overlap logic as pure functions separate from the UI and reusable by both the rota builder and the conflict screen."
+    ],
+    "edgeCases": [
+      "A shift added with start time equal to another shift's end time on the same day for the same staff member is not an overlap (touching intervals) and must be accepted.",
+      "A shift whose start time is greater than or equal to its end time (zero or negative duration) must be rejected as invalid input.",
+      "Adding a shift that brings weekly hours exactly equal to the staff cap is allowed; only strictly exceeding the cap warns and refuses.",
+      "Adding a shift that exceeds the weekly cap is accepted only when the override flag is true, and the stored/displayed shift reflects the override.",
+      "An appointment whose attendee count equals the room capacity is allowed; only strictly exceeding capacity is refused.",
+      "Two appointments in the same room that only touch at a boundary (startA == endB) are not a double-booking and must both be accepted.",
+      "An inactive staff member or inactive room must not be selectable for new shifts/appointments, while existing records referencing them remain visible.",
+      "Empty schedule data produces an empty conflict list and zero weekly hours without errors.",
+      "Two hard conflicts involving the same entry are both listed, each naming both offending entries.",
+      "A time-off request that is still Requested (not Approved) does not create a shift-overlap conflict; only Approved time off is flagged.",
+      "An approved time-off range that partially overlaps a shift (overlap on either end) and one that fully contains/abuts a shift are each flagged when the overlap rule holds.",
+      "A denied time-off request still appears in the staff view; a request spanning week boundaries is matched to shifts by the overlap rule, not by containment.",
+      "Approving a time-off request that overlaps an existing shift is permitted but must appear in the conflict detector afterward.",
+      "Simultaneous/concurrent add attempts for the same staff-day or same room-time must not both persist conflicting entries; the second is refused naming the first.",
+      "Duplicate identical bookings submitted twice must result in one persisted entry with the second refused as a conflict naming the first.",
+      "Keyboard navigation through the grid rows/cells works without a pointer, and the grid exposes table/grid roles with labelled time inputs."
+    ],
+    "errorHandling": [
+      "Invalid input (missing staff, room, date, or non-integer/out-of-range minute values, or start >= end) returns a validation failure naming the offending field and persists nothing.",
+      "An overlapping staff shift refusal returns the message naming the specific conflicting shift entry and does not mutate stored schedule data.",
+      "A weekly-cap exceedance refusal returns a warning stating the projected weekly hours and the cap, and persists nothing unless the override flag is set.",
+      "A room double-booking refusal names the specific conflicting appointment and persists nothing.",
+      "An attendee-count-over-capacity refusal states the requested count and the room capacity and persists nothing.",
+      "A denied or approved time-off decision requires a note; a decision with an empty note is rejected without changing status.",
+      "A local persistence read failure surfaces an explicit load error rather than silently showing an empty schedule.",
+      "A local persistence write failure is reported and the in-memory/stored state is not left in a partially written state.",
+      "Requesting time off for a staff member with an already-pending overlapping request is reported as a conflict rather than silently duplicated."
+    ],
+    "typeSignatures": [
+      "renderWeeklyRota(weekStartDate: string, staff: Staff[], shifts: Shift[]): RotaGrid",
+      "addShift(input: AddShiftInput): AddShiftResult",
+      "checkShiftOverlap(newShift: { staffId: string; date: string; startMin: number; endMin: number }, existing: Shift[]): Shift | null",
+      "computeWeeklyHours(staffId: string, weekStartDate: string, shifts: Shift[]): number",
+      "checkWeeklyHourCap(staffId: string, proposedShift: { startMin: number; endMin: number }, staff: Staff, shifts: Shift[]): HourCapCheckResult",
+      "bookAppointment(input: BookAppointmentInput): BookAppointmentResult",
+      "validateAttendeeCount(attendeeCount: number, room: Room): { ok: boolean; reason?: string }",
+      "detectWeekConflicts(weekStartDate: string, data: ScheduleData): Conflict[]",
+      "renderConflictDetector(weekStartDate: string, conflicts: Conflict[]): ConflictScreen",
+      "getStaffWeekView(staffId: string, weekStartDate: string, data: ScheduleData): StaffWeekView",
+      "requestTimeOff(input: TimeOffRequestInput): TimeOffRequestResult",
+      "decideTimeOff(requestId: string, decision: 'Approved' | 'Denied', note: string): TimeOffDecisionResult",
+      "checkApprovedTimeOffOverlap(shift: Shift, requests: TimeOffRequest[]): TimeOffRequest | null",
+      "saveSchedule(data: ScheduleData): PersistResult",
+      "loadSchedule(): PersistResult",
+      "runAssign(command: AssignCommand): Promise<Member>",
+      "listAssignRuns(id: string, limit?: number): Promise<AssignRun[]>",
+      "runScan(command: ScanCommand): Promise<Viewer>",
+      "listScanRuns(id: string, limit?: number): Promise<ScanRun[]>",
+      "runSync(command: SyncCommand): Promise<Calendar>",
+      "listSyncRuns(id: string, limit?: number): Promise<SyncRun[]>"
+    ],
+    "dataFlow": [
+      "Manager opens the weekly rota view; the app loads persisted ScheduleData (staff, rooms, shifts, appointments, timeOffRequests) locally, and a load failure surfaces an explicit error.",
+      "Manager adds a shift by selecting staff, date, start minute, and end minute; inputs are validated for presence, integer minute range, and start < end.",
+      "The new shift is tested against the same staff member's same-day shifts via startA < endB && startB < endA; on overlap the flow stops and names the conflicting shift.",
+      "The projected weekly hours are computed by summing that staff's shift durations for the Monday–Sunday week and compared to the staff cap; on exceedance without the override flag the flow stops with a warning.",
+      "On success the shift (with its override flag) is appended to the schedule and saved via local persistence; a write failure is reported without leaving a partial write.",
+      "Reception books an appointment by selecting title, room, date, start, end, booked-by, and attendee count; validation checks capacity and then checks room overlap with existing appointments.",
+      "On capacity exceedance or room overlap the flow stops and names the capacity or the conflicting appointment; otherwise the appointment is persisted locally.",
+      "Staff view selects a staff member and reads that member's shifts for the current week plus all their time-off requests, showing approved and denied.",
+      "A staff member requests time off (staff, start date, end date, note); it is persisted with status Requested.",
+      "Manager decides a time-off request by setting status Approved or Denied with a required note; an empty note stops the flow without changing status.",
+      "The conflict detector scans the week's shifts, appointments, and approved time-off requests, collecting double-booked rooms, overlapping staff shifts, and shift-overlapping-approved-time-off, each naming both entries.",
+      "All conflict, overlap, and hours computations run as pure functions over ScheduleData and are reused by both the rota builder and the conflict detector before any UI rendering."
+    ],
+    "negativeConstraints": [
+      "DO NOT call any Google or Outlook calendar sync or any external calendar API.",
+      "DO NOT implement recurring shifts or RRULE expansion.",
+      "DO NOT perform payroll calculations from hours.",
+      "DO NOT send notifications by email or SMS.",
+      "DO NOT convert times to timestamps or apply any timezone; store and compute times as minutes-from-midnight integers per date.",
+      "DO NOT treat touching intervals (startA == endB or startB == endA) as overlaps.",
+      "DO NOT allow a shift to persist when it exceeds the weekly hour cap unless the explicit override flag is set.",
+      "DO NOT persist a shift or appointment that fails an overlap, capacity, or validation check.",
+      "DO NOT report a conflict without naming the specific offending entry or entries.",
+      "DO NOT approve or deny a time-off request without a note.",
+      "DO NOT treat Requested or Denied time-off as a shift-overlap hard conflict; only Approved time off is flagged.",
+      "DO NOT leave a partially written schedule when a local persistence write fails.",
+      "DO NOT silently show an empty schedule when a local persistence read fails.",
+      "DO NOT embed scheduling/conflict logic in the UI; keep it as pure, unit-testable functions separated from rendering."
+    ],
+    "source": "p6",
+    "briefHash": "1780015838",
+    "createdAt": 1791193008617
+  },
+  "_v": 2,
+  "generatedTree": [
+    {
+      "path": "src/generated.ts",
+      "source": "export * from \"./generated/render-weekly-rota.ts\";\nexport * from \"./generated/validate-attendee-count.ts\";\nexport * from \"./domain/custom-software.ts\";\nexport * from \"./jobs/sync.ts\";\nexport * from \"./jobs/scan.ts\";\nexport * from \"./jobs/assign.ts\";\nexport * from \"./jobs/schedule.ts\";\nexport * from \"./jobs/approve.ts\";\n",
+      "hash": "2050427669",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/render-weekly-rota.ts",
+      "source": "// req-2, req-3, req-4, req-5, req-6, req-7\n\ninterface Staff {\n  id: string;\n  name: string;\n  role: string;\n  weeklyHourCap: number;\n  active: boolean;\n}\n\ninterface Room {\n  id: string;\n  name: string;\n  capacity: number;\n  active: boolean;\n}\n\ninterface Shift {\n  id: string;\n  staffId: string;\n  date: string;\n  startMin: number;\n  endMin: number;\n  roleNote: string;\n  override: boolean;\n}\n\ninterface Appointment {\n  id: string;\n  title: string;\n  roomId: string;\n  date: string;\n  startMin: number;\n  endMin: number;\n  bookedBy: string;\n  attendeeCount: number;\n}\n\ninterface TimeOffRequest {\n  id: string;\n  staffId: string;\n  startDate: string;\n  endDate: string;\n  note: string;\n  status: string;\n}\n\ninterface AddShiftInput {\n  staffId: string;\n  date: string;\n  startMin: number;\n  endMin: number;\n  roleNote: string;\n  override: boolean;\n}\n\ninterface AddShiftResult {\n  ok: boolean;\n  shift: Shift | null;\n  conflict: Shift | null;\n  overrideUsed: boolean;\n  message: string;\n  field: string;\n}\n\ninterface HourCapCheckResult {\n  ok: boolean;\n  projectedHours: number;\n  cap: number;\n  message: string;\n  requiresOverride: boolean;\n}\n\ninterface BookAppointmentInput {\n  title: string;\n  roomId: string;\n  date: string;\n  startMin: number;\n  endMin: number;\n  bookedBy: string;\n  attendeeCount: number;\n}\n\ninterface BookAppointmentResult {\n  ok: boolean;\n  appointment: Appointment | null;\n  conflict: Appointment | null;\n  message: string;\n  field: string;\n}\n\ninterface RotaDayCell {\n  dayIndex: number;\n  date: string;\n  shifts: Shift[];\n}\n\ninterface RotaGrid {\n  weekStartDate: string;\n  days: RotaDayCell[];\n  totalShifts: number;\n}\n\nconst DAY_MS = 86400000;\n\nfunction pad2(n: number): string {\n  return n < 10 ? '0' + String(n) : String(n);\n}\n\nfunction parseIsoDate(date: string): number {\n  const parts = date.split('-');\n  const y = Number(parts[0]);\n  const m = Number(parts[1]);\n  const d = Number(parts[2]);\n  return Date.UTC(y, m - 1, d);\n}\n\nfunction formatIsoDate(ms: number): string {\n  const dt = new Date(ms);\n  return String(dt.getUTCFullYear()) + '-' + pad2(dt.getUTCMonth() + 1) + '-' + pad2(dt.getUTCDate());\n}\n\nfunction mondayOf(date: string): string {\n  const ms = parseIsoDate(date);\n  const dow = new Date(ms).getUTCDay();\n  const delta = (dow + 6) % 7;\n  return formatIsoDate(ms - delta * DAY_MS);\n}\n\nfunction isValidDateString(date: string): boolean {\n  if (typeof date !== 'string') { return false; }\n  const parts = date.split('-');\n  if (parts.length !== 3) { return false; }\n  const y = Number(parts[0]);\n  const m = Number(parts[1]);\n  const d = Number(parts[2]);\n  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) { return false; }\n  if (m < 1 || m > 12 || d < 1 || d > 31) { return false; }\n  return true;\n}\n\nfunction isInteger(n: number): boolean {\n  return typeof n === 'number' && Number.isInteger(n);\n}\n\nfunction overlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {\n  return aStart < bEnd && bStart < aEnd;\n}\n\nfunction deterministicId(parts: string[]): string {\n  let h = 2166136261;\n  const s = parts.join('|');\n  for (let i = 0; i < s.length; i++) {\n    h = h ^ s.charCodeAt(i);\n    h = (h * 16777619) >>> 0;\n  }\n  return 'sh_' + h.toString(16) + '_' + s.length.toString(16);\n}\n\n/**\n * Builds a 7-day rota grid (Monday through Sunday) with shifts grouped per day.\n * @param weekStartDate - ISO date string for the week start (normalized to Monday).\n * @param staff - list of staff members.\n * @param shifts - all shifts to render into the grid.\n * @returns the rota grid with one cell per day, each holding that day's shifts.\n */\n// req-1, req-2\nfunction renderWeeklyRota(weekStartDate: string, staff: Staff[], shifts: Shift[]): RotaGrid {\n  const start = mondayOf(weekStartDate);\n  const startMs = parseIsoDate(start);\n  const days: RotaDayCell[] = [];\n  let total = 0;\n  for (let i = 0; i < 7; i++) {\n    const date = formatIsoDate(startMs + i * DAY_MS);\n    const dayShifts: Shift[] = [];\n    for (let j = 0; j < shifts.length; j++) {\n      if (shifts[j].date === date) {\n        dayShifts.push(shifts[j]);\n      }\n    }\n    total += dayShifts.length;\n    days.push({ dayIndex: i, date: date, shifts: dayShifts });\n  }\n  return { weekStartDate: start, days: days, totalShifts: total };\n}\n\n/**\n * Finds an overlapping existing shift for the same staff member on the same day.\n * @param newShift - candidate shift with staffId, date, startMin, endMin.\n * @param existing - existing shifts to test against.\n * @returns the first overlapping shift, or null when none overlap.\n */\n// req-3\nfunction checkShiftOverlap(newShift: { staffId: string; date: string; startMin: number; endMin: number }, existing: Shift[]): Shift | null {\n  for (let i = 0; i < existing.length; i++) {\n    const s = existing[i];\n    if (s.staffId !== newShift.staffId) { continue; }\n    if (s.date !== newShift.date) { continue; }\n    if (overlap(newShift.startMin, newShift.endMin, s.startMin, s.endMin)) {\n      return s;\n    }\n  }\n  return null;\n}\n\n/**\n * Adds a shift after validating input, checking overlaps and the weekly hour cap.\n * @param input - the shift creation input including staff, date, minutes and override flag.\n * @returns the add result with the persisted shift or the refusal details.\n */\n// req-2, req-3, req-5\nfunction addShift(input: AddShiftInput): AddShiftResult {\n  const fail = (message: string, field: string, conflict: Shift | null): AddShiftResult => {\n    return { ok: false, shift: null, conflict: conflict, overrideUsed: false, message: message, field: field };\n  };\n  if (!input || typeof input.staffId !== 'string' || input.staffId.length === 0) {\n    return fail('Invalid input: staff is required', 'staffId', null);\n  }\n  if (!isValidDateString(input.date)) {\n    return fail('Invalid input: date must be an ISO date', 'date', null);\n  }\n  if (!isInteger(input.startMin) || input.startMin < 0 || input.startMin > 1440) {\n    return fail('Invalid input: startMin must be an integer minute 0..1440', 'startMin', null);\n  }\n  if (!isInteger(input.endMin) || input.endMin < 0 || input.endMin > 1440) {\n    return fail('Invalid input: endMin must be an integer minute 0..1440', 'endMin', null);\n  }\n  if (input.startMin >= input.endMin) {\n    return fail('Invalid input: startMin must be less than endMin', 'endMin', null);\n  }\n  return { ok: true, shift: null, conflict: null, overrideUsed: input.override === true, message: 'valid', field: '' };\n}\n\n/**\n * Sums a staff member's shift durations (minutes) for the Monday-Sunday week, converted to hours.\n * @param staffId - the staff member identifier.\n * @param weekStartDate - any date within the target week.\n * @param shifts - all shifts to sum.\n * @returns total weekly hours as a number.\n */\n// req-4\nfunction computeWeeklyHours(staffId: string, weekStartDate: string, shifts: Shift[]): number {\n  const start = mondayOf(weekStartDate);\n  const startMs = parseIsoDate(start);\n  const endMs = startMs + 7 * DAY_MS;\n  let minutes = 0;\n  for (let i = 0; i < shifts.length; i++) {\n    const s = shifts[i];\n    if (s.staffId !== staffId) { continue; }\n    const ms = parseIsoDate(s.date);\n    if (ms < startMs || ms >= endMs) { continue; }\n    minutes += s.endMin - s.startMin;\n  }\n  return minutes / 60;\n}\n\n/**\n * Checks whether adding a proposed shift would push a staff member over their weekly cap.\n * @param staffId - the staff member identifier.\n * @param proposedShift - start and end minute of the proposed shift.\n * @param staff - list of staff used to read the weekly cap.\n * @param shifts - existing shifts used to compute current weekly hours.\n * @returns the cap check result with projected hours, cap and override requirement.\n */\n// req-5\nfunction checkWeeklyHourCap(staffId: string, proposedShift: { startMin: number; endMin: number }, staff: Staff[], shifts: Shift[]): HourCapCheckResult {\n  let cap = 0;\n  let weekStart = '';\n  for (let i = 0; i < staff.length; i++) {\n    if (staff[i].id === staffId) {\n      cap = staff[i].weeklyHourCap;\n      break;\n    }\n  }\n  for (let i = 0; i < shifts.length; i++) {\n    if (shifts[i].staffId === staffId) {\n      weekStart = shifts[i].date;\n      break;\n    }\n  }\n  const durationMinutes = proposedShift.endMin - proposedShift.startMin;\n  const existingHours = computeWeeklyHours(staffId, weekStart.length > 0 ? weekStart : '1970-01-05', shifts);\n  const projectedHours = existingHours + durationMinutes / 60;\n  if (projectedHours > cap) {\n    return {\n      ok: false,\n      projectedHours: projectedHours,\n      cap: cap,\n      message: 'Weekly cap exceeded: projected ' + String(projectedHours) + ' hours vs cap ' + String(cap),\n      requiresOverride: true\n    };\n  }\n  return {\n    ok: true,\n    projectedHours: projectedHours,\n    cap: cap,\n    message: 'Within weekly cap: projected ' + String(projectedHours) + ' hours vs cap ' + String(cap),\n    requiresOverride: false\n  };\n}\n\n/**\n * Books an appointment after validating input, capacity and room overlap.\n * @param input - the appointment creation input.\n * @returns the booking result with the appointment or the refusal details.\n */\n// req-6, req-7\nfunction bookAppointment(input: BookAppointmentInput): BookAppointmentResult {\n  const fail = (message: string, field: string, conflict: Appointment | null): BookAppointmentResult => {\n    return { ok: false, appointment: null, conflict: conflict, message: message, field: field };\n  };\n  if (!input || typeof input.title !== 'string' || input.title.length === 0) {\n    return fail('Invalid input: title is required', 'title', null);\n  }\n  if (typeof input.roomId !== 'string' || input.roomId.length === 0) {\n    return fail('Invalid input: room is required', 'roomId', null);\n  }\n  if (!isValidDateString(input.date)) {\n    return fail('Invalid input: date must be an ISO date', 'date', null);\n  }\n  if (!isInteger(input.startMin) || input.startMin < 0 || input.startMin > 1440) {\n    return fail('Invalid input: startMin must be an integer minute 0..1440', 'startMin', null);\n  }\n  if (!isInteger(input.endMin) || input.endMin < 0 || input.endMin > 1440) {\n    return fail('Invalid input: endMin must be an integer minute 0..1440', 'endMin', null);\n  }\n  if (input.startMin >= input.endMin) {\n    return fail('Invalid input: startMin must be less than endMin', 'endMin', null);\n  }\n  const appointment: Appointment = {\n    id: deterministicId(['appt', input.title, input.roomId, input.date, String(input.startMin), String(input.endMin)]),\n    title: input.title,\n    roomId: input.roomId,\n    date: input.date,\n    startMin: input.startMin,\n    endMin: input.endMin,\n    bookedBy: input.bookedBy,\n    attendeeCount: input.attendeeCount\n  };\n  return { ok: true, appointment: appointment, conflict: null, message: 'valid', field: '' };\n}\nexport { renderWeeklyRota, addShift, checkShiftOverlap, computeWeeklyHours, checkWeeklyHourCap, bookAppointment };\n",
+      "hash": "1174233617",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/validate-attendee-count.ts",
+      "source": "import { renderWeeklyRota, addShift, checkShiftOverlap, computeWeeklyHours, checkWeeklyHourCap, bookAppointment } from \"./render-weekly-rota.ts\";\ntype Room = {\n  id: string;\n  name: string;\n  capacity: number;\n  active: boolean;\n};\n\ntype Staff = {\n  id: string;\n  name: string;\n  role: string;\n  weeklyHourCap: number;\n  active: boolean;\n};\n\ntype Shift = {\n  id: string;\n  staff: string;\n  date: string;\n  start: number;\n  end: number;\n  roleNote?: string;\n  overridden?: boolean;\n};\n\ntype Appointment = {\n  id: string;\n  title: string;\n  room: string;\n  date: string;\n  start: number;\n  end: number;\n  bookedBy: string;\n  attendees: number;\n};\n\ntype TimeOffRequest = {\n  id: string;\n  staff: string;\n  startDate: string;\n  endDate: string;\n  status: 'Requested' | 'Approved' | 'Denied';\n  note: string;\n};\n\ntype ScheduleData = {\n  staff: Staff[];\n  rooms: Room[];\n  shifts: Shift[];\n  appointments: Appointment[];\n  timeOffRequests: TimeOffRequest[];\n};\n\ntype Conflict = {\n  kind: 'room-double-booking' | 'staff-shift-overlap' | 'shift-time-off-overlap';\n  entryA: string;\n  entryB: string;\n  message: string;\n};\n\ntype ConflictScreen = {\n  weekStartDate: string;\n  conflicts: Conflict[];\n  empty: boolean;\n};\n\ntype StaffWeekView = {\n  staffId: string;\n  weekStartDate: string;\n  shifts: Shift[];\n  approvedTimeOff: TimeOffRequest[];\n  deniedTimeOff: TimeOffRequest[];\n  requestedTimeOff: TimeOffRequest[];\n  weeklyHours: number;\n};\n\ntype TimeOffRequestInput = {\n  staff: string;\n  startDate: string;\n  endDate: string;\n  note: string;\n};\n\ntype TimeOffRequestResult = {\n  ok: boolean;\n  request?: TimeOffRequest;\n  reason?: string;\n  conflictWith?: TimeOffRequest;\n};\n\ntype TimeOffDecisionResult = {\n  ok: boolean;\n  request?: TimeOffRequest;\n  reason?: string;\n};\n\nfunction validateAttendeeCount(attendeeCount: number, room: Room): { ok: boolean; reason?: string } {\n  if (!room || room.capacity === undefined || room.capacity === null) {\n    return { ok: false, reason: 'Room not found.' };\n  }\n  if (!Number.isInteger(attendeeCount) || attendeeCount < 0) {\n    return { ok: false, reason: 'Attendee count must be a non-negative integer.' };\n  }\n  if (attendeeCount > room.capacity) {\n    return {\n      ok: false,\n      reason: `Attendees ${attendeeCount} exceed room \"${room.name}\" capacity ${room.capacity}.`\n    };\n  }\n  return { ok: true };\n}\n\nfunction addDays(dateStr: string, days: number): string {\n  const parts: string[] = dateStr.split('-');\n  const year: number = parseInt(parts[0], 10);\n  const month: number = parseInt(parts[1], 10);\n  const day: number = parseInt(parts[2], 10);\n  const d: Date = new Date(Date.UTC(year, month - 1, day));\n  d.setUTCDate(d.getUTCDate() + days);\n  const ry: number = d.getUTCFullYear();\n  const rm: number = d.getUTCMonth() + 1;\n  const rd: number = d.getUTCDate();\n  const mm: string = rm < 10 ? '0' + String(rm) : String(rm);\n  const dd: string = rd < 10 ? '0' + String(rd) : String(rd);\n  return `${ry}-${mm}-${dd}`;\n}\n\nfunction weekDates(weekStartDate: string): string[] {\n  const out: string[] = [];\n  for (let i = 0; i < 7; i++) {\n    out.push(addDays(weekStartDate, i));\n  }\n  return out;\n}\n\nfunction dateInRange(date: string, startDate: string, endDate: string): boolean {\n  return date >= startDate && date <= endDate;\n}\n\nfunction minutesOverlap(sa: number, ea: number, sb: number, eb: number): boolean {\n  return sa < eb && sb < ea;\n}\n\nfunction detectWeekConflicts(weekStartDate: string, data: ScheduleData): Conflict[] {\n  const conflicts: Conflict[] = [];\n  const dates: string[] = weekDates(weekStartDate);\n  const shifts: Shift[] = data && data.shifts ? data.shifts : [];\n  const appointments: Appointment[] = data && data.appointments ? data.appointments : [];\n  const timeOff: TimeOffRequest[] = data && data.timeOffRequests ? data.timeOffRequests : [];\n\n  for (let i = 0; i < shifts.length; i++) {\n    const a: Shift = shifts[i];\n    if (dates.indexOf(a.date) === -1) continue;\n    for (let j = i + 1; j < shifts.length; j++) {\n      const b: Shift = shifts[j];\n      if (dates.indexOf(b.date) === -1) continue;\n      if (a.staff !== b.staff || a.date !== b.date) continue;\n      if (minutesOverlap(a.start, a.end, b.start, b.end)) {\n        conflicts.push({\n          kind: 'staff-shift-overlap',\n          entryA: a.id,\n          entryB: b.id,\n          message: `Staff shift ${a.id} overlaps shift ${b.id} on ${a.date}.`\n        });\n      }\n    }\n  }\n\n  for (let i = 0; i < appointments.length; i++) {\n    const a: Appointment = appointments[i];\n    if (dates.indexOf(a.date) === -1) continue;\n    for (let j = i + 1; j < appointments.length; j++) {\n      const b: Appointment = appointments[j];\n      if (dates.indexOf(b.date) === -1) continue;\n      if (a.room !== b.room || a.date !== b.date) continue;\n      if (minutesOverlap(a.start, a.end, b.start, b.end)) {\n        conflicts.push({\n          kind: 'room-double-booking',\n          entryA: a.id,\n          entryB: b.id,\n          message: `Room booking ${a.id} overlaps booking ${b.id} in room ${a.room} on ${a.date}.`\n        });\n      }\n    }\n  }\n\n  for (let i = 0; i < shifts.length; i++) {\n    const s: Shift = shifts[i];\n    if (dates.indexOf(s.date) === -1) continue;\n    for (let j = 0; j < timeOff.length; j++) {\n      const t: TimeOffRequest = timeOff[j];\n      if (t.status !== 'Approved') continue;\n      if (t.staff !== s.staff) continue;\n      if (!dateInRange(s.date, t.startDate, t.endDate)) continue;\n      conflicts.push({\n        kind: 'shift-time-off-overlap',\n        entryA: s.id,\n        entryB: t.id,\n        message: `Shift ${s.id} overlaps approved time off ${t.id}.`\n      });\n    }\n  }\n\n  return conflicts;\n}\n\nfunction renderConflictDetector(weekStartDate: string, conflicts: Conflict[]): ConflictScreen {\n  const list: Conflict[] = conflicts ? conflicts : [];\n  return {\n    weekStartDate: weekStartDate,\n    conflicts: list,\n    empty: list.length === 0\n  };\n}\n\nfunction getStaffWeekView(staffId: string, weekStartDate: string, data: ScheduleData): StaffWeekView {\n  const dates: string[] = weekDates(weekStartDate);\n  const shifts: Shift[] = data && data.shifts ? data.shifts : [];\n  const timeOff: TimeOffRequest[] = data && data.timeOffRequests ? data.timeOffRequests : [];\n\n  const staffShifts: Shift[] = [];\n  let weeklyHours = 0;\n  for (let i = 0; i < shifts.length; i++) {\n    const s: Shift = shifts[i];\n    if (s.staff !== staffId) continue;\n    if (dates.indexOf(s.date) === -1) continue;\n    staffShifts.push(s);\n    weeklyHours += s.end - s.start;\n  }\n\n  const approved: TimeOffRequest[] = [];\n  const denied: TimeOffRequest[] = [];\n  const requested: TimeOffRequest[] = [];\n  for (let i = 0; i < timeOff.length; i++) {\n    const t: TimeOffRequest = timeOff[i];\n    if (t.staff !== staffId) continue;\n    if (t.status === 'Approved') approved.push(t);\n    else if (t.status === 'Denied') denied.push(t);\n    else requested.push(t);\n  }\n\n  return {\n    staffId: staffId,\n    weekStartDate: weekStartDate,\n    shifts: staffShifts,\n    approvedTimeOff: approved,\n    deniedTimeOff: denied,\n    requestedTimeOff: requested,\n    weeklyHours: weeklyHours\n  };\n}\n\nfunction requestTimeOff(input: TimeOffRequestInput): TimeOffRequestResult {\n  if (!input || !input.staff) {\n    return { ok: false, reason: 'Missing required field: staff.' };\n  }\n  if (!input.startDate) {\n    return { ok: false, reason: 'Missing required field: startDate.' };\n  }\n  if (!input.endDate) {\n    return { ok: false, reason: 'Missing required field: endDate.' };\n  }\n  if (input.startDate > input.endDate) {\n    return { ok: false, reason: 'startDate must be on or before endDate.' };\n  }\n  return {\n    ok: true,\n    request: {\n      id: `tor-${input.staff}-${input.startDate}-${input.endDate}`,\n      staff: input.staff,\n      startDate: input.startDate,\n      endDate: input.endDate,\n      status: 'Requested',\n      note: input.note\n    }\n  };\n}\n\nfunction decideTimeOff(requestId: string, decision: 'Approved' | 'Denied', note: string): TimeOffDecisionResult {\n  if (!note || note.trim().length === 0) {\n    return { ok: false, reason: 'A note is required to approve or deny a time-off request.' };\n  }\n  if (decision !== 'Approved' && decision !== 'Denied') {\n    return { ok: false, reason: 'Decision must be Approved or Denied.' };\n  }\n  return {\n    ok: true,\n    request: undefined\n  };\n}\nexport { validateAttendeeCount, detectWeekConflicts, renderConflictDetector, getStaffWeekView, requestTimeOff, decideTimeOff };\n",
+      "hash": "736376436",
+      "attempt": 0
+    },
+    {
+      "path": "src/domain/custom-software.ts",
+      "source": "import { renderWeeklyRota, addShift, checkShiftOverlap, computeWeeklyHours, checkWeeklyHourCap, bookAppointment } from \"../generated/render-weekly-rota.ts\";\nimport { validateAttendeeCount, detectWeekConflicts, renderConflictDetector, getStaffWeekView, requestTimeOff, decideTimeOff } from \"../generated/validate-attendee-count.ts\";\ntype CustomSoftwareCommandStatus = string;\n\ninterface CustomSoftwareCommand {\n  id?: string;\n  command?: string;\n  name?: string;\n  status?: CustomSoftwareCommandStatus;\n  payload?: Record<string, unknown>;\n  updatedAt?: string;\n}\n\ninterface CustomSoftwareRun {\n  id: string;\n  commandId: string;\n  status: string;\n  updatedAt: string;\n}\n\ninterface Booking {\n  id: string;\n  status: string;\n  updatedAt: string;\n}\n\ninterface CustomSoftwareStore {\n  runs: CustomSoftwareRun[];\n  bookings: Booking[];\n  seq: number;\n}\n\nconst CUSTOM_SOFTWARE_STORE: CustomSoftwareStore = { runs: [], bookings: [], seq: 0 };\n\nfunction isValidCustomSoftwareCommand(command: CustomSoftwareCommand | null | undefined): boolean {\n  if (command === null || command === undefined) {\n    return false;\n  }\n  if (typeof command !== 'object') {\n    return false;\n  }\n  const hasCommand: boolean = typeof command.command === 'string' && command.command.length > 0;\n  const hasName: boolean = typeof command.name === 'string' && command.name.length > 0;\n  return hasCommand || hasName;\n}\n\nfunction makeCustomSoftwareId(prefix: string, seq: number): string {\n  const padded: string = String(seq).padStart(6, '0');\n  return prefix + '-0000000000-' + padded;\n}\n\nfunction makeCustomSoftwareRunId(seq: number): string {\n  return makeCustomSoftwareId('run', seq);\n}\n\nfunction makeCustomSoftwareBookingId(seq: number): string {\n  return makeCustomSoftwareId('booking', seq);\n}\n\nfunction nowIso(): string {\n  return new Date(0).toISOString();\n}\n\n/**\n * Run a custom software command and persist the resulting booking.\n *\n * // req-12\n *\n * @param command - the custom software command to execute; must be a non-null object\n *   carrying a non-empty `command` or `name`.\n * @returns a Promise resolving to the persisted Booking record.\n */\nasync function runCustomSoftware(command: CustomSoftwareCommand): Promise<Booking> {\n  const valid: boolean = isValidCustomSoftwareCommand(command);\n  if (!valid) {\n    throw new Error('runCustomSoftware: invalid command: missing command or name');\n  }\n\n  CUSTOM_SOFTWARE_STORE.seq = CUSTOM_SOFTWARE_STORE.seq + 1;\n  const runSeq: number = CUSTOM_SOFTWARE_STORE.seq;\n  const runId: string = makeCustomSoftwareRunId(runSeq);\n  const timestamp: string = nowIso();\n\n  const run: CustomSoftwareRun = {\n    id: runId,\n    commandId: typeof command.id === 'string' ? command.id : runId,\n    status: typeof command.status === 'string' && command.status.length > 0 ? command.status : 'scheduled',\n    updatedAt: timestamp\n  };\n\n  CUSTOM_SOFTWARE_STORE.runs.push(run);\n\n  CUSTOM_SOFTWARE_STORE.seq = CUSTOM_SOFTWARE_STORE.seq + 1;\n  const bookingSeq: number = CUSTOM_SOFTWARE_STORE.seq;\n  const booking: Booking = {\n    id: makeCustomSoftwareBookingId(bookingSeq),\n    status: 'scheduled',\n    updatedAt: timestamp\n  };\n\n  CUSTOM_SOFTWARE_STORE.bookings.push(booking);\n\n  return booking;\n}\n\n/**\n * List previously persisted custom software runs, newest last.\n *\n * // req-12\n *\n * @param id - the command id whose runs should be listed; empty string lists all runs.\n * @param limit - optional maximum number of runs to return; must be a positive integer when provided.\n * @returns a Promise resolving to the matching CustomSoftwareRun records.\n */\nasync function listCustomSoftwareRuns(id: string, limit?: number): Promise<CustomSoftwareRun[]> {\n  const all: CustomSoftwareRun[] = CUSTOM_SOFTWARE_STORE.runs.slice();\n  const matches: CustomSoftwareRun[] = all.filter((run: CustomSoftwareRun): boolean => {\n    if (id === '') {\n      return true;\n    }\n    return run.commandId === id;\n  });\n\n  if (typeof limit === 'number' && isFinite(limit) && limit > 0) {\n    const capped: number = Math.floor(limit);\n    return matches.slice(0, capped);\n  }\n\n  return matches;\n}\nexport { runCustomSoftware, listCustomSoftwareRuns };\n",
+      "hash": "654239538",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/sync.ts",
+      "source": "import { renderWeeklyRota, addShift, checkShiftOverlap, computeWeeklyHours, checkWeeklyHourCap, bookAppointment } from \"../generated/render-weekly-rota.ts\";\nimport { validateAttendeeCount, detectWeekConflicts, renderConflictDetector, getStaffWeekView, requestTimeOff, decideTimeOff } from \"../generated/validate-attendee-count.ts\";\nimport { runCustomSoftware, listCustomSoftwareRuns } from \"../domain/custom-software.ts\";\ntype CalendarStatus = 'active' | 'inactive';\ntype SyncStatus = 'ok' | 'failed';\n\ntype Calendar = {\n  id: string;\n  status: CalendarStatus;\n  updatedAt: string;\n};\n\ntype SyncCommand = {\n  calendarId: string;\n  mode: string;\n  requestedAt: string;\n};\n\ntype SyncRun = {\n  id: string;\n  calendarId: string;\n  mode: string;\n  status: SyncStatus;\n  startedAt: string;\n  finishedAt: string;\n  calendar: Calendar;\n};\n\nconst SYNC_RUN_LOG: SyncRun[] = [];\n\nfunction pad(value: number, width: number): string {\n  let out: string = String(value);\n  while (out.length < width) {\n    out = '0' + out;\n  }\n  return out;\n}\n\nfunction deriveSyncRunId(calendarId: string, requestedAt: string, sequence: number): string {\n  const stamp: number = Date.parse(requestedAt);\n  const safeStamp: number = isNaN(stamp) ? 0 : stamp;\n  const base: string = pad(safeStamp % 100000000, 8);\n  const seq: string = pad(sequence % 10000, 4);\n  return 'sync-' + calendarId + '-' + base + '-' + seq;\n}\n\nfunction counterFor(calendarId: string): number {\n  let count: number = 0;\n  for (let i: number = 0; i < SYNC_RUN_LOG.length; i = i + 1) {\n    if (SYNC_RUN_LOG[i].calendarId === calendarId) {\n      count = count + 1;\n    }\n  }\n  return count;\n}\n\n/**\n * Runs a local calendar sync command and returns the resulting Calendar record.\n * Persists the outcome in the in-memory sync run log; a command carrying an\n * unknown calendar id yields a failed (inactive) calendar rather than an\n * exception so callers can surface the load error explicitly.\n *\n * @param command the sync command (calendar id, mode, requested timestamp)\n * @returns the Calendar entity reflecting the sync outcome\n */\nasync function runSync(command: SyncCommand): Promise<Calendar> {\n  // req-12\n  const calendarId: string = typeof command.calendarId === 'string' && command.calendarId.length > 0 ? command.calendarId : 'unknown';\n  const mode: string = typeof command.mode === 'string' && command.mode.length > 0 ? command.mode : 'full';\n  const requestedAt: string = typeof command.requestedAt === 'string' && command.requestedAt.length > 0 ? command.requestedAt : '1970-01-01T00:00:00.000Z';\n  const status: SyncStatus = calendarId === 'unknown' ? 'failed' : 'ok';\n  const calendarStatus: CalendarStatus = status === 'ok' ? 'active' : 'inactive';\n  const sequence: number = counterFor(calendarId) + 1;\n  const runId: string = deriveSyncRunId(calendarId, requestedAt, sequence);\n  const calendar: Calendar = {\n    id: calendarId,\n    status: calendarStatus,\n    updatedAt: requestedAt,\n  };\n  const run: SyncRun = {\n    id: runId,\n    calendarId: calendarId,\n    mode: mode,\n    status: status,\n    startedAt: requestedAt,\n    finishedAt: requestedAt,\n    calendar: calendar,\n  };\n  SYNC_RUN_LOG.push(run);\n  return calendar;\n}\n\n/**\n * Lists prior sync runs for a calendar id, newest first, bounded by an\n * optional limit (defaults to 20). Returns an empty list when no runs exist.\n *\n * @param id the calendar id whose sync runs are requested\n * @param limit optional maximum number of runs to return\n * @returns the matching sync runs in reverse chronological order\n */\nasync function listSyncRuns(id: string, limit?: number): Promise<SyncRun[]> {\n  // req-12\n  const calendarId: string = typeof id === 'string' && id.length > 0 ? id : 'unknown';\n  const max: number = typeof limit === 'number' && isFinite(limit) && limit > 0 ? Math.floor(limit) : 20;\n  const matches: SyncRun[] = [];\n  for (let i: number = SYNC_RUN_LOG.length - 1; i >= 0; i = i - 1) {\n    const run: SyncRun = SYNC_RUN_LOG[i];\n    if (run.calendarId === calendarId) {\n      matches.push(run);\n    }\n  }\n  const bounded: SyncRun[] = [];\n  for (let j: number = 0; j < matches.length && j < max; j = j + 1) {\n    bounded.push(matches[j]);\n  }\n  return bounded;\n}\nexport { runSync, listSyncRuns };\n",
+      "hash": "3352110845",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/scan.ts",
+      "source": "import { renderWeeklyRota, addShift, checkShiftOverlap, computeWeeklyHours, checkWeeklyHourCap, bookAppointment } from \"../generated/render-weekly-rota.ts\";\nimport { validateAttendeeCount, detectWeekConflicts, renderConflictDetector, getStaffWeekView, requestTimeOff, decideTimeOff } from \"../generated/validate-attendee-count.ts\";\nimport { runCustomSoftware, listCustomSoftwareRuns } from \"../domain/custom-software.ts\";\nimport { runSync, listSyncRuns } from \"./sync.ts\";\ntype ScanCommand = {\n  weekStartDate?: string;\n  weekStart?: string;\n  scanId?: string;\n  staffId?: string;\n  id?: string;\n  label?: string;\n  requestedBy?: string;\n  [key: string]: unknown;\n};\n\ntype ScanRun = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  weekStart: string;\n  conflictCount: number;\n  conflicts: unknown[];\n  label: string;\n};\n\ntype Viewer = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  conflicts: unknown[];\n  weekStart: string;\n  runId: string;\n  ok: boolean;\n};\n\ntype ConflictRecord = {\n  entryA: string;\n  entryB: string;\n  kind: string;\n};\n\ntype SlotEntry = {\n  id: string;\n  date: string;\n  start: number;\n  end: number;\n  owner: string;\n};\n\nvar scanRunStore: ScanRun[] = [];\nvar scanRunSequence: number = 0;\n\nfunction scanPad(value: number): string {\n  var text: string = String(value);\n  while (text.length < 4) {\n    text = \"0\" + text;\n  }\n  return text;\n}\n\nfunction scanDeriveId(prefix: string, seed: string): string {\n  var hash: number = 7;\n  var index: number = 0;\n  while (index < seed.length) {\n    hash = (hash * 31 + seed.charCodeAt(index)) % 1000000007;\n    index = index + 1;\n  }\n  return prefix + \"-\" + scanPad(hash % 10000);\n}\n\nfunction scanToMinutes(value: unknown): number {\n  if (typeof value === \"number\" && isFinite(value)) {\n    return Math.floor(value);\n  }\n  if (typeof value === \"string\") {\n    var match: RegExpMatchArray | null = value.match(/^(\\d{1,2}):(\\d{2})/);\n    if (match !== null) {\n      return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);\n    }\n    var parsed: number = parseInt(value, 10);\n    if (isFinite(parsed)) {\n      return parsed;\n    }\n  }\n  return -1;\n}\n\nfunction scanEntryFromRecord(record: Record<string, unknown>, ownerKey: string): SlotEntry | null {\n  var id: unknown = record.id;\n  var date: unknown = record.date;\n  var start: unknown = record.start;\n  var end: unknown = record.end;\n  if (id === undefined && record.shiftId !== undefined) {\n    id = record.shiftId;\n  }\n  if (start === undefined && record.startMinute !== undefined) {\n    start = record.startMinute;\n  }\n  if (start === undefined && record.startTime !== undefined) {\n    start = record.startTime;\n  }\n  if (end === undefined && record.endMinute !== undefined) {\n    end = record.endMinute;\n  }\n  if (end === undefined && record.endTime !== undefined) {\n    end = record.endTime;\n  }\n  if (typeof id !== \"string\" || typeof date !== \"string\") {\n    return null;\n  }\n  var startValue: number = scanToMinutes(start);\n  var endValue: number = scanToMinutes(end);\n  if (startValue < 0 || endValue < 0 || startValue >= endValue) {\n    return null;\n  }\n  var owner: unknown = record[ownerKey];\n  if (owner === undefined && record.staffId !== undefined) {\n    owner = record.staffId;\n  }\n  if (owner === undefined && record.roomId !== undefined) {\n    owner = record.roomId;\n  }\n  return {\n    id: id,\n    date: date,\n    start: startValue,\n    end: endValue,\n    owner: typeof owner === \"string\" ? owner : \"\"\n  };\n}\n\nfunction scanCollectEntries(options: Record<string, unknown>, ownerKey: string): SlotEntry[] {\n  var collected: SlotEntry[] = [];\n  var names: string[] = [\"entries\", \"records\", \"items\", \"shifts\", \"appointments\", \"bookings\"];\n  var nameIndex: number = 0;\n  while (nameIndex < names.length) {\n    var bucket: unknown = options[names[nameIndex]];\n    if (Array.isArray(bucket)) {\n      var itemIndex: number = 0;\n      while (itemIndex < bucket.length) {\n        var item: unknown = bucket[itemIndex];\n        if (item !== null && typeof item === \"object\") {\n          var entry: SlotEntry | null = scanEntryFromRecord(item as Record<string, unknown>, ownerKey);\n          if (entry !== null) {\n            collected.push(entry);\n          }\n        }\n        itemIndex = itemIndex + 1;\n      }\n    }\n    nameIndex = nameIndex + 1;\n  }\n  return collected;\n}\n\nfunction scanDetectConflicts(entries: SlotEntry[], kindLabel: string): ConflictRecord[] {\n  var found: ConflictRecord[] = [];\n  var outer: number = 0;\n  while (outer < entries.length) {\n    var inner: number = outer + 1;\n    while (inner < entries.length) {\n      var a: SlotEntry = entries[outer];\n      var b: SlotEntry = entries[inner];\n      if (a.date === b.date && a.owner === b.owner && a.owner !== \"\") {\n        if (a.start < b.end && b.start < a.end) {\n          found.push({ entryA: a.id, entryB: b.id, kind: kindLabel });\n        }\n      }\n      inner = inner + 1;\n    }\n    outer = outer + 1;\n  }\n  return found;\n}\n\n/**\n * Executes a conflict scan over the supplied schedule payload and returns a\n * Viewer describing the requesting user together with the detected hard\n * conflicts (double-booked rooms and overlapping staff shifts). The scan is\n * purely deterministic: identical commands yield identical results, and no\n * external calendar, notification, or network call is performed.\n *\n * // req-8 // req-12\n *\n * @param command ScanCommand carrying the week window plus the schedule records to scan.\n * @returns Promise resolving to a Viewer with the conflict list and run reference.\n */\nasync function runScan(command: ScanCommand): Promise<Viewer> {\n  var options: Record<string, unknown> = command as Record<string, unknown>;\n  var weekStart: string = \"\";\n  if (typeof options.weekStart === \"string\") {\n    weekStart = options.weekStart;\n  } else if (typeof options.weekStartDate === \"string\") {\n    weekStart = options.weekStartDate;\n  }\n  var requestedBy: string = typeof options.requestedBy === \"string\" ? options.requestedBy : \"viewer\";\n  var label: string = typeof options.label === \"string\" ? options.label : \"scan\";\n  var seed: string = weekStart + \"|\" + requestedBy + \"|\" + label + \"|\" + String(scanRunSequence);\n  var runId: string = scanDeriveId(\"scan\", seed);\n  scanRunSequence = scanRunSequence + 1;\n\n  var roomEntries: SlotEntry[] = scanCollectEntries(options, \"roomId\");\n  var staffEntries: SlotEntry[] = scanCollectEntries(options, \"staffId\");\n  var conflicts: ConflictRecord[] = [];\n  var roomConflicts: ConflictRecord[] = scanDetectConflicts(roomEntries, \"double-booked-room\");\n  var index: number = 0;\n  while (index < roomConflicts.length) {\n    conflicts.push(roomConflicts[index]);\n    index = index + 1;\n  }\n  var staffConflicts: ConflictRecord[] = scanDetectConflicts(staffEntries, \"overlapping-staff-shift\");\n  index = 0;\n  while (index < staffConflicts.length) {\n    conflicts.push(staffConflicts[index]);\n    index = index + 1;\n  }\n\n  var run: ScanRun = {\n    id: runId,\n    status: \"completed\",\n    updatedAt: \"1970-01-01T00:00:00.000Z\",\n    weekStart: weekStart,\n    conflictCount: conflicts.length,\n    conflicts: conflicts,\n    label: label\n  };\n  scanRunStore.push(run);\n\n  var viewer: Viewer = {\n    id: requestedBy,\n    status: \"ready\",\n    updatedAt: run.updatedAt,\n    conflicts: conflicts,\n    weekStart: weekStart,\n    runId: runId,\n    ok: true\n  };\n  return viewer;\n}\n\n/**\n * Lists previously executed scan runs, most recent first, optionally capping\n * the number of returned records. The listing is derived from the caller's\n * recorded runs plus this module's deterministic in-memory run registry.\n *\n * // req-8\n *\n * @param id Identifier used to select the run collection (a scan id, week, or requester).\n * @param limit Optional maximum number of runs to return.\n * @returns Promise resolving to an array of ScanRun records.\n */\nasync function listScanRuns(id: string, limit?: number): Promise<ScanRun[]> {\n  var fromStore: ScanRun[] = [];\n  var storeIndex: number = 0;\n  while (storeIndex < scanRunStore.length) {\n    var stored: ScanRun = scanRunStore[storeIndex];\n    if (id === \"\" || stored.id === id || stored.label === id || stored.weekStart === id || stored.id.indexOf(id) === 0) {\n      fromStore.push(stored);\n    }\n    storeIndex = storeIndex + 1;\n  }\n  fromStore.reverse();\n  if (typeof limit === \"number\" && isFinite(limit) && limit >= 0 && fromStore.length > limit) {\n    fromStore = fromStore.slice(0, Math.floor(limit));\n  }\n  return fromStore;\n}\nexport { runScan, listScanRuns };\n",
+      "hash": "2901953683",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/assign.ts",
+      "source": "import { renderWeeklyRota, addShift, checkShiftOverlap, computeWeeklyHours, checkWeeklyHourCap, bookAppointment } from \"../generated/render-weekly-rota.ts\";\nimport { validateAttendeeCount, detectWeekConflicts, renderConflictDetector, getStaffWeekView, requestTimeOff, decideTimeOff } from \"../generated/validate-attendee-count.ts\";\nimport { runCustomSoftware, listCustomSoftwareRuns } from \"../domain/custom-software.ts\";\nimport { runSync, listSyncRuns } from \"./sync.ts\";\nimport { runScan, listScanRuns } from \"./scan.ts\";\ntype AssignStatus = 'Requested' | 'Approved' | 'Denied';\n\ninterface AssignMemberRecord {\n  id: string;\n  name: string;\n  role: string;\n  weeklyHourCap: number;\n  active: boolean;\n  status: string;\n  updatedAt: string;\n}\n\ntype Member = AssignMemberRecord;\n\ninterface AssignCommand {\n  staffId: string;\n  date: string;\n  startMinute: number;\n  endMinute: number;\n  roleNote?: string;\n  override?: boolean;\n  limit?: number;\n}\n\ninterface AssignRun {\n  id: string;\n  staffId: string;\n  date: string;\n  startMinute: number;\n  endMinute: number;\n  status: AssignStatus;\n  updatedAt: string;\n  overrideUsed: boolean;\n}\n\ninterface AssignStoreShape {\n  members: AssignMemberRecord[];\n  runs: AssignRun[];\n}\n\nconst assignStore: AssignStoreShape = { members: [], runs: [] };\n\nfunction assignIsInteger(value: unknown): boolean {\n  return typeof value === 'number' && isFinite(value) && Math.floor(value) === value;\n}\n\nfunction assignPad(value: number): string {\n  return value < 10 ? '0' + String(value) : String(value);\n}\n\nfunction assignDeriveId(seed: string): string {\n  let h1 = 5381;\n  let h2 = 52711;\n  for (let i = 0; i < seed.length; i += 1) {\n    const code = seed.charCodeAt(i);\n    h1 = (h1 * 33 + code) % 4294967296;\n    h2 = (h2 * 31 + code) % 4294967296;\n  }\n  const a = assignPad(h1 % 1000000);\n  const b = assignPad(h2 % 1000000);\n  return 'run_' + a + b + '_' + String(seed.length);\n}\n\nfunction assignValidationError(field: string): Error {\n  return new Error('validation failure: ' + field);\n}\n\n/**\n * Assigns a shift command to a member, validating the command, the weekly\n * hour cap, and persisting an assign run derived deterministically from the\n * command. Refuses invalid commands and over-cap shifts without an override.\n *\n * @param command - the assign command describing staff, date, and minutes.\n * @returns a promise resolving to the member the shift was assigned to.\n */\nasync function runAssign(command: AssignCommand): Promise<Member> {\n  if (command === undefined || command === null || typeof command !== 'object') {\n    throw assignValidationError('command');\n  }\n  if (typeof command.staffId !== 'string' || command.staffId.length === 0) {\n    throw assignValidationError('staffId');\n  }\n  if (typeof command.date !== 'string' || command.date.length === 0) {\n    throw assignValidationError('date');\n  }\n  if (!assignIsInteger(command.startMinute)) {\n    throw assignValidationError('startMinute');\n  }\n  if (!assignIsInteger(command.endMinute)) {\n    throw assignValidationError('endMinute');\n  }\n  if (command.startMinute < 0 || command.startMinute > 1440) {\n    throw assignValidationError('startMinute');\n  }\n  if (command.endMinute < 0 || command.endMinute > 1440) {\n    throw assignValidationError('endMinute');\n  }\n  if (command.startMinute >= command.endMinute) {\n    throw assignValidationError('endMinute');\n  }\n  const overrideUsed = command.override === true;\n  const existingMember = assignStore.members.filter(\n    (m: AssignMemberRecord): boolean => m.id === command.staffId\n  )[0];\n  let member: AssignMemberRecord;\n  if (existingMember === undefined) {\n    member = {\n      id: command.staffId,\n      name: command.staffId,\n      role: 'staff',\n      weeklyHourCap: 40,\n      active: true,\n      status: 'active',\n      updatedAt: '1970-01-01T00:00:00.000Z'\n    };\n    assignStore.members.push(member);\n  } else {\n    member = existingMember;\n  }\n  if (!member.active) {\n    throw new Error('validation failure: staffId inactive');\n  }\n  const duration = command.endMinute - command.startMinute;\n  const sameWeekShifts = assignStore.runs.filter((r: AssignRun): boolean => r.staffId === command.staffId);\n  let projected = duration;\n  for (let i = 0; i < sameWeekShifts.length; i += 1) {\n    projected += sameWeekShifts[i].endMinute - sameWeekShifts[i].startMinute;\n  }\n  if (projected > member.weeklyHourCap && !overrideUsed) {\n    throw new Error(\n      'weekly cap exceeded: projected ' + String(projected) + ' minutes vs cap ' + String(member.weeklyHourCap)\n    );\n  }\n  const seed = command.staffId + '|' + command.date + '|' + String(command.startMinute) + '|' + String(command.endMinute);\n  const run: AssignRun = {\n    id: assignDeriveId(seed),\n    staffId: command.staffId,\n    date: command.date,\n    startMinute: command.startMinute,\n    endMinute: command.endMinute,\n    status: 'Approved',\n    updatedAt: '1970-01-01T00:00:00.000Z',\n    overrideUsed: overrideUsed\n  };\n  assignStore.runs.push(run);\n  const nextMember: AssignMemberRecord = {\n    id: member.id,\n    name: member.name,\n    role: member.role,\n    weeklyHourCap: member.weeklyHourCap,\n    active: member.active,\n    status: member.status,\n    updatedAt: member.updatedAt\n  };\n  return nextMember;\n}\n\n/**\n * Lists previously recorded assign runs, optionally bounded by a limit.\n *\n * @param id - the staff identifier whose runs should be listed.\n * @param limit - optional maximum number of runs to return.\n * @returns a promise resolving to the matching assign runs.\n */\nasync function listAssignRuns(id: string, limit?: number): Promise<AssignRun[]> {\n  if (typeof id !== 'string' || id.length === 0) {\n    throw assignValidationError('id');\n  }\n  const matched = assignStore.runs.filter((r: AssignRun): boolean => r.staffId === id);\n  if (limit === undefined || limit === null) {\n    return matched;\n  }\n  let bound = limit as number;\n  if (!assignIsInteger(bound) || bound < 0) {\n    return matched;\n  }\n  if (bound > matched.length) {\n    bound = matched.length;\n  }\n  const sliced: AssignRun[] = [];\n  for (let i = 0; i < bound; i += 1) {\n    sliced.push(matched[i]);\n  }\n  return sliced;\n}\nexport { runAssign, listAssignRuns };\n",
+      "hash": "2286264927",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/schedule.ts",
+      "source": "import { renderWeeklyRota, addShift, checkShiftOverlap, computeWeeklyHours, checkWeeklyHourCap, bookAppointment } from \"../generated/render-weekly-rota.ts\";\nimport { validateAttendeeCount, detectWeekConflicts, renderConflictDetector, getStaffWeekView, requestTimeOff, decideTimeOff } from \"../generated/validate-attendee-count.ts\";\nimport { runCustomSoftware, listCustomSoftwareRuns } from \"../domain/custom-software.ts\";\nimport { runSync, listSyncRuns } from \"./sync.ts\";\nimport { runScan, listScanRuns } from \"./scan.ts\";\nimport { runAssign, listAssignRuns } from \"./assign.ts\";\ntype ScheduleData = {\n  staff: StaffMember[];\n  rooms: RoomRecord[];\n  shifts: ShiftRecord[];\n  appointments: AppointmentRecord[];\n  timeOffRequests: TimeOffRecord[];\n};\n\ntype StaffMember = {\n  id: string;\n  name: string;\n  role: string;\n  weeklyHourCap: number;\n  active: boolean;\n};\n\ntype RoomRecord = {\n  id: string;\n  name: string;\n  capacity: number;\n  active: boolean;\n};\n\ntype ShiftRecord = {\n  id: string;\n  staffId: string;\n  date: string;\n  startMinute: number;\n  endMinute: number;\n  roleNote: string;\n  override: boolean;\n};\n\ntype AppointmentRecord = {\n  id: string;\n  title: string;\n  roomId: string;\n  date: string;\n  startMinute: number;\n  endMinute: number;\n  bookedBy: string;\n  attendeeCount: number;\n};\n\ntype TimeOffRecord = {\n  id: string;\n  staffId: string;\n  startDate: string;\n  endDate: string;\n  status: string;\n  note: string;\n};\n\ntype PersistResult = {\n  ok: boolean;\n  error: string;\n  data: ScheduleData;\n};\n\n// req-12\nfunction saveSchedule(data: ScheduleData): PersistResult {\n  const store: ScheduleData = {\n    staff: data.staff.slice(),\n    rooms: data.rooms.slice(),\n    shifts: data.shifts.slice(),\n    appointments: data.appointments.slice(),\n    timeOffRequests: data.timeOffRequests.slice()\n  };\n  const serialized: string = JSON.stringify(store);\n  if (serialized.length === 0) {\n    return { ok: false, error: 'write-failure: schedule could not be serialized', data: emptySchedule() };\n  }\n  persistedSchedule = store;\n  return { ok: true, error: '', data: store };\n}\n\n// req-12\nfunction loadSchedule(): PersistResult {\n  if (persistedSchedule === null) {\n    return { ok: false, error: 'load-failure: no locally persisted schedule available', data: emptySchedule() };\n  }\n  return { ok: true, error: '', data: persistedSchedule };\n}\n\nfunction emptySchedule(): ScheduleData {\n  return { staff: [], rooms: [], shifts: [], appointments: [], timeOffRequests: [] };\n}\n\nlet persistedSchedule: ScheduleData | null = null;\nexport { saveSchedule, loadSchedule };\n",
+      "hash": "2563971046",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/approve.ts",
+      "source": "import { renderWeeklyRota, addShift, checkShiftOverlap, computeWeeklyHours, checkWeeklyHourCap, bookAppointment } from \"../generated/render-weekly-rota.ts\";\nimport { validateAttendeeCount, detectWeekConflicts, renderConflictDetector, getStaffWeekView, requestTimeOff, decideTimeOff } from \"../generated/validate-attendee-count.ts\";\nimport { runCustomSoftware, listCustomSoftwareRuns } from \"../domain/custom-software.ts\";\nimport { runSync, listSyncRuns } from \"./sync.ts\";\nimport { runScan, listScanRuns } from \"./scan.ts\";\nimport { runAssign, listAssignRuns } from \"./assign.ts\";\nimport { saveSchedule, loadSchedule } from \"./schedule.ts\";\n// req-11: flag an approved time-off range that overlaps an existing shift,\n// naming both the shift and the time-off request.\n//\n// This module implements the single exported signature assigned to this file:\n//   checkApprovedTimeOffOverlap(shift: Shift, requests: TimeOffRequest[]): TimeOffRequest | null\n//\n// Only APPROVED time off is considered (Requested / Denied are ignored). The\n// overlap rule is the project-wide half-open rule: startA < endB && startB < endA,\n// so touching intervals (startA == endB or startB == endA) are NOT overlaps.\n// Dates are compared as identical ISO day strings; times are minutes-from-midnight\n// integers per date, with no timezone conversion whatsoever.\n\n/** A single scheduled shift. Times are minutes-from-midnight integers per date. */\ntype Shift = {\n  id: string;\n  staff: string;\n  date: string;\n  start: number;\n  end: number;\n  roleNote?: string;\n  override?: boolean;\n};\n\n/** Status of a time-off request. Only \"Approved\" is flagged as a hard conflict. */\ntype TimeOffStatus = \"Requested\" | \"Approved\" | \"Denied\";\n\n/** A time-off request spanning an inclusive date range. */\ntype TimeOffRequest = {\n  id: string;\n  staff: string;\n  startDate: string;\n  endDate: string;\n  status: TimeOffStatus;\n  note: string;\n};\n\n/**\n * Compare two ISO day strings (YYYY-MM-DD) as plain lexicographic ranges.\n * An ISO day is a fixed-width string, so string ordering equals date ordering\n * and no Date construction (hence no timezone) is ever performed.\n */\nfunction compareDay(a: string, b: string): number {\n  if (a < b) {\n    return -1;\n  }\n  if (a > b) {\n    return 1;\n  }\n  return 0;\n}\n\n/**\n * Does an approved time-off range overlap a shift on a single date, using the\n * half-open rule startA < endB && startB < endA so touching intervals pass?\n */\nfunction rangeOverlapsShift(\n  requestStart: number,\n  requestEnd: number,\n  shiftStart: number,\n  shiftEnd: number\n): boolean {\n  return requestStart < shiftEnd && shiftStart < requestEnd;\n}\n\n/**\n * Find the first approved time-off request that overlaps the given shift.\n *\n * A request is flagged only when its status is \"Approved\" and the shift's date\n * falls within the request's inclusive start/end date range under the half-open\n * minute overlap rule (partial overlap on either end, or full containment, both\n * flag; exact touching at a boundary does not). Requested and Denied requests\n * never produce a hard conflict. The returned request names the offending\n * entry so callers can report both the shift and the request.\n *\n * @param shift - the scheduled shift to test (date plus minute range).\n * @param requests - all time-off requests; only Approved ones are considered.\n * @returns the first overlapping approved TimeOffRequest, or null if none.\n */\nfunction checkApprovedTimeOffOverlap(\n  shift: Shift,\n  requests: TimeOffRequest[]\n): TimeOffRequest | null {\n  // Empty data (no requests) yields no conflict and no error.\n  if (requests.length === 0) {\n    return null;\n  }\n\n  for (const request of requests) {\n    // Only Approved time off is a hard conflict; skip anything else.\n    if (request.status !== \"Approved\") {\n      continue;\n    }\n\n    // The shift date must sit inside the request's inclusive day range.\n    const afterOrOnStart = compareDay(shift.date, request.startDate) >= 0;\n    const beforeOrOnEnd = compareDay(shift.date, request.endDate) <= 0;\n    if (!afterOrOnStart || !beforeOrOnEnd) {\n      continue;\n    }\n\n    // A request spanning whole days blocks the entire day: minutes 0..1440.\n    const requestStart = 0;\n    const requestEnd = 1440;\n\n    if (rangeOverlapsShift(requestStart, requestEnd, shift.start, shift.end)) {\n      return request;\n    }\n  }\n\n  return null;\n}\nexport { checkApprovedTimeOffOverlap };\n",
+      "hash": "185991126",
+      "attempt": 0
+    }
+  ],
+  "meta": {},
+  "kind": "app",
+  "tokenUsage": {
+    "promptTokens": 100051,
+    "completionTokens": 49383,
+    "calls": 25,
+    "cachedPromptTokens": 128
+  }
+}

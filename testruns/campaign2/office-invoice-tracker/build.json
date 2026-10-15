@@ -1,0 +1,1537 @@
+{
+  "id": "fe92284a-715d-4a54-9f3d-7fac87177ce5",
+  "name": "Ledgeline",
+  "brief": "# Ledgeline — Office Invoice & Expense Tracker\n\n## What this is\nAn internal office tool for tracking supplier invoices and staff expenses from\nreceipt through to payment. It replaces a spreadsheet and gives the office\nmanager a single ageing view of what is owed and what is overdue.\n\n## Users\n- **Office manager** — enters invoices, marks them paid, chases overdue.\n- **Employee** — submits an expense claim with a receipt reference.\n- **Approver** — approves or rejects expense claims.\n\n## Core domain\n- **Supplier**: id, name, email, payment terms (days).\n- **Invoice**: id, number, supplier, issue date, due date, amount (integer\n  pence), tax amount, status (Draft | Submitted | Approved | Paid | Overdue |\n  Cancelled), notes.\n- **ExpenseClaim**: id, employee name, date incurred, category (Travel |\n  Meals | Equipment | Software | Other), amount (pence), receipt reference,\n  status (Draft | Submitted | Approved | Rejected | Reimbursed), decision note.\n\n## Required features\n1. **Invoice list** — table with supplier, number, dates, amount, status, and an\n   \"age\" column (days since due; overdue highlighted). Filter by status and\n   supplier, search by number/supplier, sort by due date or amount.\n2. **Add / edit invoice** — validate: number required and unique, supplier\n   required, amount > 0, tax >= 0 and <= amount, due date on/after issue date.\n   Computes due date from the supplier's terms when not given explicitly.\n3. **Status ageing** — an invoice becomes Overdue automatically when its due\n   date has passed and it is not Paid/Cancelled; a \"refresh\" recomputes this\n   from the data (never a manual flag alone).\n4. **Expense claims** — submit, approve, reject (rejection requires a note of at\n   least 8 characters), and mark reimbursed. A rejected claim cannot be\n   reimbursed; an approved claim cannot be re-approved.\n5. **Dashboard** — totals: total outstanding, total overdue, count by status,\n   and expenses awaiting approval. A simple bar breakdown by supplier of the\n   top five outstanding.\n6. **Export** — a CSV of the currently filtered invoice list (columns: number,\n   supplier, issue, due, amount, tax, status, age).\n\n## Functional requirements\n- All money in integer pence; arithmetic (totals, outstanding, overdue sums) is\n  exact; display in GBP.\n- Ageing and dashboard totals derive from the stored records each time they are\n  requested (no stale cached totals).\n- Status transitions constrained: Draft→Submitted→Approved→Paid; Submitted→\n  Cancelled; a Paid invoice is terminal.\n- Expense rejection note rule enforced (>= 8 chars) with a clear error.\n- CSV export must quote fields containing commas/quotes correctly.\n\n## Non-functional requirements\n- Desktop-first, usable to 768px; accessible data tables with proper headers.\n- Deterministic core calculations separated from UI for unit testing.\n- Local persistence; no external services needed to run.\n\n## Explicitly out of scope\n- Bank feed / open-banking integration.\n- Real OCR of receipts.\n- Multi-currency (GBP only).\n- Payroll or tax filing.",
+  "domain": "finance-ops",
+  "createdAt": 1791192699567,
+  "status": "awaiting_hitl",
+  "currentPhase": 6,
+  "phases": [
+    {
+      "id": 0,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3269632901",
+        "checkedAt": 1791192704153
+      },
+      "startedAt": 1791192700333,
+      "completedAt": 1791192700365
+    },
+    {
+      "id": 1,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1050713914",
+        "checkedAt": 1791192704176
+      },
+      "startedAt": 1791192704159,
+      "completedAt": 1791192704164
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1845537766",
+        "checkedAt": 1791192704193
+      },
+      "startedAt": 1791192704183,
+      "completedAt": 1791192704185
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1638292844",
+        "checkedAt": 1791192704210
+      },
+      "startedAt": 1791192704198,
+      "completedAt": 1791192704201
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3527188654",
+        "checkedAt": 1791192704231
+      },
+      "startedAt": 1791192704215,
+      "completedAt": 1791192704228
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "2951452883",
+        "checkedAt": 1791192704256
+      },
+      "startedAt": 1791192704236,
+      "completedAt": 1791192704249
+    },
+    {
+      "id": 6,
+      "status": "awaiting_hitl",
+      "rejectionHistory": [],
+      "gate": null,
+      "startedAt": 1791192704263
+    },
+    {
+      "id": 7,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 8,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 9,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 10,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 11,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 12,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    }
+  ],
+  "scorecard": {
+    "overall": 7.4,
+    "verdict": "proceed-with-guards",
+    "axes": [
+      {
+        "key": "feasibility",
+        "label": "Technical feasibility",
+        "score": 3,
+        "note": "Typed contracts + sequential graph."
+      },
+      {
+        "key": "scale",
+        "label": "Scale headroom",
+        "score": 9,
+        "note": "Stateless workers + durable checkpoints."
+      },
+      {
+        "key": "security",
+        "label": "Security posture",
+        "score": 10,
+        "note": "Scheduler Δ2."
+      },
+      {
+        "key": "api",
+        "label": "API / rate-limit risk",
+        "score": 7,
+        "note": "Live-tool Δ1."
+      },
+      {
+        "key": "delivery",
+        "label": "Delivery confidence",
+        "score": 8,
+        "note": "Phased graph prevents skipped work."
+      }
+    ],
+    "bottlenecks": [
+      "Long-running tools must stream over WebSocket MCP.",
+      "HITL rejection without a qualitative note is illegal.",
+      "Constraint: deterministic",
+      "Constraint: local-first"
+    ],
+    "attackVectors": [
+      "Prompt injection via ingested competitor pages.",
+      "Tool-call privilege escalation if OAuth scopes are inherited.",
+      "Sandbox escape if generated exec has network."
+    ],
+    "libraries": [
+      {
+        "name": "TanStack Start",
+        "role": "Typed app shell and file routes"
+      },
+      {
+        "name": "Zod",
+        "role": "Schema lock on generated artifacts"
+      },
+      {
+        "name": "Ledger + payments SDK",
+        "role": "Tax-ready books"
+      }
+    ]
+  },
+  "competitors": [],
+  "artifacts": [
+    {
+      "id": "0-scorecard-feasibility-architecture-scoreca",
+      "phase": 0,
+      "kind": "scorecard",
+      "title": "Feasibility & Architecture Scorecard",
+      "body": "# Ledgeline — Phase 0 scorecard\n\nDomain: finance-ops\nOverall: 7.4 / 10 — proceed-with-guards\nLattice jobs: invoice, approve, quote, track, search, record, validate, test\nEntities: invoice, manager, dashboard, column, table, user, viewer, file, rule, cache, payroll\nConstraints: deterministic, local-first\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 10/10 — Scheduler Δ2.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n- Constraint: deterministic\n- Constraint: local-first\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- Ledger + payments SDK: Tax-ready books"
+    },
+    {
+      "id": "0-algorithm-intent-lattice-a1",
+      "phase": 0,
+      "kind": "algorithm",
+      "title": "Intent Lattice (A1)",
+      "body": "{\n  \"domain\": \"finance-ops\",\n  \"jobs\": [\n    \"invoice\",\n    \"approve\",\n    \"quote\",\n    \"track\",\n    \"search\",\n    \"record\",\n    \"validate\",\n    \"test\"\n  ],\n  \"entities\": [\n    \"invoice\",\n    \"manager\",\n    \"dashboard\",\n    \"column\",\n    \"table\",\n    \"user\",\n    \"viewer\",\n    \"file\",\n    \"rule\",\n    \"cache\",\n    \"payroll\"\n  ],\n  \"constraints\": [\n    \"deterministic\",\n    \"local-first\"\n  ],\n  \"nodes\": [\n    {\n      \"kind\": \"job\",\n      \"label\": \"invoice\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"approve\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"invoice\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"manager\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"quote\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"track\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"dashboard\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"column\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"table\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"risk\",\n      \"label\": \"payment\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"deterministic\",\n      \"weight\": 0.7000000000000001\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"user\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"viewer\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"search\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"record\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"validate\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"test\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"file\",\n      \"weight\": 0.55\n    }\n  ],\n  \"complexity\": 10,\n  \"vague\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "research-0-0-1791192704152",
+      "phase": 0,
+      "kind": "research",
+      "title": "Free Payment Deadline Calculator for Construction Invoices (2026)",
+      "body": "# Free Payment Deadline Calculator for Construction Invoices (2026)\n\nFree calculator: enter invoice date and contract terms, see when payment is due and how late it is. Built for U.S. construction GCs and subs. No signup.\n\nSource: https://www.liendone.com/tools/payment-deadline",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-1-1791192704152",
+      "phase": 0,
+      "kind": "research",
+      "title": "Architecture Billing Index (ABI) June 2026 - AIA",
+      "body": "# Architecture Billing Index (ABI) June 2026 - AIA\n\nBusiness conditions at architecture firms remained soft in June The AIA/Deltek Architecture Billings Index ® (ABI) score for the month was 47.3. While this score is nearly three points higher than the May score, it still indicates that a majority of firms reported a decline in billings this month, although fewer firms reported a decline than last month. Architecture firms remain mired in one ...\n\nSource: https://www.aia.org/resource-center/abi-june-2026-billings-remain-weak-architecture-firms",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-2-1791192704152",
+      "phase": 0,
+      "kind": "research",
+      "title": "Architecture Invoice Template: What to Include and How to Get Paid ...",
+      "body": "# Architecture Invoice Template: What to Include and How to Get Paid ...\n\nAn architecture invoice template with phase-based line items, a sample invoice , and payment terms that get architects paid faster. Build one free, no signup.\n\nSource: https://www.filecurrent.com/blog/architecture-invoice-template",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-3-1791192704152",
+      "phase": 0,
+      "kind": "research",
+      "title": "Architect Invoice Templates and Samples for All Billing Methods",
+      "body": "# Architect Invoice Templates and Samples for All Billing Methods\n\nGet professional architect invoice templates built for real-world billing. Each format parallels the invoicing options available in BQE CORE, with editable fields for phases, reimbursables, taxes, and more. Inside this article: Different types of architect invoice templates Basic elements of any architecture invoice International invoice considerations for architects Easiest way to simplify ...\n\nSource: https://www.bqe.com/blog/architect-invoice-templates-samples",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-4-1791192704152",
+      "phase": 0,
+      "kind": "research",
+      "title": "Architecture Billing Index (ABI) May 2026 - AIA",
+      "body": "# Architecture Billing Index (ABI) May 2026 - AIA\n\nThe AIA/Deltek Architecture Billings Index® (ABI) is a diffusion index derived from the monthly Work-on-the-Boards survey, conducted by the AIA Economics & Market Research Group. The ABI serves as a leading economic indicator that leads nonresidential construction activity by approximately 9-12 months. The survey panel asks participants whether their billings increased, decreased, or stayed ...\n\nSource: https://www.aia.org/resource-center/abi-may-2026-architecture-firm-billings-weaken-further",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-0-1791192704152",
+      "phase": 0,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "**P0 Deep Research & Feasibility — Ledgeline**\n\nDesk research confirms a real, bounded problem and a clear wedge for Ledgeline's phase-based invoice and expense tracking. Construction and architecture billing is demonstrably under pressure—the AIA/Deltek ABI sat at 47.3 in June 2026 (soft, though nearly three points up from May)—which sharpens demand for tools that surface what is owed and overdue. Existing free offerings split into two camps: deadline/late-payment calculators built for U.S. construction GCs and subs (invoice date + contract terms → due date and days late, no signup) and architecture-specific invoice templates covering phase-based line items, reimbursables, taxes, and multiple billing methods (including formats paralleling BQE CORE). Both validate the core mechanics Ledgeline needs—phase-based line items, contract terms driving due dates, and a single ageing view—but they solve the problem in isolation: calculators don't track expenses, templates don't age receivables, and none give an office manager one ledger from receipt to payment. Feasibility is strong: the required primitives are well-established, the competitive gap is the connective tissue between invoicing and expense submission, and the clearest risk is scope—Ledgeline should win by nailing the office manager's ageing view rather than out-featuring dedicated billing suites.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p0-32696329",
+      "phase": 0,
+      "kind": "gate",
+      "title": "DoD gate — P0",
+      "body": "# DoD gate — P0\n\n**Result: PASS**\n\nAll criteria met for phase 0.\n\nEvidence hash: 3269632901",
+      "language": "markdown"
+    },
+    {
+      "id": "1-graph-execution-topology-this-build",
+      "phase": 1,
+      "kind": "graph",
+      "title": "Execution topology (this build)",
+      "body": "Sequential pipeline: invoice → approve → quote → track → search → record\nState entities: invoice, manager, dashboard, column, table, user, viewer, file, rule, cache, payroll\n\nEach step advances a invoice through its lifecycle in the finance operations domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over invoices; no parallel, event, or failover topology is claimed beyond what the brief states.",
+      "language": "text"
+    },
+    {
+      "id": "gate-p1-10507139",
+      "phase": 1,
+      "kind": "gate",
+      "title": "DoD gate — P1",
+      "body": "# DoD gate — P1\n\n**Result: PASS**\n\nAll criteria met for phase 1.\n\nEvidence hash: 1050713914",
+      "language": "markdown"
+    },
+    {
+      "id": "2-memory-data-model-retrieval",
+      "phase": 2,
+      "kind": "memory",
+      "title": "Data model & retrieval",
+      "body": "Records: invoice, manager, dashboard, column, table, user, viewer, file, rule, cache, payroll\nOperations: invoice, approve, quote, track, search, record, validate, test\n\nEach invoice is the unit of state; invoice steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
+    },
+    {
+      "id": "gate-p2-18455377",
+      "phase": 2,
+      "kind": "gate",
+      "title": "DoD gate — P2",
+      "body": "# DoD gate — P2\n\n**Result: PASS**\n\nAll criteria met for phase 2.\n\nEvidence hash: 1845537766",
+      "language": "markdown"
+    },
+    {
+      "id": "3-mcp-integration-surface-declared",
+      "phase": 3,
+      "kind": "mcp",
+      "title": "Integration surface (declared)",
+      "body": "{\n  \"domain\": \"finance-ops\",\n  \"surface\": [\n    \"ledger & payments\",\n    \"tax-ready export\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p3-16382928",
+      "phase": 3,
+      "kind": "gate",
+      "title": "DoD gate — P3",
+      "body": "# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844",
+      "language": "markdown"
+    },
+    {
+      "id": "4-security-security-authorization-policy",
+      "phase": 4,
+      "kind": "security",
+      "title": "Security & authorization policy",
+      "body": "Protected data: invoice, manager, dashboard, column, table, user (the brief's own entities).\nAccess model: manager, user, viewer — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the invoices its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive invoice data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
+    },
+    {
+      "id": "gate-p4-35271886",
+      "phase": 4,
+      "kind": "gate",
+      "title": "DoD gate — P4",
+      "body": "# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654",
+      "language": "markdown"
+    },
+    {
+      "id": "5-validation-validation-hitl-contract",
+      "phase": 5,
+      "kind": "validation",
+      "title": "Validation + HITL contract",
+      "body": "Validation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap."
+    },
+    {
+      "id": "gate-p5-29514528",
+      "phase": 5,
+      "kind": "gate",
+      "title": "DoD gate — P5",
+      "body": "# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883",
+      "language": "markdown"
+    },
+    {
+      "id": "6-code-p6-placeholder-module-determinis",
+      "phase": 6,
+      "kind": "code",
+      "title": "P6 placeholder module (deterministic template)",
+      "body": "const JOBS = [\"invoice\", \"approve\", \"quote\", \"track\", \"search\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Ledgeline\", phase: 6, job: \"invoice\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"invoice\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"invoice\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"invoice\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+      "language": "javascript"
+    },
+    {
+      "id": "6-code-sandbox-result",
+      "phase": 6,
+      "kind": "code",
+      "title": "Sandbox result",
+      "body": "{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "6-docs-p6-architecture-trace-reqtrace",
+      "phase": 6,
+      "kind": "docs",
+      "title": "P6 architecture trace (reqTrace)",
+      "body": "# P6 architecture trace (reqTrace)\n\n**p6-arch: FAIL** · tree (2 files)\n\n- invoice → src/generated/compute-age.ts\n- approve → src/generated/compute-age.ts\n- validate → src/generated/compute-age.ts\n\nMissing capabilities (no tree file carries their identifiers):\n- quote\n- track\n- search\n- test\n\n> reqTrace: capability → tree file(s), computed by p6-arch over generatedTree code identifiers (stemmed; literals/comments masked).",
+      "language": "markdown"
+    },
+    {
+      "id": "packet-6",
+      "phase": 6,
+      "kind": "packet",
+      "title": "Agent packet (A4)",
+      "body": "# RapidTool Agent Packet v3 — Ledgeline\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T09:33:23.652Z\nproject_id: fe92284a-715d-4a54-9f3d-7fac87177ce5\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P6 Code Generation, Testing & Deployment) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T09:33:23.652Z\",\n  \"project_id\": \"fe92284a-715d-4a54-9f3d-7fac87177ce5\",\n  \"name\": \"Ledgeline\",\n  \"project_status\": \"awaiting_hitl\",\n  \"current_phase\": {\n    \"id\": 6,\n    \"code\": \"P6\",\n    \"title\": \"Code Generation, Testing & Deployment\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"3268318407\",\n  \"input_hash\": \"165033028\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791192704218,\n      \"decided_at\": 1791192704228\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791192704238,\n      \"decided_at\": 1791192704249\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"awaiting_hitl\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 9,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 10,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 6,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 0,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 37599,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Ledgeline — Office Invoice & Expense Tracker\n\n## What this is\nAn internal office tool for tracking supplier invoices and staff expenses from\nreceipt through to payment. It replaces a spreadsheet and gives the office\nmanager a single ageing view of what is owed and what is overdue.\n\n## Users\n- **Office manager** — enters invoices, marks them paid, chases overdue.\n- **Employee** — submits an expense claim with a receipt reference.\n- **Approver** — approves or rejects expense claims.\n\n## Core domain\n- **Supplier**: id, name, email, payment terms (days).\n- **Invoice**: id, number, supplier, issue date, due date, amount (integer\n  pence), tax amount, status (Draft | Submitted | Approved | Paid | Overdue |\n  Cancelled), notes.\n- **ExpenseClaim**: id, employee name, date incurred, category (Travel |\n  Meals | Equipment | Software | Other), amount (pence), receipt reference,\n  status (Draft | Submitted | Approved | Rejected | Reimbursed), decision note.\n\n## Required features\n1. **Invoice list** — table with supplier, number, dates, amount, status, and an\n   \"age\" column (days since due; overdue highlighted). Filter by status and\n   supplier, search by number/supplier, sort by due date or amount.\n2. **Add / edit invoice** — validate: number required and unique, supplier\n   required, amount > 0, tax >= 0 and <= amount, due date on/after issue date.\n   Computes due date from the supplier's terms when not given explicitly.\n3. **Status ageing** — an invoice becomes Overdue automatically when its due\n   date has passed and it is not Paid/Cancelled; a \"refresh\" recomputes this\n   from the data (never a manual flag alone).\n4. **Expense claims** — submit, approve, reject (rejection requires a note of at\n   least 8 characters), and mark reimbursed. A rejected claim cannot be\n   reimbursed; an approved claim cannot be re-approved.\n5. **Dashboard** — totals: total outstanding, total overdue, count by status,\n   and expenses awaiting approval. A simple bar breakdown by supplier of the\n   top five outstanding.\n6. **Export** — a CSV of the currently filtered invoice list (columns: number,\n   supplier, issue, due, amount, tax, status, age).\n\n## Functional requirements\n- All money in integer pence; arithmetic (totals, outstanding, overdue sums) is\n  exact; display in GBP.\n- Ageing and dashboard totals derive from the stored records each time they are\n  requested (no stale cached totals).\n- Status transitions constrained: Draft→Submitted→Approved→Paid; Submitted→\n  Cancelled; a Paid invoice is terminal.\n- Expense rejection note rule enforced (>= 8 chars) with a clear error.\n- CSV export must quote fields containing commas/quotes correctly.\n\n## Non-functional requirements\n- Desktop-first, usable to 768px; accessible data tables with proper headers.\n- Deterministic core calculations separated from UI for unit testing.\n- Local persistence; no external services needed to run.\n\n## Explicitly out of scope\n- Bank feed / open-banking integration.\n- Real OCR of receipts.\n- Multi-currency (GBP only).\n- Payroll or tax filing.\n\n## Intent lattice (A1)\nDomain: finance-ops\nJobs: invoice, approve, quote, track, search, record, validate, test\nEntities: invoice, manager, dashboard, column, table, user, viewer, file, rule, cache, payroll\nConstraints: deterministic, local-first\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 10 · security Δ2 · api Δ1\n- Elevate isolate + OAuth review; treat data as sensitive.\n- Default API budget.\n- Extra HITL on P6.\nExtra HITL: P6\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Exit criteria (DoD)\nGate P6: FAIL (3 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] Last template self-test run passed\n- [x] Generated source is non-empty\n- [x] Generated code artifact exists for P6\n- [ ] Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- [ ] Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) — keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns core missing (17/31): ageing, column, console, edit, ledgeline, manager, office, oracle, quote, search, table, track, …; advisory missing (55/147): internal, tracking, staff, replaces, spreadsheet, gives, single, owed, enters, marks, chases, core, …\n- [ ] Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\n\n## Artifacts (trimmed)\nCensus: 22 artifact row(s) recorded — the newest 8 render below (window ≤ 8; the packet's own row is excluded).\n### P3 · DoD gate — P3\n# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844\n\n### P4 · Security & authorization policy\nProtected data: invoice, manager, dashboard, column, table, user (the brief's own entities).\nAccess model: manager, user, viewer — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the invoices its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive invoice data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty).\n\n### P4 · DoD gate — P4\n# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654\n\n### P5 · Validation + HITL contract\nValidation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap.\n\n### P5 · DoD gate — P5\n# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883\n\n### P6 · P6 placeholder module (deterministic template)\nconst JOBS = [\"invoice\", \"approve\", \"quote\", \"track\", \"search\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Ledgeline\", phase: 6, job: \"invoice\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"invoice\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"invoice\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunc…\n\n### P6 · Sandbox result\n{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}\n\n### P6 · P6 architecture trace (reqTrace)\n# P6 architecture trace (reqTrace)\n\n**p6-arch: FAIL** · tree (2 files)\n\n- invoice → src/generated/compute-age.ts\n- approve → src/generated/compute-age.ts\n- validate → src/generated/compute-age.ts\n\nMissing capabilities (no tree file carries their identifiers):\n- quote\n- track\n- search\n- test\n\n> reqTrace: capability → tree file(s), computed by p6-arch over generatedTree code identifiers (stemmed; literals/comments masked).\n\n\n## Research sources (live)\n- Free Payment Deadline Calculator for Construction Invoices (2026) — https://www.liendone.com/tools/payment-deadline\n- Architecture Billing Index (ABI) June 2026 - AIA — https://www.aia.org/resource-center/abi-june-2026-billings-remain-weak-architecture-firms\n- Architecture Invoice Template: What to Include and How to Get Paid ... — https://www.filecurrent.com/blog/architecture-invoice-template\n- Architect Invoice Templates and Samples for All Billing Methods — https://www.bqe.com/blog/architect-invoice-templates-samples\n- Architecture Billing Index (ABI) May 2026 - AIA — https://www.aia.org/resource-center/abi-may-2026-architecture-firm-billings-weaken-further\n\n> Fetched by RapidTool — cite these, do not invent sources.\n\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge — only P7 if this phase completes\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "language": "markdown"
+    }
+  ],
+  "memory": [
+    {
+      "id": "6-episodic-0.86",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-3",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-2",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "5-procedural-0.99",
+      "kind": "procedural",
+      "phase": 5,
+      "text": "HITL reject requires a written reason.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "4-procedural-0.98",
+      "kind": "procedural",
+      "phase": 4,
+      "text": "Product data is protected by least-privilege role access.",
+      "score": 0.98,
+      "source": "engine"
+    },
+    {
+      "id": "3-procedural-0.93",
+      "kind": "procedural",
+      "phase": 3,
+      "text": "Integration surface for finance operations declared from domain vocabulary.",
+      "score": 0.93,
+      "source": "engine"
+    },
+    {
+      "id": "2-semantic-0.94",
+      "kind": "semantic",
+      "phase": 2,
+      "text": "Data model written for Ledgeline: invoice, manager, dashboard, column, table, user, viewer, file, rule, cache, payroll.",
+      "score": 0.94,
+      "source": "engine"
+    },
+    {
+      "id": "1-procedural-0.99",
+      "kind": "procedural",
+      "phase": 1,
+      "text": "Ledgeline executes as one sequential finance operations pipeline.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "0-episodic-0.91",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Ingested brief for Ledgeline in finance-ops.",
+      "score": 0.91,
+      "source": "engine"
+    },
+    {
+      "id": "0-semantic-0.97",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Scorecard must exist before any code node fires.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain finance-ops; jobs invoice, approve, quote, track.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: deterministic, local-first.",
+      "score": 0.7,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-template-emission-96c804dc",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "L2 template-emission: phase P6 sealed with gate unmet (p6-verified, p6-brief-fit); required brief nouns present as identifiers in emitted source: 70/173 (0 hits: ledgeline, office, tracker, internal, tracking, …); evidenceHash=1532678053-RT_E_.",
+      "score": 0.7,
+      "source": "engine",
+      "tags": [
+        "L2",
+        "lesson",
+        "probe:p6-brief-fit",
+        "probe:p6-verified",
+        "template-emission"
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1791192699567,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "finance-ops"
+    },
+    {
+      "ts": 1791192700364,
+      "phase": 0,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P0 Deep Research & Feasibility"
+    },
+    {
+      "ts": 1791192700365,
+      "phase": 0,
+      "level": "info",
+      "event": "scorecard.ready",
+      "detail": "overall=7.4 verdict=proceed-with-guards"
+    },
+    {
+      "ts": 1791192700365,
+      "phase": 0,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192704153,
+      "phase": 0,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32696329"
+    },
+    {
+      "ts": 1791192704163,
+      "phase": 1,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P1 Core Orchestration & State Graph"
+    },
+    {
+      "ts": 1791192704164,
+      "phase": 1,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192704176,
+      "phase": 1,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 10507139"
+    },
+    {
+      "ts": 1791192704185,
+      "phase": 2,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P2 Memory & Context Consolidation"
+    },
+    {
+      "ts": 1791192704185,
+      "phase": 2,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192704193,
+      "phase": 2,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 18455377"
+    },
+    {
+      "ts": 1791192704201,
+      "phase": 3,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P3 Tool Integration & Interoperability"
+    },
+    {
+      "ts": 1791192704201,
+      "phase": 3,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192704210,
+      "phase": 3,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16382928"
+    },
+    {
+      "ts": 1791192704218,
+      "phase": 4,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P4 Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791192704218,
+      "phase": 4,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192704228,
+      "phase": 4,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791192704231,
+      "phase": 4,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35271886"
+    },
+    {
+      "ts": 1791192704238,
+      "phase": 5,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P5 Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791192704238,
+      "phase": 5,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192704249,
+      "phase": 5,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791192704256,
+      "phase": 5,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 29514528"
+    },
+    {
+      "ts": 1791192704268,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791192704270,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791192704269,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192704269,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.jobs.shortfall",
+      "detail": "declared 8 lattice job(s) vs materialised 5 spec-graph job node(s) — 3 unmaterialised; missing: record, validate, test"
+    },
+    {
+      "ts": 1791192714537,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: quote, track, search (+6 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791192714538,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.floor",
+      "detail": "brief-driven minimum plan: +0 module(s) over the model plan (minimum 8); "
+    },
+    {
+      "ts": 1791192729301,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192732786,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192732795,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_PLAN_UNDERPRODUCED · chunk 1/8 refused · accepted tree has 0 module(s) but the brief demands >= 8 — the plan is under-produced; missing module(s): src/jobs/invoice.ts (job:invoice), src/jobs/approve.ts (job:approve), src/jobs/quote.ts (job:quote), src/jobs/track.ts (job:track), src/jobs/search.ts (job:search), src/domain/finance-ops.ts (entity:finance-ops), src/generated/ledgeline.ts (brief:ledgeline), src/generated/office.ts (brief:office) — proximate refusal (RT_E_VALIDATION): typeSignature functions not exported: computeDueDate, refreshAgeing, submitExpenseClaim, rejectExpenseClaim, reimburseExpenseClaim, getDashboardTotals, topOutstandingBySupplier"
+    },
+    {
+      "ts": 1791192732795,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "RT_E_PLAN_UNDERPRODUCED · chunk 1/8 refused · accepted tree has 0 module(s) but the brief demands >= 8 — the plan is under-produced; missing module(s): src/jobs/invoice.ts (job:invoice), src/jobs/approve.ts (job:approve), src/jobs/quote.ts (job:quote), src/jobs/track.ts (job:track), src/jobs/search.ts (job:search), src/domain/finance-ops.ts (entity:finance-ops), src/generated/ledgeline.ts (brief:ledgeline), src/generated/office.ts (brief:office) — proximate refusal (RT_E_VALIDATION): typeSignature functions not exported: computeDueDate, refreshAgeing, submitExpenseClaim, rejectExpenseClaim, reimburseExpenseClaim, getDashboardTotals, topOutstandingBySupplier"
+    },
+    {
+      "ts": 1791192732808,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791192732810,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791192732809,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192753361,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192765593,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192766953,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192766953,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.envelope.unreadable",
+      "detail": "src/generated/compute-outstanding.ts · RT_E_LLM_REJECTED · parseSynthesisEnvelope: the reply was received but could not be read — the payload has no non-empty `module` string (23 chars; excerpt \"{\"type\": \"json_object\"}\")"
+    },
+    {
+      "ts": 1791192766960,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_PLAN_UNDERPRODUCED · chunk 2/8 refused · accepted tree has 1 module(s) but the brief demands >= 8 — the plan is under-produced; missing module(s): src/jobs/invoice.ts (job:invoice), src/jobs/approve.ts (job:approve), src/jobs/quote.ts (job:quote), src/jobs/track.ts (job:track), src/jobs/search.ts (job:search), src/domain/finance-ops.ts (entity:finance-ops), src/generated/ledgeline.ts (brief:ledgeline), src/generated/office.ts (brief:office) — proximate refusal (RT_E_VALIDATION): forbidden primitive in generated module code (globalThis)"
+    },
+    {
+      "ts": 1791192766970,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (2 files) · missing: quote, track, search, test"
+    },
+    {
+      "ts": 1791192770958,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "tests/oracle.spec.ts: fail — skip-dominated spec: 1 live case(s) ≤ 8 skipped — a skip is not a pass"
+    },
+    {
+      "ts": 1791192771002,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791192771004,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791192771003,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791192771046,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (2 files) · missing: quote, track, search, test"
+    },
+    {
+      "ts": 1791192793681,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192799741,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791192799748,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_PLAN_UNDERPRODUCED · chunk 1/8 refused · accepted tree has 0 module(s) but the brief demands >= 8 — the plan is under-produced; missing module(s): src/jobs/invoice.ts (job:invoice), src/jobs/approve.ts (job:approve), src/jobs/quote.ts (job:quote), src/jobs/track.ts (job:track), src/jobs/search.ts (job:search), src/domain/finance-ops.ts (entity:finance-ops), src/generated/ledgeline.ts (brief:ledgeline), src/generated/office.ts (brief:office) — proximate refusal (RT_E_VALIDATION): typeSignature functions not exported: computeDueDate, refreshAgeing, submitExpenseClaim, rejectExpenseClaim, reimburseExpenseClaim, getDashboardTotals, getSupplierOutstandingBreakdown"
+    },
+    {
+      "ts": 1791192799757,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (2 files) · missing: quote, track, search, test"
+    },
+    {
+      "ts": 1791192803652,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "tests/oracle.spec.ts: fail — skip-dominated spec: 1 live case(s) ≤ 8 skipped — a skip is not a pass"
+    },
+    {
+      "ts": 1791192803652,
+      "phase": 6,
+      "level": "error",
+      "event": "p6.journey.exhausted",
+      "detail": "3 cycle(s) without a green tree-run — last refusal: RT_E_PLAN_UNDERPRODUCED · chunk 1/8 refused · accepted tree has 0 module(s) but the brief demands >= 8 — the plan is under-produced; missing module(s): src/jobs/invoice.ts (job:inv"
+    },
+    {
+      "ts": 1791192803725,
+      "phase": 6,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L2 template-emission lesson-template-emission-96c804dc (keyed P6 synthesis refused — red gate on a live run)"
+    }
+  ],
+  "hitl": {
+    "phase": 6,
+    "title": "Approve placeholder module (deterministic template)",
+    "prompt": "Scheduler raised HITL on the placeholder module (deterministic template — it does not implement the brief; keyed synthesis is a separate path).",
+    "stakes": "Generated code enters the isolate.",
+    "forceHuman": false,
+    "requestedAt": 1791192771003
+  },
+  "decisions": [
+    {
+      "id": "hitl-4-1791192704228",
+      "phase": 4,
+      "title": "Approve isolation policy",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791192704218,
+      "decidedAt": 1791192704228,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P4",
+        "reason": "autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-5-1791192704249",
+      "phase": 5,
+      "title": "Approve validation contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791192704238,
+      "decidedAt": 1791192704249,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P5",
+        "reason": "autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    }
+  ],
+  "modelRoute": "deepseek-flash",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": false
+  },
+  "openapi": "",
+  "adr": "",
+  "lattice": {
+    "domain": "finance-ops",
+    "jobs": [
+      "invoice",
+      "approve",
+      "quote",
+      "track",
+      "search",
+      "record",
+      "validate",
+      "test"
+    ],
+    "entities": [
+      "invoice",
+      "manager",
+      "dashboard",
+      "column",
+      "table",
+      "user",
+      "viewer",
+      "file",
+      "rule",
+      "cache",
+      "payroll"
+    ],
+    "constraints": [
+      "deterministic",
+      "local-first"
+    ],
+    "nodes": [
+      {
+        "kind": "job",
+        "label": "invoice",
+        "weight": 1
+      },
+      {
+        "kind": "job",
+        "label": "approve",
+        "weight": 1
+      },
+      {
+        "kind": "object",
+        "label": "invoice",
+        "weight": 1
+      },
+      {
+        "kind": "actor",
+        "label": "manager",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "quote",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "track",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "dashboard",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "column",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "table",
+        "weight": 0.75
+      },
+      {
+        "kind": "risk",
+        "label": "payment",
+        "weight": 0.75
+      },
+      {
+        "kind": "constraint",
+        "label": "deterministic",
+        "weight": 0.7000000000000001
+      },
+      {
+        "kind": "actor",
+        "label": "user",
+        "weight": 0.55
+      },
+      {
+        "kind": "actor",
+        "label": "viewer",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "search",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "record",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "validate",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "test",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "file",
+        "weight": 0.55
+      }
+    ],
+    "complexity": 10,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 2,
+    "apiDelta": 1,
+    "tightness": 10,
+    "extraHitl": [
+      6
+    ],
+    "notes": [
+      "Elevate isolate + OAuth review; treat data as sensitive.",
+      "Default API budget.",
+      "Extra HITL on P6."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1791192803654,
+      "summary": "18 nodes · complexity 10.0"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1791192803654,
+      "summary": "ranked 13 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1791192803654,
+      "summary": "tightness 10 · sec+2"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1791192803654,
+      "summary": "compiled P6 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1791192803654,
+      "summary": "10 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1791192803654,
+      "summary": "6 entities · 6 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1791192803654,
+      "summary": "8 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1791192803654,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — Ledgeline\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T09:33:23.652Z\nproject_id: fe92284a-715d-4a54-9f3d-7fac87177ce5\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P6 Code Generation, Testing & Deployment) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T09:33:23.652Z\",\n  \"project_id\": \"fe92284a-715d-4a54-9f3d-7fac87177ce5\",\n  \"name\": \"Ledgeline\",\n  \"project_status\": \"awaiting_hitl\",\n  \"current_phase\": {\n    \"id\": 6,\n    \"code\": \"P6\",\n    \"title\": \"Code Generation, Testing & Deployment\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"3268318407\",\n  \"input_hash\": \"165033028\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791192704218,\n      \"decided_at\": 1791192704228\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791192704238,\n      \"decided_at\": 1791192704249\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"awaiting_hitl\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 9,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 10,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 6,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 0,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 37599,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Ledgeline — Office Invoice & Expense Tracker\n\n## What this is\nAn internal office tool for tracking supplier invoices and staff expenses from\nreceipt through to payment. It replaces a spreadsheet and gives the office\nmanager a single ageing view of what is owed and what is overdue.\n\n## Users\n- **Office manager** — enters invoices, marks them paid, chases overdue.\n- **Employee** — submits an expense claim with a receipt reference.\n- **Approver** — approves or rejects expense claims.\n\n## Core domain\n- **Supplier**: id, name, email, payment terms (days).\n- **Invoice**: id, number, supplier, issue date, due date, amount (integer\n  pence), tax amount, status (Draft | Submitted | Approved | Paid | Overdue |\n  Cancelled), notes.\n- **ExpenseClaim**: id, employee name, date incurred, category (Travel |\n  Meals | Equipment | Software | Other), amount (pence), receipt reference,\n  status (Draft | Submitted | Approved | Rejected | Reimbursed), decision note.\n\n## Required features\n1. **Invoice list** — table with supplier, number, dates, amount, status, and an\n   \"age\" column (days since due; overdue highlighted). Filter by status and\n   supplier, search by number/supplier, sort by due date or amount.\n2. **Add / edit invoice** — validate: number required and unique, supplier\n   required, amount > 0, tax >= 0 and <= amount, due date on/after issue date.\n   Computes due date from the supplier's terms when not given explicitly.\n3. **Status ageing** — an invoice becomes Overdue automatically when its due\n   date has passed and it is not Paid/Cancelled; a \"refresh\" recomputes this\n   from the data (never a manual flag alone).\n4. **Expense claims** — submit, approve, reject (rejection requires a note of at\n   least 8 characters), and mark reimbursed. A rejected claim cannot be\n   reimbursed; an approved claim cannot be re-approved.\n5. **Dashboard** — totals: total outstanding, total overdue, count by status,\n   and expenses awaiting approval. A simple bar breakdown by supplier of the\n   top five outstanding.\n6. **Export** — a CSV of the currently filtered invoice list (columns: number,\n   supplier, issue, due, amount, tax, status, age).\n\n## Functional requirements\n- All money in integer pence; arithmetic (totals, outstanding, overdue sums) is\n  exact; display in GBP.\n- Ageing and dashboard totals derive from the stored records each time they are\n  requested (no stale cached totals).\n- Status transitions constrained: Draft→Submitted→Approved→Paid; Submitted→\n  Cancelled; a Paid invoice is terminal.\n- Expense rejection note rule enforced (>= 8 chars) with a clear error.\n- CSV export must quote fields containing commas/quotes correctly.\n\n## Non-functional requirements\n- Desktop-first, usable to 768px; accessible data tables with proper headers.\n- Deterministic core calculations separated from UI for unit testing.\n- Local persistence; no external services needed to run.\n\n## Explicitly out of scope\n- Bank feed / open-banking integration.\n- Real OCR of receipts.\n- Multi-currency (GBP only).\n- Payroll or tax filing.\n\n## Intent lattice (A1)\nDomain: finance-ops\nJobs: invoice, approve, quote, track, search, record, validate, test\nEntities: invoice, manager, dashboard, column, table, user, viewer, file, rule, cache, payroll\nConstraints: deterministic, local-first\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 10 · security Δ2 · api Δ1\n- Elevate isolate + OAuth review; treat data as sensitive.\n- Default API budget.\n- Extra HITL on P6.\nExtra HITL: P6\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Exit criteria (DoD)\nGate P6: FAIL (3 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] Last template self-test run passed\n- [x] Generated source is non-empty\n- [x] Generated code artifact exists for P6\n- [ ] Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- [ ] Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) — keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns core missing (17/31): ageing, column, console, edit, ledgeline, manager, office, oracle, quote, search, table, track, …; advisory missing (55/147): internal, tracking, staff, replaces, spreadsheet, gives, single, owed, enters, marks, chases, core, …\n- [ ] Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\n\n## Artifacts (trimmed)\nCensus: 22 artifact row(s) recorded — the newest 8 render below (window ≤ 8; the packet's own row is excluded).\n### P3 · DoD gate — P3\n# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844\n\n### P4 · Security & authorization policy\nProtected data: invoice, manager, dashboard, column, table, user (the brief's own entities).\nAccess model: manager, user, viewer — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the invoices its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive invoice data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty).\n\n### P4 · DoD gate — P4\n# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654\n\n### P5 · Validation + HITL contract\nValidation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap.\n\n### P5 · DoD gate — P5\n# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883\n\n### P6 · P6 placeholder module (deterministic template)\nconst JOBS = [\"invoice\", \"approve\", \"quote\", \"track\", \"search\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Ledgeline\", phase: 6, job: \"invoice\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"invoice\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"invoice\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunc…\n\n### P6 · Sandbox result\n{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}\n\n### P6 · P6 architecture trace (reqTrace)\n# P6 architecture trace (reqTrace)\n\n**p6-arch: FAIL** · tree (2 files)\n\n- invoice → src/generated/compute-age.ts\n- approve → src/generated/compute-age.ts\n- validate → src/generated/compute-age.ts\n\nMissing capabilities (no tree file carries their identifiers):\n- quote\n- track\n- search\n- test\n\n> reqTrace: capability → tree file(s), computed by p6-arch over generatedTree code identifiers (stemmed; literals/comments masked).\n\n\n## Research sources (live)\n- Free Payment Deadline Calculator for Construction Invoices (2026) — https://www.liendone.com/tools/payment-deadline\n- Architecture Billing Index (ABI) June 2026 - AIA — https://www.aia.org/resource-center/abi-june-2026-billings-remain-weak-architecture-firms\n- Architecture Invoice Template: What to Include and How to Get Paid ... — https://www.filecurrent.com/blog/architecture-invoice-template\n- Architect Invoice Templates and Samples for All Billing Methods — https://www.bqe.com/blog/architect-invoice-templates-samples\n- Architecture Billing Index (ABI) May 2026 - AIA — https://www.aia.org/resource-center/abi-may-2026-architecture-firm-billings-weaken-further\n\n> Fetched by RapidTool — cite these, do not invent sources.\n\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge — only P7 if this phase completes\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/finance_ops.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/invoice.ts",
+        "purpose": "Implement job “invoice” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/approve.ts",
+        "purpose": "Implement job “approve” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/quote.ts",
+        "purpose": "Implement job “quote” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-3",
+        "file": "src/jobs/track.ts",
+        "purpose": "Implement job “track” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-4",
+        "file": "src/jobs/search.ts",
+        "purpose": "Implement job “search” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2",
+          "job-3",
+          "job-4"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "job-3",
+      "job-4",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Invoice",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "totalCents",
+            "type": "int"
+          },
+          {
+            "name": "approvedBy",
+            "type": "ulid?"
+          }
+        ]
+      },
+      {
+        "name": "Manager",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Dashboard",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Column",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Table",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "User",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/invoice",
+        "job": "invoice"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/approve",
+        "job": "approve"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/quote",
+        "job": "quote"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/track",
+        "job": "track"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/search",
+        "job": "search"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/record",
+        "job": "record"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.invoice.happy",
+      "given": "Authorized operator submits “invoice” with a valid invoice",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "invoice"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.approve.happy",
+      "given": "Authorized operator submits “approve” with a valid invoice",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "approve"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.quote.happy",
+      "given": "Authorized operator submits “quote” with a valid invoice",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "quote"
+    },
+    {
+      "id": "orc-4",
+      "name": "job.track.happy",
+      "given": "Authorized operator submits “track” with a valid invoice",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "track"
+    },
+    {
+      "id": "orc-5",
+      "name": "job.search.happy",
+      "given": "Authorized operator submits “search” with a valid invoice",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "search"
+    },
+    {
+      "id": "orc-c-deterministic",
+      "name": "constraint.deterministic",
+      "given": "Request violates deterministic",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "invoice"
+    },
+    {
+      "id": "orc-c-local-first",
+      "name": "constraint.local-first",
+      "given": "Request violates local-first",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "invoice"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for invoice, approve, quote before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": false
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Code Generation, Testing & Deployment.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": true
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": false
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: deterministic, local-first.",
+      "active": true
+    }
+  ],
+  "notes": "",
+  "generatedSource": "const JOBS = [\"invoice\", \"approve\", \"quote\", \"track\", \"search\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Ledgeline\", phase: 6, job: \"invoice\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"invoice\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"invoice\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"invoice\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+  "lastTest": {
+    "ok": true,
+    "detail": "tests.pass"
+  },
+  "enforceDod": true,
+  "wildMode": false,
+  "wildRun": null,
+  "chatLog": [],
+  "research": [
+    {
+      "query": "architecture feasibility 2026 supplier invoice date",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "Free Payment Deadline Calculator for Construction Invoices (2026)",
+          "url": "https://www.liendone.com/tools/payment-deadline",
+          "content": "Free calculator: enter invoice date and contract terms, see when payment is due and how late it is. Built for U.S. construction GCs and subs. No signup."
+        },
+        {
+          "title": "Architecture Billing Index (ABI) June 2026 - AIA",
+          "url": "https://www.aia.org/resource-center/abi-june-2026-billings-remain-weak-architecture-firms",
+          "content": "Business conditions at architecture firms remained soft in June The AIA/Deltek Architecture Billings Index ® (ABI) score for the month was 47.3. While this score is nearly three points higher than the May score, it still indicates that a majority of firms reported a decline in billings this month, although fewer firms reported a decline than last month. Architecture firms remain mired in one ..."
+        },
+        {
+          "title": "Architecture Invoice Template: What to Include and How to Get Paid ...",
+          "url": "https://www.filecurrent.com/blog/architecture-invoice-template",
+          "content": "An architecture invoice template with phase-based line items, a sample invoice , and payment terms that get architects paid faster. Build one free, no signup."
+        },
+        {
+          "title": "Architect Invoice Templates and Samples for All Billing Methods",
+          "url": "https://www.bqe.com/blog/architect-invoice-templates-samples",
+          "content": "Get professional architect invoice templates built for real-world billing. Each format parallels the invoicing options available in BQE CORE, with editable fields for phases, reimbursables, taxes, and more. Inside this article: Different types of architect invoice templates Basic elements of any architecture invoice International invoice considerations for architects Easiest way to simplify ..."
+        },
+        {
+          "title": "Architecture Billing Index (ABI) May 2026 - AIA",
+          "url": "https://www.aia.org/resource-center/abi-may-2026-architecture-firm-billings-weaken-further",
+          "content": "The AIA/Deltek Architecture Billings Index® (ABI) is a diffusion index derived from the monthly Work-on-the-Boards survey, conducted by the AIA Economics & Market Research Group. The ABI serves as a leading economic indicator that leads nonresidential construction activity by approximately 9-12 months. The survey panel asks participants whether their billings increased, decreased, or stayed ..."
+        }
+      ]
+    }
+  ],
+  "implementationSpec": null,
+  "_v": 2,
+  "generatedTree": [
+    {
+      "path": "src/generated.ts",
+      "source": "export * from \"./generated/compute-age.ts\";\n",
+      "hash": "2739547461",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/compute-age.ts",
+      "source": "type InvoiceStatus = 'Draft' | 'Submitted' | 'Approved' | 'Paid' | 'Overdue' | 'Cancelled';\ntype ExpenseCategory = 'Travel' | 'Meals' | 'Equipment' | 'Software' | 'Other';\ntype ExpenseStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Reimbursed';\n\ninterface Invoice {\n  id: string;\n  number: string;\n  supplierId: string;\n  supplier: string;\n  issueDate: string;\n  dueDate: string;\n  amount: number;\n  tax: number;\n  status: InvoiceStatus;\n  notes: string;\n  totalCents: number;\n  approvedBy?: string;\n}\n\ninterface ExpenseClaimInput {\n  id: string;\n  employeeName: string;\n  dateIncurred: string;\n  category: ExpenseCategory;\n  amount: number;\n  receiptReference: string;\n  status?: ExpenseStatus;\n  decisionNote?: string;\n}\n\ninterface ExpenseClaim {\n  id: string;\n  employeeName: string;\n  dateIncurred: string;\n  category: ExpenseCategory;\n  amount: number;\n  receiptReference: string;\n  status: ExpenseStatus;\n  decisionNote: string;\n}\n\ninterface ValidationResult {\n  valid: boolean;\n  errors: string[];\n}\n\ninterface Dashboard {\n  totalOutstanding: number;\n  totalOverdue: number;\n  countByStatus: Record<string, number>;\n  expensesAwaitingApproval: number;\n  topSuppliers: { supplier: string; amount: number }[];\n}\n\nconst STORE: { invoices: Invoice[]; claims: ExpenseClaim[] } = { invoices: [], claims: [] };\n\n/**\n * Compute the age in whole days of an invoice relative to its due date.\n * Age is days since the due date; an invoice due today or in the future has age 0.\n * @param invoice the invoice to age\n * @param today the reference date\n * @returns number of days past due (0 when not yet due)\n */\n// req-1\nfunction computeAge(invoice: Invoice, today: Date): number {\n  const due = Date.parse(invoice.dueDate + 'T00:00:00.000Z');\n  const now = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());\n  if (Number.isNaN(due)) {\n    return 0;\n  }\n  const diff = Math.floor((now - due) / 86400000);\n  return diff > 0 ? diff : 0;\n}\n\n/**\n * Compute an invoice due date from the issue date plus the supplier payment terms in days.\n * @param issueDate the date the invoice was issued\n * @param paymentTermsDays the supplier's payment terms in days (may be 0)\n * @returns the computed due date\n */\n// req-4\nfunction computeDueDate(issueDate: Date, paymentTermsDays: number): Date {\n  const base = Date.UTC(issueDate.getUTCFullYear(), issueDate.getUTCMonth(), issueDate.getUTCDate());\n  return new Date(base + paymentTermsDays * 86400000);\n}\n\n/**\n * Recompute the Overdue status of each invoice from its stored due date and status.\n * Paid and Cancelled invoices are never marked Overdue. Recompute is idempotent.\n * @param invoices the stored invoices\n * @param today the reference date used to judge overdue\n * @returns the recomputed invoices and the count transitioned to Overdue\n */\n// req-6\nfunction refreshOverdueStatuses(invoices: Invoice[], today: Date): { invoices: Invoice[]; changed: number } {\n  const now = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());\n  let changed = 0;\n  const next: Invoice[] = invoices.map((inv: Invoice): Invoice => {\n    const due = Date.parse(inv.dueDate + 'T00:00:00.000Z');\n    const isTerminal = inv.status === 'Paid' || inv.status === 'Cancelled';\n    if (isTerminal) {\n      return { id: inv.id, number: inv.number, supplierId: inv.supplierId, supplier: inv.supplier, issueDate: inv.issueDate, dueDate: inv.dueDate, amount: inv.amount, tax: inv.tax, status: inv.status, notes: inv.notes, totalCents: inv.totalCents, approvedBy: inv.approvedBy };\n    }\n    const pastDue = !Number.isNaN(due) && now > due;\n    if (pastDue && inv.status !== 'Overdue') {\n      changed += 1;\n      return { id: inv.id, number: inv.number, supplierId: inv.supplierId, supplier: inv.supplier, issueDate: inv.issueDate, dueDate: inv.dueDate, amount: inv.amount, tax: inv.tax, status: 'Overdue', notes: inv.notes, totalCents: inv.totalCents, approvedBy: inv.approvedBy };\n    }\n    return { id: inv.id, number: inv.number, supplierId: inv.supplierId, supplier: inv.supplier, issueDate: inv.issueDate, dueDate: inv.dueDate, amount: inv.amount, tax: inv.tax, status: inv.status, notes: inv.notes, totalCents: inv.totalCents, approvedBy: inv.approvedBy };\n  });\n  STORE.invoices = next;\n  return { invoices: next, changed: changed };\n}\n\n/**\n * Validate a decision note for an expense rejection; must be at least 8 characters after trimming.\n * @param note the decision note text\n * @returns validation result with any errors\n */\n// req-7\nfunction validateDecisionNote(note: string): ValidationResult {\n  const errors: string[] = [];\n  const trimmed = typeof note === 'string' ? note.trim() : '';\n  if (trimmed.length < 8) {\n    errors.push('Decision note must be at least 8 characters.');\n  }\n  return { valid: errors.length === 0, errors: errors };\n}\n\n/**\n * Create and store a new expense claim in Draft or Submitted status.\n * @param input the raw expense claim input\n * @returns the persisted expense claim\n */\n// req-7\nasync function createExpenseClaim(input: ExpenseClaimInput): Promise<ExpenseClaim> {\n  const status: ExpenseStatus = input.status === 'Submitted' ? 'Submitted' : 'Draft';\n  const claim: ExpenseClaim = {\n    id: input.id,\n    employeeName: String(input.employeeName),\n    dateIncurred: String(input.dateIncurred),\n    category: input.category,\n    amount: input.amount,\n    receiptReference: String(input.receiptReference),\n    status: status,\n    decisionNote: typeof input.decisionNote === 'string' ? input.decisionNote : ''\n  };\n  STORE.claims = STORE.claims.filter((c: ExpenseClaim): boolean => c.id !== claim.id).concat([claim]);\n  return claim;\n}\n\n/**\n * Reject an expense claim; requires a decision note of at least 8 characters.\n * A rejected claim is never reimbursable and an approved claim cannot be re-approved.\n * @param id the expense claim id\n * @param note the rejection decision note\n * @returns the updated expense claim\n */\n// req-7\nasync function rejectExpenseClaim(id: string, note: string): Promise<ExpenseClaim> {\n  const check = validateDecisionNote(note);\n  if (!check.valid) {\n    throw new Error(check.errors.join(' '));\n  }\n  const found = STORE.claims.filter((c: ExpenseClaim): boolean => c.id === id)[0];\n  if (!found) {\n    throw new Error('Expense claim not found: ' + id);\n  }\n  if (found.status === 'Reimbursed') {\n    throw new Error('A reimbursed claim cannot be rejected.');\n  }\n  const updated: ExpenseClaim = {\n    id: found.id,\n    employeeName: found.employeeName,\n    dateIncurred: found.dateIncurred,\n    category: found.category,\n    amount: found.amount,\n    receiptReference: found.receiptReference,\n    status: 'Rejected',\n    decisionNote: note.trim()\n  };\n  STORE.claims = STORE.claims.map((c: ExpenseClaim): ExpenseClaim => (c.id === id ? updated : c));\n  return updated;\n}\n\n/**\n * Mark an approved expense claim as reimbursed. A rejected claim cannot be reimbursed.\n * @param id the expense claim id\n * @returns the updated expense claim\n */\n// req-7\nasync function reimburseExpenseClaim(id: string): Promise<ExpenseClaim> {\n  const found = STORE.claims.filter((c: ExpenseClaim): boolean => c.id === id)[0];\n  if (!found) {\n    throw new Error('Expense claim not found: ' + id);\n  }\n  if (found.status === 'Rejected') {\n    throw new Error('A rejected claim cannot be reimbursed.');\n  }\n  if (found.status === 'Approved' || found.status === 'Submitted' || found.status === 'Draft') {\n    const updated: ExpenseClaim = {\n      id: found.id,\n      employeeName: found.employeeName,\n      dateIncurred: found.dateIncurred,\n      category: found.category,\n      amount: found.amount,\n      receiptReference: found.receiptReference,\n      status: 'Reimbursed',\n      decisionNote: found.decisionNote\n    };\n    STORE.claims = STORE.claims.map((c: ExpenseClaim): ExpenseClaim => (c.id === id ? updated : c));\n    return updated;\n  }\n  if (found.status === 'Reimbursed') {\n    return found;\n  }\n  return found;\n}\n\n/**\n * Build the dashboard totals from stored invoices and claims, derived fresh per request.\n * @param invoices the stored invoices\n * @param claims the stored expense claims\n * @returns dashboard aggregates including top five suppliers by outstanding amount\n */\n// req-9\nfunction getDashboard(invoices: Invoice[], claims: ExpenseClaim[]): Dashboard {\n  let totalOutstanding = 0;\n  let totalOverdue = 0;\n  const countByStatus: Record<string, number> = {\n    Draft: 0,\n    Submitted: 0,\n    Approved: 0,\n    Paid: 0,\n    Overdue: 0,\n    Cancelled: 0\n  };\n  const supplierTotals: Record<string, number> = {};\n  for (let i = 0; i < invoices.length; i += 1) {\n    const inv = invoices[i];\n    if (countByStatus[inv.status] === undefined) {\n      countByStatus[inv.status] = 0;\n    }\n    countByStatus[inv.status] += 1;\n    const total = inv.amount + inv.tax;\n    if (inv.status !== 'Paid' && inv.status !== 'Cancelled') {\n      totalOutstanding += total;\n      if (supplierTotals[inv.supplier] === undefined) {\n        supplierTotals[inv.supplier] = 0;\n      }\n      supplierTotals[inv.supplier] += total;\n      if (inv.status === 'Overdue') {\n        totalOverdue += total;\n      }\n    }\n  }\n  let expensesAwaitingApproval = 0;\n  for (let j = 0; j < claims.length; j += 1) {\n    if (claims[j].status === 'Submitted') {\n      expensesAwaitingApproval += 1;\n    }\n  }\n  const suppliers: { supplier: string; amount: number }[] = [];\n  const keys = Object.keys(supplierTotals);\n  for (let k = 0; k < keys.length; k += 1) {\n    suppliers.push({ supplier: keys[k], amount: supplierTotals[keys[k]] });\n  }\n  suppliers.sort((a: { supplier: string; amount: number }, b: { supplier: string; amount: number }): number => {\n    if (b.amount !== a.amount) {\n      return b.amount - a.amount;\n    }\n    return a.supplier < b.supplier ? -1 : a.supplier > b.supplier ? 1 : 0;\n  });\n  const topSuppliers = suppliers.slice(0, 5);\n  return {\n    totalOutstanding: totalOutstanding,\n    totalOverdue: totalOverdue,\n    countByStatus: countByStatus,\n    expensesAwaitingApproval: expensesAwaitingApproval,\n    topSuppliers: topSuppliers\n  };\n}\nexport { computeAge, computeDueDate, refreshOverdueStatuses, createExpenseClaim, rejectExpenseClaim, reimburseExpenseClaim, validateDecisionNote, getDashboard };\n",
+      "hash": "2985768636",
+      "attempt": 0
+    }
+  ],
+  "meta": {},
+  "kind": "app",
+  "tokenUsage": {
+    "promptTokens": 20104,
+    "completionTokens": 17495,
+    "calls": 8,
+    "cachedPromptTokens": 0
+  }
+}

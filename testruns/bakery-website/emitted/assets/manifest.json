@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "kind": "game",
+  "generatedBy": "RapidTool scaffold emitter — machine-generated from RapidTool packet 729ce422-bcaa-4b79-9ec6-4840b61a458e; regenerate, don't hand-edit.",
+  "note": "Placeholder manifest: assets/ and public/ are expected at the emitted scaffold and are NOT engine-generated.",
+  "assets": [
+    {
+      "asset": "sprites/text.png",
+      "role": "entity/job placeholder for Text",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/table.png",
+      "role": "entity/job placeholder for Table",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/page.png",
+      "role": "entity/job placeholder for Page",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/image.png",
+      "role": "entity/job placeholder for Image",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/link.png",
+      "role": "entity/job placeholder for Link",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/home.png",
+      "role": "entity/job placeholder for Home",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/show.png",
+      "role": "entity/job placeholder for show",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/search.png",
+      "role": "entity/job placeholder for search",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/close.png",
+      "role": "entity/job placeholder for close",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/track.png",
+      "role": "entity/job placeholder for track",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/query.png",
+      "role": "entity/job placeholder for query",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "sprites/validate.png",
+      "role": "entity/job placeholder for validate",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    },
+    {
+      "asset": "ui/icon.png",
+      "role": "app icon placeholder",
+      "status": "placeholder",
+      "note": "NOT engine-generated — supply art or procedural rendering"
+    }
+  ]
+}

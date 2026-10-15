@@ -1,0 +1,1702 @@
+{
+  "id": "0f435492-fbe0-4432-ae57-2f7b3875efb1",
+  "name": "# Crumb & Bloom",
+  "brief": "# Crumb & Bloom Companion — Mobile App\n\n## What this is\nA mobile-optimised companion for the Crumb & Bloom back-office. It is a\nphone-first version of the counter workflow: staff on their feet take orders,\ncheck stock at a glance, and receive alerts when something needs restocking.\n\n## Form factor\n- Designed for a 360–430px portrait viewport; works one-handed.\n- Bottom tab bar navigation with four tabs: **Today**, **New Order**, **Stock**,\n  **Alerts**.\n- Large tap targets (min 44×44px), sticky primary action button per screen.\n\n## Required screens\n1. **Today** — a summary card set: orders due today, revenue today, items sold\n   today, and a prominent \"low stock\" count that links to Alerts. A reverse-\n   chronological list of today's orders with status chips.\n2. **New Order** — a fast counter flow: search products (big search field),\n   tap to add, adjust quantities with +/- steppers, see a sticky running total,\n   pick a customer (or quick-add name+phone), choose a fulfilment date, and\n   place the order. Placing validates stock and shows a success toast with the\n   order id.\n3. **Stock** — a searchable list of products with a stock badge (green / amber /\n   red vs reorder level). Tapping opens a sheet to receive stock (＋ quantity) or\n   record spoilage (－ quantity with a reason), each writing a stock movement.\n4. **Alerts** — low-stock items to reorder, newest first, with a suggested\n   quantity and a one-tap \"mark reordered\" that records a note (it must NOT\n   change stock — receiving does that).\n\n## Functional requirements\n- Offline-tolerant: the app reads a local snapshot; a clearly labelled pending\n  badge shows changes not yet synced. No fake sync success.\n- The New Order flow must prevent adding more of a product than is in stock and\n  must show the shortfall if it happens.\n- Money in integer pence, shown as GBP.\n- Stock and order logic must reuse the same contracts as the back-office\n  (products, orders, movements) so the two tools agree.\n\n## Non-functional requirements\n- Touch-first: no hover-only affordances; visible focus for keyboard.\n- Works in a mobile browser; no app-store packaging required.\n- Fast first paint; skeleton states while data loads.\n- Accessible: labelled controls, WCAG AA contrast, respects reduced motion.\n\n## Explicitly out of scope\n- Native iOS/Android builds.\n- Payment processing.\n- Push notifications from a server (alerts are in-app).\n- Multi-branch support.",
+  "domain": "operations",
+  "createdAt": 1791169591985,
+  "status": "running",
+  "currentPhase": 6,
+  "phases": [
+    {
+      "id": 0,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3269632901",
+        "checkedAt": 1791169597016
+      },
+      "startedAt": 1791169592880,
+      "completedAt": 1791169592917
+    },
+    {
+      "id": 1,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1050713914",
+        "checkedAt": 1791169597042
+      },
+      "startedAt": 1791169597024,
+      "completedAt": 1791169597029
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1845537766",
+        "checkedAt": 1791169597058
+      },
+      "startedAt": 1791169597047,
+      "completedAt": 1791169597050
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1638292844",
+        "checkedAt": 1791169597080
+      },
+      "startedAt": 1791169597062,
+      "completedAt": 1791169597072
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3527188654",
+        "checkedAt": 1791169597101
+      },
+      "startedAt": 1791169597084,
+      "completedAt": 1791169597099
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "2951452883",
+        "checkedAt": 1791169597122
+      },
+      "startedAt": 1791169597106,
+      "completedAt": 1791169597117
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "rejectionHistory": [],
+      "gate": {
+        "passed": false,
+        "unmet": [
+          "Last template self-test run passed",
+          "Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)",
+          "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+        ],
+        "evidenceHash": "4100106227",
+        "checkedAt": 1791169820631
+      },
+      "startedAt": 1791169597127,
+      "completedAt": 1791169754102
+    },
+    {
+      "id": 7,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 8,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 9,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 10,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 11,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    },
+    {
+      "id": 12,
+      "status": "locked",
+      "rejectionHistory": [],
+      "gate": null
+    }
+  ],
+  "scorecard": {
+    "overall": 6.8,
+    "verdict": "proceed-with-guards",
+    "axes": [
+      {
+        "key": "feasibility",
+        "label": "Technical feasibility",
+        "score": 3,
+        "note": "Typed contracts + sequential graph."
+      },
+      {
+        "key": "scale",
+        "label": "Scale headroom",
+        "score": 9,
+        "note": "Stateless workers + durable checkpoints."
+      },
+      {
+        "key": "security",
+        "label": "Security posture",
+        "score": 7,
+        "note": "Scheduler Δ0."
+      },
+      {
+        "key": "api",
+        "label": "API / rate-limit risk",
+        "score": 7,
+        "note": "Live-tool Δ1."
+      },
+      {
+        "key": "delivery",
+        "label": "Delivery confidence",
+        "score": 8,
+        "note": "Phased graph prevents skipped work."
+      }
+    ],
+    "bottlenecks": [
+      "Long-running tools must stream over WebSocket MCP.",
+      "HITL rejection without a qualitative note is illegal.",
+      "Constraint: offline",
+      "Constraint: local-first"
+    ],
+    "attackVectors": [
+      "Prompt injection via ingested competitor pages.",
+      "Tool-call privilege escalation if OAuth scopes are inherited.",
+      "Sandbox escape if generated exec has network."
+    ],
+    "libraries": [
+      {
+        "name": "TanStack Start",
+        "role": "Typed app shell and file routes"
+      },
+      {
+        "name": "Zod",
+        "role": "Schema lock on generated artifacts"
+      },
+      {
+        "name": "Inventory core (vendor or in-house)",
+        "role": "SKU truth + stock ledger"
+      },
+      {
+        "name": "Sync engine + local cache",
+        "role": "Offline-first writes"
+      }
+    ]
+  },
+  "competitors": [],
+  "artifacts": [
+    {
+      "id": "0-scorecard-feasibility-architecture-scoreca",
+      "phase": 0,
+      "kind": "scorecard",
+      "title": "Feasibility & Architecture Scorecard",
+      "body": "# # Crumb & Bloom — Phase 0 scorecard\n\nDomain: operations\nOverall: 6.8 / 10 — proceed-with-guards\nLattice jobs: alert, show, search, sync, record, serve, validate\nEntities: item, customer, package, card, link, notification, work-order\nConstraints: offline, local-first\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n- Constraint: offline\n- Constraint: local-first\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- Inventory core (vendor or in-house): SKU truth + stock ledger\n- Sync engine + local cache: Offline-first writes"
+    },
+    {
+      "id": "0-algorithm-intent-lattice-a1",
+      "phase": 0,
+      "kind": "algorithm",
+      "title": "Intent Lattice (A1)",
+      "body": "{\n  \"domain\": \"operations\",\n  \"jobs\": [\n    \"alert\",\n    \"show\",\n    \"search\",\n    \"sync\",\n    \"record\",\n    \"serve\",\n    \"validate\"\n  ],\n  \"entities\": [\n    \"item\",\n    \"customer\",\n    \"package\",\n    \"card\",\n    \"link\",\n    \"notification\",\n    \"work-order\"\n  ],\n  \"constraints\": [\n    \"offline\",\n    \"local-first\"\n  ],\n  \"nodes\": [\n    {\n      \"kind\": \"job\",\n      \"label\": \"alert\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"show\",\n      \"weight\": 0.9500000000000001\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"search\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"sync\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"record\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"item\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"offline\",\n      \"weight\": 0.7000000000000001\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"customer\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"serve\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"validate\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"package\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"card\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"link\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"notification\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"risk\",\n      \"label\": \"payment\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"local-first\",\n      \"weight\": 0.5\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"work-order\",\n      \"weight\": 0.35\n    }\n  ],\n  \"complexity\": 10,\n  \"vague\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "research-0-0-1791169597014",
+      "phase": 0,
+      "kind": "research",
+      "title": "Building a Real-Time Stock Management System for Growing Teams",
+      "body": "# Building a Real-Time Stock Management System for Growing Teams\n\nAs teams grow, stock errors stop being small mistakes and become revenue leaks. A real-time stock management system gives operations a shared truth, reduces order failures, and improves planning speed.\n\nSource: https://www.tigertech-software.com/software-development-guides/building-a-real-time-stock-management-system-for-growing-teams",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-1-1791169597014",
+      "phase": 0,
+      "kind": "research",
+      "title": "AI Inventory Alert Agent: A Build Blueprint for Stock Monitoring and ...",
+      "body": "# AI Inventory Alert Agent: A Build Blueprint for Stock Monitoring and ...\n\nAn AI Inventory Alert Agent watches your stock levels continuously, compares them against demand signals, and fires the right alert to the right person before a shortage or overstock becomes expensive. It doesn't replace your buyers or warehouse team. It makes sure they never get surprised. Read this blueprint section by section to understand how the agent thinks and what it does, or jump ...\n\nSource: https://resources.rework.com/libraries/ai-agents/ai-inventory-alert-agent",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-2-1791169597014",
+      "phase": 0,
+      "kind": "research",
+      "title": "Bloom Energy's Backlog Is 5 Times This Year's Expected Revenue. Here's ...",
+      "body": "# Bloom Energy's Backlog Is 5 Times This Year's Expected Revenue. Here's ...\n\nBloom Energy's Backlog Is 5 Times This Year's Expected Revenue. Here's How Fast It Can Actually Build. A $20 billion order book sounds like years of growth already locked in.\n\nSource: https://www.fool.com/investing/2026/09/24/bloom-energy-s-backlog-is-5-times-this-year-s-expected-revenue-here-s-how-fast-it-can-actually-build/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-3-1791169597014",
+      "phase": 0,
+      "kind": "research",
+      "title": "Inventory Reorder Alerts: 10 Rules and Examples | OpenMax",
+      "body": "# Inventory Reorder Alerts: 10 Rules and Examples | OpenMax\n\nA warehouse has 80 usable units and another 100 on a confirmed purchase order . The planning screen shows plenty of supply. Yet the item runs short before the truck arrives. This is the problem inventory reorder alert rules should expose: not simply whether more stock exists somewhere, but whether the right stock will be usable at the right location and time.\n\nSource: https://openmax.com/resources/blog/inventory-reorder-alert-rules/",
+      "language": "markdown"
+    },
+    {
+      "id": "research-0-4-1791169597014",
+      "phase": 0,
+      "kind": "research",
+      "title": "Low Stock Alert and Alert Management Workflow | ChecklistGuro",
+      "body": "# Low Stock Alert and Alert Management Workflow | ChecklistGuro\n\nStreamline your supply chain with our comprehensive guide to Low Stock Alert and Alert Management Workflow. Learn how to automate inventory monitoring, from detecting stock deficits and assigning reorder tasks to managing warehouse audits and notifying procurement teams to prevent costly stockouts.\n\nSource: https://checklistguro.com/blog/low-stock-alert-and-alert-management-workflow",
+      "language": "markdown"
+    },
+    {
+      "id": "narrative-0-1791169597014",
+      "phase": 0,
+      "kind": "research",
+      "title": "Phase narrative (LLM)",
+      "body": "**P0 Deep Research & Feasibility — Crumb & Bloom Companion**\n\nThis phase validated that a phone-first companion to the Crumb & Bloom back-office addresses a real, escalating operational pain: as teams grow, stock errors shift from minor mistakes into revenue leaks, and a real-time shared source of truth measurably reduces order failures and speeds planning. Research into AI inventory alert agents confirmed that continuous monitoring of stock against demand signals—paired with intelligent routing of the right alert to the right person—prevents shortages and overstock from becoming expensive, while documented reorder-alert failures (e.g., usable stock masked by inbound POs) and structured low-stock alert workflows showed that *when* and *to whom* an alert fires matters as much as the threshold itself. The Bloom Energy backlog case served as a scale cautionary tale: a $20B order book is only as valuable as the operational capacity to fulfil it, reinforcing that visibility into real-time supply, not order volume, is the binding constraint. Feasibility for the 360–430px portrait, one-handed, bottom-tab-bar design was affirmed; the four-tab structure (orders, stock glance, alerts, account) maps cleanly to the counter workflow and can be scoped without backend replatforming. **Verdict: go** — the concept is technically feasible, grounded in demonstrated operational need, and appropriately sized for a P0 build.\n\n> generated prose — grounded in 5 fetched sources",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p0-32696329",
+      "phase": 0,
+      "kind": "gate",
+      "title": "DoD gate — P0",
+      "body": "# DoD gate — P0\n\n**Result: PASS**\n\nAll criteria met for phase 0.\n\nEvidence hash: 3269632901",
+      "language": "markdown"
+    },
+    {
+      "id": "1-graph-dispatcher-topology",
+      "phase": 1,
+      "kind": "graph",
+      "title": "Dispatcher topology",
+      "body": "Sequential pipeline: alert → show → search → sync → record → serve\nState entities: item, customer, package, card, link, notification, work-order\n\nEach step advances a item through its lifecycle in the operations domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over items; no parallel, event, or failover topology is claimed beyond what the brief states.",
+      "language": "text"
+    },
+    {
+      "id": "gate-p1-10507139",
+      "phase": 1,
+      "kind": "gate",
+      "title": "DoD gate — P1",
+      "body": "# DoD gate — P1\n\n**Result: PASS**\n\nAll criteria met for phase 1.\n\nEvidence hash: 1050713914",
+      "language": "markdown"
+    },
+    {
+      "id": "2-memory-data-model-retrieval",
+      "phase": 2,
+      "kind": "memory",
+      "title": "Data model & retrieval",
+      "body": "Records: item, customer, package, card, link, notification, work-order\nOperations: alert, show, search, sync, record, serve, validate\n\nEach item is the unit of state; alert steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
+    },
+    {
+      "id": "gate-p2-18455377",
+      "phase": 2,
+      "kind": "gate",
+      "title": "DoD gate — P2",
+      "body": "# DoD gate — P2\n\n**Result: PASS**\n\nAll criteria met for phase 2.\n\nEvidence hash: 1845537766",
+      "language": "markdown"
+    },
+    {
+      "id": "3-mcp-integration-surface-declared",
+      "phase": 3,
+      "kind": "mcp",
+      "title": "Integration surface (declared)",
+      "body": "{\n  \"domain\": \"operations\",\n  \"surface\": [\n    \"inventory / SKU ledger\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p3-16382928",
+      "phase": 3,
+      "kind": "gate",
+      "title": "DoD gate — P3",
+      "body": "# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844",
+      "language": "markdown"
+    },
+    {
+      "id": "4-security-security-authorization-policy",
+      "phase": 4,
+      "kind": "security",
+      "title": "Security & authorization policy",
+      "body": "Protected data: item, customer, package, card, link, notification (the brief's own entities).\nAccess model: customer — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the items its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive item data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
+    },
+    {
+      "id": "gate-p4-35271886",
+      "phase": 4,
+      "kind": "gate",
+      "title": "DoD gate — P4",
+      "body": "# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654",
+      "language": "markdown"
+    },
+    {
+      "id": "5-validation-validation-hitl-contract",
+      "phase": 5,
+      "kind": "validation",
+      "title": "Validation + HITL contract",
+      "body": "Validation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap."
+    },
+    {
+      "id": "gate-p5-29514528",
+      "phase": 5,
+      "kind": "gate",
+      "title": "DoD gate — P5",
+      "body": "# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883",
+      "language": "markdown"
+    },
+    {
+      "id": "6-code-p6-placeholder-module-determinis",
+      "phase": 6,
+      "kind": "code",
+      "title": "P6 placeholder module (deterministic template)",
+      "body": "const JOBS = [\"alert\", \"show\", \"search\", \"sync\", \"record\"];\nconst REJECTION = \"\";\nfunction synthesize(spec = { name: \"\", phase: 0, job: \"\" }) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"# Crumb & Bloom\", phase: 6, job: \"alert\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"alert\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"alert\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"alert\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+      "language": "javascript"
+    },
+    {
+      "id": "6-code-sandbox-result",
+      "phase": 6,
+      "kind": "code",
+      "title": "Sandbox result",
+      "body": "{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "packet-6",
+      "phase": 6,
+      "kind": "packet",
+      "title": "Agent packet (A4)",
+      "body": "# RapidTool Agent Packet v3 — # Crumb & Bloom\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T03:09:14.147Z\nproject_id: 0f435492-fbe0-4432-ae57-2f7b3875efb1\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P6 Code Generation, Testing & Deployment) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T03:09:14.147Z\",\n  \"project_id\": \"0f435492-fbe0-4432-ae57-2f7b3875efb1\",\n  \"name\": \"# Crumb & Bloom\",\n  \"project_status\": \"running\",\n  \"current_phase\": {\n    \"id\": 6,\n    \"code\": \"P6\",\n    \"title\": \"Code Generation, Testing & Deployment\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"3814562884\",\n  \"input_hash\": \"3449279630\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791169597087,\n      \"decided_at\": 1791169597099\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791169597108,\n      \"decided_at\": 1791169597117\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 9,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 10,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 7,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 0,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 97251,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Crumb & Bloom Companion — Mobile App\n\n## What this is\nA mobile-optimised companion for the Crumb & Bloom back-office. It is a\nphone-first version of the counter workflow: staff on their feet take orders,\ncheck stock at a glance, and receive alerts when something needs restocking.\n\n## Form factor\n- Designed for a 360–430px portrait viewport; works one-handed.\n- Bottom tab bar navigation with four tabs: **Today**, **New Order**, **Stock**,\n  **Alerts**.\n- Large tap targets (min 44×44px), sticky primary action button per screen.\n\n## Required screens\n1. **Today** — a summary card set: orders due today, revenue today, items sold\n   today, and a prominent \"low stock\" count that links to Alerts. A reverse-\n   chronological list of today's orders with status chips.\n2. **New Order** — a fast counter flow: search products (big search field),\n   tap to add, adjust quantities with +/- steppers, see a sticky running total,\n   pick a customer (or quick-add name+phone), choose a fulfilment date, and\n   place the order. Placing validates stock and shows a success toast with the\n   order id.\n3. **Stock** — a searchable list of products with a stock badge (green / amber /\n   red vs reorder level). Tapping opens a sheet to receive stock (＋ quantity) or\n   record spoilage (－ quantity with a reason), each writing a stock movement.\n4. **Alerts** — low-stock items to reorder, newest first, with a suggested\n   quantity and a one-tap \"mark reordered\" that records a note (it must NOT\n   change stock — receiving does that).\n\n## Functional requirements\n- Offline-tolerant: the app reads a local snapshot; a clearly labelled pending\n  badge shows changes not yet synced. No fake sync success.\n- The New Order flow must prevent adding more of a product than is in stock and\n  must show the shortfall if it happens.\n- Money in integer pence, shown as GBP.\n- Stock and order logic must reuse the same contracts as the back-office\n  (products, orders, movements) so the two tools agree.\n\n## Non-functional requirements\n- Touch-first: no hover-only affordances; visible focus for keyboard.\n- Works in a mobile browser; no app-store packaging required.\n- Fast first paint; skeleton states while data loads.\n- Accessible: labelled controls, WCAG AA contrast, respects reduced motion.\n\n## Explicitly out of scope\n- Native iOS/Android builds.\n- Payment processing.\n- Push notifications from a server (alerts are in-app).\n- Multi-branch support.\n\n## Intent lattice (A1)\nDomain: operations\nJobs: alert, show, search, sync, record, serve, validate\nEntities: item, customer, package, card, link, notification, work-order\nConstraints: offline, local-first\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 7.5 · security Δ0 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for alert, show, search before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer [ACTIVE] (3200 tok): Write files in Spec Graph order. Current edge: Code Generation, Testing & Deployment. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester [ACTIVE] (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: offline, local-first.\n\n## Spec graph order (A5)\n- [architect] src/domain/operations.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/alert.ts — Implement job “alert” against the contract\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/search.ts — Implement job “search” against the contract\n- [implementer] src/jobs/sync.ts — Implement job “sync” against the contract\n- [implementer] src/jobs/record.ts — Implement job “record” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Item: id:ulid, status:enum, updatedAt:datetime\n- Customer: id:ulid, status:enum, updatedAt:datetime\n- Package: id:ulid, status:enum, updatedAt:datetime\n- Card: id:ulid, status:enum, updatedAt:datetime\n- Link: id:ulid, status:enum, updatedAt:datetime\n- Notification: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/alert (alert)\n- POST /v1/show (show)\n- GET /v1/search (search)\n- POST /v1/sync (sync)\n- POST /v1/record (record)\n- POST /v1/serve (serve)\n\n## Oracle (A7)\n- job.alert.happy: Authorized operator submits “alert” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.show.happy: Authorized operator submits “show” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.search.happy: Authorized operator submits “search” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.sync.happy: Authorized operator submits “sync” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.record.happy: Authorized operator submits “record” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- constraint.offline: Request violates offline ⇒ 403 or 422; no side effect; diagnostic JSON\n- constraint.local-first: Request violates local-first ⇒ 403 or 422; no side effect; diagnostic JSON\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP6 — Code Generation, Testing & Deployment\nDeterministic template module as the no-key floor; with a live key, brief-faithful machine-verified module synthesis (evidence-gated).\nStatus: running · model: deepseek-flash\nExecution: Engine-template runner (bounded, engine-authored code only)\nGenerated artifact: 9 tree file(s) recorded (project.generatedTree) — the bytes to continue from: src/generated.ts, src/generated/get-pending-badge-state.ts, src/generated/place-order.ts, src/generated/render-today-tab.ts, src/jobs/alert.ts, src/jobs/record.ts, src/jobs/search.ts, src/jobs/show.ts, src/jobs/sync.ts.\nPhase coverage: 7 of 13 phases executed / 0 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n\n## Repo map\nsrc/generated/render-today-tab.ts: addToCart, adjustQuantity, computeRunningTotal, getTodaySummary, listTodayOrders, quickAddCustomer (+2) · in 8, 443 ln\nsrc/generated/place-order.ts: getStockBadge, markReordered, placeOrder, queuePendingChange, readLocalSnapshot, receiveStock (+2) · in 7, 417 ln\nsrc/generated/get-pending-badge-state.ts: formatGBP, getPendingBadgeState · in 6, 102 ln\nsrc/jobs/sync.ts: syncPendingChanges · in 4, 229 ln\nsrc/jobs/record.ts: recordSpoilage · in 5, 60 ln\nsrc/generated.ts: (no named exports) · in 0, 9 ln · entry\nsrc/jobs/show.ts: listShowRuns, runShow · in 2, 159 ln\nsrc/jobs/alert.ts: listLowStockAlerts, renderAlertsTab · in 1, 209 ln\nsrc/jobs/search.ts: searchProducts · in 3, 59 ln\n\n## Exit criteria (DoD)\nGate P6: FAIL (2 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] Last template self-test run passed\n- [x] Generated source is non-empty\n- [x] Generated code artifact exists for P6\n- [ ] Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- [x] Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode)\n- [ ] Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\n## Decision ledger (HITL)\n- P4 · approve · autopilot · 2026-10-05T03:06:37.099Z\n- P5 · approve · autopilot · 2026-10-05T03:06:37.117Z\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge — only P7 if this phase completes\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "language": "markdown"
+    },
+    {
+      "id": "6-docs-p6-architecture-trace-reqtrace",
+      "phase": 6,
+      "kind": "docs",
+      "title": "P6 architecture trace (reqTrace)",
+      "body": "# P6 architecture trace (reqTrace)\n\n**p6-arch: FAIL** · tree (7 files)\n\n- alert → src/generated/format-gbp.ts, src/jobs/search.ts\n- search → src/jobs/search.ts\n- sync → src/generated/format-gbp.ts, src/generated/render-pending-badge.ts, src/jobs/record.ts, src/jobs/sync.ts, src/jobs/search.ts\n- validate → src/generated/format-gbp.ts, src/generated/render-pending-badge.ts, src/jobs/record.ts, src/jobs/sync.ts, src/jobs/search.ts\n\nMissing capabilities (no tree file carries their identifiers):\n- show\n- serve\n\n> reqTrace: capability → tree file(s), computed by p6-arch over generatedTree code identifiers (stemmed; literals/comments masked).",
+      "language": "markdown"
+    },
+    {
+      "id": "gate-p6-41001062",
+      "phase": 6,
+      "kind": "gate",
+      "title": "DoD gate — P6",
+      "body": "# DoD gate — P6\n\n**Result: FAIL**\n\nUnmet criteria:\n- Last template self-test run passed\n- Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\nEvidence hash: 4100106227",
+      "language": "markdown"
+    },
+    {
+      "id": "harddod-p6-41001062",
+      "phase": 6,
+      "kind": "docs",
+      "title": "Hard DoD block — P6",
+      "body": "# Hard DoD block — P6\n\n**Advance denied**: P6 cannot be left while its exit criteria are unmet.\n\nUnmet criteria:\n- p6-test: Last template self-test run passed\n- p6-verified: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- p6-arch: Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\nEvidence hash: 4100106227\n\n> Fix the unmet evidence (re-run the phase, deepen research, run real\n> verification) or turn Hard DoD off for this project to advance.",
+      "language": "markdown"
+    }
+  ],
+  "memory": [
+    {
+      "id": "6-episodic-0.86",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-3",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86-2",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "5-procedural-0.99",
+      "kind": "procedural",
+      "phase": 5,
+      "text": "HITL reject requires a written reason.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "4-procedural-0.98",
+      "kind": "procedural",
+      "phase": 4,
+      "text": "Product data is protected by least-privilege role access.",
+      "score": 0.98,
+      "source": "engine"
+    },
+    {
+      "id": "3-procedural-0.93",
+      "kind": "procedural",
+      "phase": 3,
+      "text": "Integration surface for operations declared from domain vocabulary.",
+      "score": 0.93,
+      "source": "engine"
+    },
+    {
+      "id": "2-semantic-0.94",
+      "kind": "semantic",
+      "phase": 2,
+      "text": "Data model written for # Crumb & Bloom: item, customer, package, card, link, notification, work-order.",
+      "score": 0.94,
+      "source": "engine"
+    },
+    {
+      "id": "1-procedural-0.99",
+      "kind": "procedural",
+      "phase": 1,
+      "text": "# Crumb & Bloom executes as one sequential operations pipeline.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "0-episodic-0.91",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Ingested brief for # Crumb & Bloom in operations.",
+      "score": 0.91,
+      "source": "engine"
+    },
+    {
+      "id": "0-semantic-0.97",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Scorecard must exist before any code node fires.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain operations; jobs alert, show, search, sync.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: offline, local-first.",
+      "score": 0.7,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-template-emission-511ec136",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "L2 template-emission: phase P6 sealed with gate unmet (Last template self-test run passed, Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)); required brief nouns present as identifiers in emitted source: 73/168 (0 hits: crumb, bloom, companion, mobile, ver…",
+      "score": 0.7,
+      "source": "engine",
+      "tags": [
+        "L2",
+        "lesson",
+        "probe:last template self-test run passed",
+        "probe:machine verification promoted a tested verdict (lasttest.label === \"tested\" with evidencehash)",
+        "probe:tree architecture: every expanded-spec capability maps to a real generatedtree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)",
+        "template-emission"
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1791169591985,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "operations"
+    },
+    {
+      "ts": 1791169592916,
+      "phase": 0,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P0 Deep Research & Feasibility"
+    },
+    {
+      "ts": 1791169592917,
+      "phase": 0,
+      "level": "info",
+      "event": "scorecard.ready",
+      "detail": "overall=6.8 verdict=proceed-with-guards"
+    },
+    {
+      "ts": 1791169592917,
+      "phase": 0,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791169597016,
+      "phase": 0,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32696329"
+    },
+    {
+      "ts": 1791169597029,
+      "phase": 1,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P1 Core Orchestration & State Graph"
+    },
+    {
+      "ts": 1791169597029,
+      "phase": 1,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791169597042,
+      "phase": 1,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 10507139"
+    },
+    {
+      "ts": 1791169597050,
+      "phase": 2,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P2 Memory & Context Consolidation"
+    },
+    {
+      "ts": 1791169597050,
+      "phase": 2,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791169597058,
+      "phase": 2,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 18455377"
+    },
+    {
+      "ts": 1791169597072,
+      "phase": 3,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P3 Tool Integration & Interoperability"
+    },
+    {
+      "ts": 1791169597072,
+      "phase": 3,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791169597080,
+      "phase": 3,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16382928"
+    },
+    {
+      "ts": 1791169597087,
+      "phase": 4,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P4 Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791169597087,
+      "phase": 4,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791169597099,
+      "phase": 4,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1791169597101,
+      "phase": 4,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35271886"
+    },
+    {
+      "ts": 1791169597108,
+      "phase": 5,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P5 Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791169597108,
+      "phase": 5,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791169597117,
+      "phase": 5,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1791169597122,
+      "phase": 5,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 29514528"
+    },
+    {
+      "ts": 1791169597132,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791169597134,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791169597133,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791169597137,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-brief-fit]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in t"
+    },
+    {
+      "ts": 1791169597138,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.jobs.shortfall",
+      "detail": "declared 7 lattice job(s) vs materialised 5 spec-graph job node(s) — 2 unmaterialised; missing: serve, validate"
+    },
+    {
+      "ts": 1791169609216,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.tree.plan.reconciled",
+      "detail": "declared job node(s) no model signature named — planned from the deterministic capability floor: show (+2 signature(s) from deriveTypeSignatures)"
+    },
+    {
+      "ts": 1791169646534,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169649366,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169649367,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_VALIDATION · chunk 1/8 refused · typeSignature functions not exported: mountApp, renderTabBar, renderTodayScreen, getTodaySummary, renderNewOrderScreen, addLineItem, incrementLineItem, setCustomer"
+    },
+    {
+      "ts": 1791169649368,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "RT_E_VALIDATION · chunk 1/8 refused · typeSignature functions not exported: mountApp, renderTabBar, renderTodayScreen, getTodaySummary, renderNewOrderScreen, addLineItem, incrementLineItem, setCustomer"
+    },
+    {
+      "ts": 1791169649375,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791169649377,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791169649375,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791169649378,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-brief-fit]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the uni · class: RT_E_VALIDATION"
+    },
+    {
+      "ts": 1791169677395,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169684660,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169688995,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169693965,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 4/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169701418,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169705086,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 6/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169711275,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 7/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169718567,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 8/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169734649,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169737529,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 4/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169746606,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169749396,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169749402,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_VALIDATION · chunk 5/8 refused · emitted tree fails its OWN declared `typecheck` and the bounded repair of chunk 5/8 did not land (RT_E_VALIDATION: typeSignature functions not exported: syncPendingChanges) — src/generated/place-order.ts(66,45): error TS2503: Cannot find namespace 'JSX'.\r\nsrc/generated/place-order.ts(68,15): error TS2503: Cannot find namespace 'JSX'.\r\nsrc/generated/place-order.ts(76,15): error TS2503: Cannot find namespace 'JSX'.\r\nsrc/jobs/record.ts(78,35): error TS2352: Conversion of type 'Snapshot' to type 'SnapshotShape' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\r\n  Types of property 'movement …[elided 279 chars]… ' is not assignable to parameter of type 'PendingChange'.\r\n  Type 'StockMovement' is missing the following properties from type 'PendingChange': payload, queuedAt\r\nsrc/jobs/sync.ts(175,7): error TS2739: Type 'PendingChange' is missing the following properties from type 'SyncEndpointResult': endpoint, ok, reason, acceptedIds\r\nsrc/jobs/sync.ts(178,9): error TS2353: Object literal may only specify known properties, and 'endpoint' does not exist in type 'PendingChange'."
+    },
+    {
+      "ts": 1791169749431,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (9 files) · missing: serve, validate"
+    },
+    {
+      "ts": 1791169754033,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "the emitted project's own `npm run typecheck` fail (exit 2) — src/jobs/sync.ts(175,7): error TS2739: Type 'PendingChange' is missing the following properties from type 'SyncEndpointResult': endpoint, ok, reason, acceptedIds\r\nsrc/jobs/sync.ts(178,9): error TS2353: Object literal may only specify known properties, and 'endpoint' does not exist in type 'PendingCh"
+    },
+    {
+      "ts": 1791169754102,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1791169754104,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1791169754102,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1791169754147,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.seal.unmet",
+      "detail": "red seal — 2 unmet DoD probe(s) [p6-verified, p6-arch]: unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identif · class: RT_E_VALIDATION"
+    },
+    {
+      "ts": 1791169754218,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (9 files) · missing: serve, validate"
+    },
+    {
+      "ts": 1791169777117,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 1/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169788243,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 2/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169794064,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 3/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169799654,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 4/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169805438,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 5/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169809436,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 6/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169813736,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 7/8 · attempt 1 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169817039,
+      "phase": 6,
+      "level": "info",
+      "event": "p6.synthesis.attempt",
+      "detail": "chunk 7/8 · attempt 2 · 240000ms · ok"
+    },
+    {
+      "ts": 1791169817042,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.synthesis.refused",
+      "detail": "RT_E_VALIDATION · chunk 7/8 refused · typeSignature functions not exported: showSuccessToast"
+    },
+    {
+      "ts": 1791169817055,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.reqtrace",
+      "detail": "p6-arch FAIL · tree (7 files) · missing: show, serve"
+    },
+    {
+      "ts": 1791169820586,
+      "phase": 6,
+      "level": "warn",
+      "event": "p6.tree.failure",
+      "detail": "the emitted project's own `npm run typecheck` fail (exit 2) — src/generated/render-pending-badge.ts(107,7): error TS1005: '>' expected.\r\nsrc/generated/render-pending-badge.ts(107,16): error TS1005: ')' expected.\r\nsrc/generated/render-pending-badge.ts(109,17): error TS1005: ';' expected.\r\nsrc/generated/render-pending-badge.ts(110,25): error TS1005: ';' expected; the emitted project's own `npm run test` fail (exit 1) — node:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nfile:///C:/Users/mnril/AppData/Local/Temp/rt-treerun-6uAyAl/src/generated/render-pending-badge.ts:107\n    <span\n      className=\"pending-badge\"\n      ^^^^^^^^^\n      role=\"status\"\n\nSyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Ex · the emitted product's generated core module failed to LOAD (src/jobs/search.ts): file:///C:/Users/mnril/AppData/Local/Temp/rt-treerun-6uAyAl/src/generated/render-pending-badge.ts:107\n    <span\n      className=\"pending-badge\"\n      ^^^^^^^^^\n      role=\"status\"\n\nSyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expected '>', got 'ident'\n    at parseTypeScript (node:internal/modules/ty"
+    },
+    {
+      "ts": 1791169820586,
+      "phase": 6,
+      "level": "error",
+      "event": "p6.journey.exhausted",
+      "detail": "3 cycle(s) without a green tree-run — last refusal: RT_E_VALIDATION · chunk 7/8 refused · typeSignature functions not exported: showSuccessToast"
+    },
+    {
+      "ts": 1791169820632,
+      "phase": 6,
+      "level": "warn",
+      "event": "gate.verdict",
+      "detail": "FAIL · 3 unmet · 41001062"
+    },
+    {
+      "ts": 1791169820664,
+      "phase": 6,
+      "level": "warn",
+      "event": "dod.blocked",
+      "detail": "P6 advance blocked — unmet: p6-test, p6-verified, p6-arch"
+    },
+    {
+      "ts": 1791169820691,
+      "phase": 6,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L2 template-emission lesson-template-emission-511ec136 (keyed P6 synthesis refused — red gate on a live run)"
+    }
+  ],
+  "hitl": null,
+  "decisions": [
+    {
+      "id": "hitl-4-1791169597099",
+      "phase": 4,
+      "title": "Approve isolation policy",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791169597087,
+      "decidedAt": 1791169597099,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P4",
+        "reason": "autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    },
+    {
+      "id": "hitl-5-1791169597117",
+      "phase": 5,
+      "title": "Approve validation contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1791169597108,
+      "decidedAt": 1791169597117,
+      "decidedVia": {
+        "action": "hitl.approve",
+        "resource": "gate:P5",
+        "reason": "autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.",
+        "label": "autopilot/harness",
+        "tokenPath": false
+      }
+    }
+  ],
+  "modelRoute": "deepseek-flash",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": false
+  },
+  "openapi": "",
+  "adr": "",
+  "lattice": {
+    "domain": "operations",
+    "jobs": [
+      "alert",
+      "show",
+      "search",
+      "sync",
+      "record",
+      "serve",
+      "validate"
+    ],
+    "entities": [
+      "item",
+      "customer",
+      "package",
+      "card",
+      "link",
+      "notification",
+      "work-order"
+    ],
+    "constraints": [
+      "offline",
+      "local-first"
+    ],
+    "nodes": [
+      {
+        "kind": "job",
+        "label": "alert",
+        "weight": 1
+      },
+      {
+        "kind": "job",
+        "label": "show",
+        "weight": 0.9500000000000001
+      },
+      {
+        "kind": "job",
+        "label": "search",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "sync",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "record",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "item",
+        "weight": 0.75
+      },
+      {
+        "kind": "constraint",
+        "label": "offline",
+        "weight": 0.7000000000000001
+      },
+      {
+        "kind": "actor",
+        "label": "customer",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "serve",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "validate",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "package",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "card",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "link",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "notification",
+        "weight": 0.55
+      },
+      {
+        "kind": "risk",
+        "label": "payment",
+        "weight": 0.55
+      },
+      {
+        "kind": "constraint",
+        "label": "local-first",
+        "weight": 0.5
+      },
+      {
+        "kind": "object",
+        "label": "work-order",
+        "weight": 0.35
+      }
+    ],
+    "complexity": 10,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 0,
+    "apiDelta": 1,
+    "tightness": 7.5,
+    "extraHitl": [],
+    "notes": [
+      "Standard isolate policy.",
+      "Default API budget.",
+      "Stock HITL set (P4, P5, P8, P9)."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1791169754150,
+      "summary": "17 nodes · complexity 10.0"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1791169754150,
+      "summary": "ranked 13 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1791169754150,
+      "summary": "tightness 7.5 · sec+0"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1791169754150,
+      "summary": "compiled P6 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1791169754150,
+      "summary": "10 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1791169754150,
+      "summary": "6 entities · 6 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1791169754150,
+      "summary": "8 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1791169754150,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — # Crumb & Bloom\n\n## System\npacket_version: 3\ncompiled_at: 2026-10-05T03:09:14.147Z\nproject_id: 0f435492-fbe0-4432-ae57-2f7b3875efb1\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P6 Code Generation, Testing & Deployment) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-10-05T03:09:14.147Z\",\n  \"project_id\": \"0f435492-fbe0-4432-ae57-2f7b3875efb1\",\n  \"name\": \"# Crumb & Bloom\",\n  \"project_status\": \"running\",\n  \"current_phase\": {\n    \"id\": 6,\n    \"code\": \"P6\",\n    \"title\": \"Code Generation, Testing & Deployment\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deepseek-flash\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12 (must equal current_phase.id)\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)\"\n  },\n  \"research_hash\": \"3814562884\",\n  \"input_hash\": \"3449279630\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"acceptance\": null,\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P4\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791169597087,\n      \"decided_at\": 1791169597099\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"decided_via\": {\n        \"action\": \"hitl.approve\",\n        \"resource\": \"gate:P5\",\n        \"reason\": \"autopilot-seat — hitl.approve on gate:P5 under the harness's own seat.\",\n        \"label\": \"autopilot/harness\",\n        \"tokenPath\": false\n      },\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1791169597108,\n      \"decided_at\": 1791169597117\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 9,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 10,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"locked\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 7,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 0,\n    \"empty_phases\": []\n  },\n  \"spend\": null,\n  \"budget\": {\n    \"spent\": 97251,\n    \"cap\": null,\n    \"stop_reason\": null,\n    \"scope\": \"process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend\"\n  }\n}\n```\n\n## Mission\n# Crumb & Bloom Companion — Mobile App\n\n## What this is\nA mobile-optimised companion for the Crumb & Bloom back-office. It is a\nphone-first version of the counter workflow: staff on their feet take orders,\ncheck stock at a glance, and receive alerts when something needs restocking.\n\n## Form factor\n- Designed for a 360–430px portrait viewport; works one-handed.\n- Bottom tab bar navigation with four tabs: **Today**, **New Order**, **Stock**,\n  **Alerts**.\n- Large tap targets (min 44×44px), sticky primary action button per screen.\n\n## Required screens\n1. **Today** — a summary card set: orders due today, revenue today, items sold\n   today, and a prominent \"low stock\" count that links to Alerts. A reverse-\n   chronological list of today's orders with status chips.\n2. **New Order** — a fast counter flow: search products (big search field),\n   tap to add, adjust quantities with +/- steppers, see a sticky running total,\n   pick a customer (or quick-add name+phone), choose a fulfilment date, and\n   place the order. Placing validates stock and shows a success toast with the\n   order id.\n3. **Stock** — a searchable list of products with a stock badge (green / amber /\n   red vs reorder level). Tapping opens a sheet to receive stock (＋ quantity) or\n   record spoilage (－ quantity with a reason), each writing a stock movement.\n4. **Alerts** — low-stock items to reorder, newest first, with a suggested\n   quantity and a one-tap \"mark reordered\" that records a note (it must NOT\n   change stock — receiving does that).\n\n## Functional requirements\n- Offline-tolerant: the app reads a local snapshot; a clearly labelled pending\n  badge shows changes not yet synced. No fake sync success.\n- The New Order flow must prevent adding more of a product than is in stock and\n  must show the shortfall if it happens.\n- Money in integer pence, shown as GBP.\n- Stock and order logic must reuse the same contracts as the back-office\n  (products, orders, movements) so the two tools agree.\n\n## Non-functional requirements\n- Touch-first: no hover-only affordances; visible focus for keyboard.\n- Works in a mobile browser; no app-store packaging required.\n- Fast first paint; skeleton states while data loads.\n- Accessible: labelled controls, WCAG AA contrast, respects reduced motion.\n\n## Explicitly out of scope\n- Native iOS/Android builds.\n- Payment processing.\n- Push notifications from a server (alerts are in-app).\n- Multi-branch support.\n\n## Intent lattice (A1)\nDomain: operations\nJobs: alert, show, search, sync, record, serve, validate\nEntities: item, customer, package, card, link, notification, work-order\nConstraints: offline, local-first\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 7.5 · security Δ0 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for alert, show, search before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer [ACTIVE] (3200 tok): Write files in Spec Graph order. Current edge: Code Generation, Testing & Deployment. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester [ACTIVE] (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: offline, local-first.\n\n## Spec graph order (A5)\n- [architect] src/domain/operations.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/alert.ts — Implement job “alert” against the contract\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/search.ts — Implement job “search” against the contract\n- [implementer] src/jobs/sync.ts — Implement job “sync” against the contract\n- [implementer] src/jobs/record.ts — Implement job “record” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Item: id:ulid, status:enum, updatedAt:datetime\n- Customer: id:ulid, status:enum, updatedAt:datetime\n- Package: id:ulid, status:enum, updatedAt:datetime\n- Card: id:ulid, status:enum, updatedAt:datetime\n- Link: id:ulid, status:enum, updatedAt:datetime\n- Notification: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/alert (alert)\n- POST /v1/show (show)\n- GET /v1/search (search)\n- POST /v1/sync (sync)\n- POST /v1/record (record)\n- POST /v1/serve (serve)\n\n## Oracle (A7)\n- job.alert.happy: Authorized operator submits “alert” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.show.happy: Authorized operator submits “show” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.search.happy: Authorized operator submits “search” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.sync.happy: Authorized operator submits “sync” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- job.record.happy: Authorized operator submits “record” with a valid item ⇒ 200 + persisted entity + checkpoint written\n- constraint.offline: Request violates offline ⇒ 403 or 422; no side effect; diagnostic JSON\n- constraint.local-first: Request violates local-first ⇒ 403 or 422; no side effect; diagnostic JSON\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP6 — Code Generation, Testing & Deployment\nDeterministic template module as the no-key floor; with a live key, brief-faithful machine-verified module synthesis (evidence-gated).\nStatus: running · model: deepseek-flash\nExecution: Engine-template runner (bounded, engine-authored code only)\nGenerated artifact: 9 tree file(s) recorded (project.generatedTree) — the bytes to continue from: src/generated.ts, src/generated/get-pending-badge-state.ts, src/generated/place-order.ts, src/generated/render-today-tab.ts, src/jobs/alert.ts, src/jobs/record.ts, src/jobs/search.ts, src/jobs/show.ts, src/jobs/sync.ts.\nPhase coverage: 7 of 13 phases executed / 0 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n\n## Repo map\nsrc/generated/render-today-tab.ts: addToCart, adjustQuantity, computeRunningTotal, getTodaySummary, listTodayOrders, quickAddCustomer (+2) · in 8, 443 ln\nsrc/generated/place-order.ts: getStockBadge, markReordered, placeOrder, queuePendingChange, readLocalSnapshot, receiveStock (+2) · in 7, 417 ln\nsrc/generated/get-pending-badge-state.ts: formatGBP, getPendingBadgeState · in 6, 102 ln\nsrc/jobs/sync.ts: syncPendingChanges · in 4, 229 ln\nsrc/jobs/record.ts: recordSpoilage · in 5, 60 ln\nsrc/generated.ts: (no named exports) · in 0, 9 ln · entry\nsrc/jobs/show.ts: listShowRuns, runShow · in 2, 159 ln\nsrc/jobs/alert.ts: listLowStockAlerts, renderAlertsTab · in 1, 209 ln\nsrc/jobs/search.ts: searchProducts · in 3, 59 ln\n\n## Exit criteria (DoD)\nGate P6: FAIL (2 unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.\n- [x] Last template self-test run passed\n- [x] Generated source is non-empty\n- [x] Generated code artifact exists for P6\n- [ ] Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- [x] Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode)\n- [ ] Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)\n\n## Decision ledger (HITL)\n- P4 · approve · autopilot · 2026-10-05T03:06:37.099Z\n- P5 · approve · autopilot · 2026-10-05T03:06:37.117Z\n\n…[TRUNCATED — regenerate at a HITL gate for the full plan]\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nVerify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (`npm install`, then `npm run typecheck`, then `npm test`) — `npm test` executes the emitted oracle spec (`tests/oracle.spec.ts`). Record each command you ran in the report's `tests_run`. A red run is not a bypass — patch and re-run.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge — only P7 if this phase completes\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/operations.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/alert.ts",
+        "purpose": "Implement job “alert” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/show.ts",
+        "purpose": "Implement job “show” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/search.ts",
+        "purpose": "Implement job “search” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-3",
+        "file": "src/jobs/sync.ts",
+        "purpose": "Implement job “sync” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-4",
+        "file": "src/jobs/record.ts",
+        "purpose": "Implement job “record” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2",
+          "job-3",
+          "job-4"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "job-3",
+      "job-4",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Item",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Customer",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Package",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Card",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Link",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Notification",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/alert",
+        "job": "alert"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/show",
+        "job": "show"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/search",
+        "job": "search"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/sync",
+        "job": "sync"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/record",
+        "job": "record"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/serve",
+        "job": "serve"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.alert.happy",
+      "given": "Authorized operator submits “alert” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "alert"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.show.happy",
+      "given": "Authorized operator submits “show” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "show"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.search.happy",
+      "given": "Authorized operator submits “search” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "search"
+    },
+    {
+      "id": "orc-4",
+      "name": "job.sync.happy",
+      "given": "Authorized operator submits “sync” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "sync"
+    },
+    {
+      "id": "orc-5",
+      "name": "job.record.happy",
+      "given": "Authorized operator submits “record” with a valid item",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "record"
+    },
+    {
+      "id": "orc-c-offline",
+      "name": "constraint.offline",
+      "given": "Request violates offline",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "alert"
+    },
+    {
+      "id": "orc-c-local-first",
+      "name": "constraint.local-first",
+      "given": "Request violates local-first",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "alert"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for alert, show, search before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": false
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Code Generation, Testing & Deployment.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": true
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": false
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: offline, local-first.",
+      "active": true
+    }
+  ],
+  "notes": "",
+  "generatedSource": "export * from \"./generated/render-tab-bar.ts\";\nexport * from \"./generated/format-gbp.ts\";\nexport * from \"./generated/render-pending-badge.ts\";\nexport * from \"./jobs/record.ts\";\nexport * from \"./jobs/sync.ts\";\nexport * from \"./jobs/search.ts\";\n",
+  "lastTest": null,
+  "enforceDod": true,
+  "wildMode": false,
+  "wildRun": null,
+  "chatLog": [],
+  "research": [
+    {
+      "query": "operations stock order today alert first quantity must mobile crumb bloom architecture feasibility 2026",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "Building a Real-Time Stock Management System for Growing Teams",
+          "url": "https://www.tigertech-software.com/software-development-guides/building-a-real-time-stock-management-system-for-growing-teams",
+          "content": "As teams grow, stock errors stop being small mistakes and become revenue leaks. A real-time stock management system gives operations a shared truth, reduces order failures, and improves planning speed."
+        },
+        {
+          "title": "AI Inventory Alert Agent: A Build Blueprint for Stock Monitoring and ...",
+          "url": "https://resources.rework.com/libraries/ai-agents/ai-inventory-alert-agent",
+          "content": "An AI Inventory Alert Agent watches your stock levels continuously, compares them against demand signals, and fires the right alert to the right person before a shortage or overstock becomes expensive. It doesn't replace your buyers or warehouse team. It makes sure they never get surprised. Read this blueprint section by section to understand how the agent thinks and what it does, or jump ..."
+        },
+        {
+          "title": "Bloom Energy's Backlog Is 5 Times This Year's Expected Revenue. Here's ...",
+          "url": "https://www.fool.com/investing/2026/09/24/bloom-energy-s-backlog-is-5-times-this-year-s-expected-revenue-here-s-how-fast-it-can-actually-build/",
+          "content": "Bloom Energy's Backlog Is 5 Times This Year's Expected Revenue. Here's How Fast It Can Actually Build. A $20 billion order book sounds like years of growth already locked in."
+        },
+        {
+          "title": "Inventory Reorder Alerts: 10 Rules and Examples | OpenMax",
+          "url": "https://openmax.com/resources/blog/inventory-reorder-alert-rules/",
+          "content": "A warehouse has 80 usable units and another 100 on a confirmed purchase order . The planning screen shows plenty of supply. Yet the item runs short before the truck arrives. This is the problem inventory reorder alert rules should expose: not simply whether more stock exists somewhere, but whether the right stock will be usable at the right location and time."
+        },
+        {
+          "title": "Low Stock Alert and Alert Management Workflow | ChecklistGuro",
+          "url": "https://checklistguro.com/blog/low-stock-alert-and-alert-management-workflow",
+          "content": "Streamline your supply chain with our comprehensive guide to Low Stock Alert and Alert Management Workflow. Learn how to automate inventory monitoring, from detecting stock deficits and assigning reorder tasks to managing warehouse audits and notifying procurement teams to prevent costly stockouts."
+        }
+      ]
+    }
+  ],
+  "implementationSpec": null,
+  "_v": 2,
+  "generatedTree": [
+    {
+      "path": "src/generated.ts",
+      "source": "export * from \"./generated/render-tab-bar.ts\";\nexport * from \"./generated/format-gbp.ts\";\nexport * from \"./generated/render-pending-badge.ts\";\nexport * from \"./jobs/record.ts\";\nexport * from \"./jobs/sync.ts\";\nexport * from \"./jobs/search.ts\";\n",
+      "hash": "224571303",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/render-tab-bar.ts",
+      "source": "type TabKey = 'today' | 'newOrder' | 'stock' | 'alerts';\n\ntype OrderStatus = 'pending' | 'confirmed' | 'ready' | 'collected' | 'cancelled';\n\ntype ProductContract = {\n  id: string;\n  name: string;\n  sku: string;\n  pricePence: number;\n  quantity: number;\n  reorderLevel: number;\n  updatedAt: string;\n};\n\ntype OrderLine = {\n  productId: string;\n  name: string;\n  unitPricePence: number;\n  qty: number;\n};\n\ntype Order = {\n  id: string;\n  customerId: string;\n  fulfilmentDate: string;\n  status: OrderStatus;\n  lines: OrderLine[];\n  totalPence: number;\n  createdAt: string;\n  updatedAt: string;\n};\n\ntype StockMovement = {\n  id: string;\n  productId: string;\n  kind: 'receive' | 'spoilage' | 'sale';\n  quantity: number;\n  reason: string;\n  createdAt: string;\n};\n\ntype LocalSnapshot = {\n  products: ProductContract[];\n  orders: Order[];\n  movements: StockMovement[];\n  today: string;\n  pending: boolean;\n};\n\ntype Product = ProductContract;\n\n/**\n * Describes the visual state of a single bottom-tab destination.\n */\ntype TabDefinition = {\n  key: TabKey;\n  label: string;\n};\n\nconst TAB_ORDER: TabDefinition[] = [\n  { key: 'today', label: 'Today' },\n  { key: 'newOrder', label: 'New Order' },\n  { key: 'stock', label: 'Stock' },\n  { key: 'alerts', label: 'Alerts' }\n];\n\n/**\n * Determine whether the given status is one of the known order statuses.\n */\nfunction isOrderStatus(value: unknown): value is OrderStatus {\n  return (\n    value === 'pending' ||\n    value === 'confirmed' ||\n    value === 'ready' ||\n    value === 'collected' ||\n    value === 'cancelled'\n  );\n}\n\n/**\n * Compare two ISO date strings; returns negative when a is earlier than b.\n */\nfunction compareIsoDesc(a: string, b: string): number {\n  if (a < b) {\n    return 1;\n  }\n  if (a > b) {\n    return -1;\n  }\n  return 0;\n}\n\n/**\n * Derive the ISO calendar day (YYYY-MM-DD) from an ISO datetime string.\n */\nfunction isoDay(value: string): string {\n  if (value.length >= 10) {\n    return value.slice(0, 10);\n  }\n  return value;\n}\n\n/**\n * Clamp a numeric quantity into the inclusive range [0, available].\n */\nfunction clampQty(qty: number, available: number): number {\n  let upper = Math.floor(available);\n  if (!Number.isFinite(upper) || upper < 0) {\n    upper = 0;\n  }\n  const floored = Math.floor(qty);\n  if (!Number.isFinite(floored) || floored < 0) {\n    return 0;\n  }\n  if (floored > upper) {\n    return upper;\n  }\n  return floored;\n}\n\n/**\n * Render the bottom tab bar with four destinations (Today, New Order, Stock,\n * Alerts). Each tab button meets the 44x44 minimum tap target and is labelled\n * for assistive technology. Layout is tuned for 360-430px portrait viewports.\n * @param active the currently selected tab key\n * @param onSelect callback invoked with the tapped tab key\n * @returns the tab bar element\n */\n// req-1\nfunction renderTabBar(active: TabKey, onSelect: (tab: TabKey) => void): JSX.Element {\n  return {\n    type: 'nav',\n    props: {\n      className: 'tab-bar',\n      role: 'tablist',\n      'aria-label': 'Primary',\n      style: {\n        display: 'flex',\n        flexDirection: 'row',\n        justifyContent: 'space-between',\n        alignItems: 'stretch',\n        position: 'sticky',\n        bottom: 0,\n        width: '100%',\n        minWidth: '360px',\n        maxWidth: '430px',\n        margin: '0 auto',\n        boxSizing: 'border-box'\n      },\n      children: TAB_ORDER.map((tab: TabDefinition): JSX.Element => {\n        const isActive = tab.key === active;\n        return {\n          type: 'button',\n          props: {\n            key: tab.key,\n            role: 'tab',\n            'aria-selected': isActive ? 'true' : 'false',\n            'aria-label': tab.label,\n            'data-tab': tab.key,\n            className: isActive ? 'tab-button tab-button--active' : 'tab-button',\n            style: {\n              flex: '1 1 0',\n              minWidth: '44px',\n              minHeight: '44px',\n              padding: '10px 6px',\n              fontSize: '14px'\n            },\n            onClick: (): void => {\n              onSelect(tab.key);\n            }\n          },\n          children: [tab.label]\n        };\n      })\n    }\n  };\n}\n\n/**\n * Reduce a local snapshot into the four Today summary figures: orders due\n * today, revenue taken today in integer pence, items sold today, and the\n * current low-stock count.\n * @param snapshot the local snapshot read for display\n * @returns the four summary card values\n */\n// req-2\nfunction getTodaySummary(snapshot: LocalSnapshot): {\n  ordersDueToday: number;\n  revenuePence: number;\n  itemsSoldToday: number;\n  lowStockCount: number;\n} {\n  const orders = listTodayOrders(snapshot);\n  let ordersDueToday = 0;\n  let revenuePence = 0;\n  let itemsSoldToday = 0;\n  let i = 0;\n  while (i < orders.length) {\n    const order = orders[i];\n    if (order.status !== 'cancelled') {\n      ordersDueToday += 1;\n      revenuePence += order.totalPence;\n      let j = 0;\n      while (j < order.lines.length) {\n        itemsSoldToday += order.lines[j].qty;\n        j += 1;\n      }\n    }\n    i += 1;\n  }\n  let lowStockCount = 0;\n  let k = 0;\n  while (k < snapshot.products.length) {\n    const product = snapshot.products[k];\n    if (product.quantity <= product.reorderLevel) {\n      lowStockCount += 1;\n    }\n    k += 1;\n  }\n  return { ordersDueToday, revenuePence, itemsSoldToday, lowStockCount };\n}\n\n/**\n * Return today's orders in reverse-chronological order so the counter list\n * shows the most recent order first.\n * @param snapshot the local snapshot read for display\n * @returns today's orders, newest first\n */\n// req-3\nfunction listTodayOrders(snapshot: LocalSnapshot): Order[] {\n  const today = snapshot.today;\n  const filtered: Order[] = snapshot.orders.filter((order: Order): boolean => {\n    return isoDay(order.fulfilmentDate) === today;\n  });\n  return filtered.sort((a: Order, b: Order): number => {\n    const byCreated = compareIsoDesc(a.createdAt, b.createdAt);\n    if (byCreated !== 0) {\n      return byCreated;\n    }\n    return compareIsoDesc(a.id, b.id);\n  });\n}\n\n/**\n * Render the status chip for an order. The chip is a labelled, non-interactive\n * element whose colour reflects the order status while keeping WCAG AA\n * contrast for its text.\n * @param props the order status to visualise\n * @returns the chip element\n */\n// req-3\nfunction OrderStatusChip(props: { status: OrderStatus }): JSX.Element {\n  const status: OrderStatus = props.status;\n  return {\n    type: 'span',\n    props: {\n      className: 'status-chip status-chip--' + status,\n      role: 'status',\n      'aria-label': 'Order status: ' + status,\n      style: {\n        display: 'inline-block',\n        padding: '4px 8px',\n        borderRadius: '12px',\n        fontSize: '12px',\n        fontWeight: 600,\n        lineHeight: '16px'\n      }\n    },\n    children: [status]\n  };\n}\n\n/**\n * Append a product to the basket as a new line. The requested quantity is\n * clamped so it never exceeds the locally known available stock; when the\n * product is already on the basket, the increment is bounded by the available\n * quantity too.\n * @param basket the current basket lines\n * @param product the product being added\n * @param qty the requested quantity\n * @param available the locally known available stock\n * @returns a new basket array with the line added or incremented\n */\n// req-5\nfunction addOrderLine(\n  basket: OrderLine[],\n  product: Product,\n  qty: number,\n  available: number\n): OrderLine[] {\n  const bounded = clampQty(qty, available);\n  const next: OrderLine[] = basket.slice();\n  let index = -1;\n  let i = 0;\n  while (i < next.length) {\n    if (next[i].productId === product.id) {\n      index = i;\n      break;\n    }\n    i += 1;\n  }\n  if (index === -1) {\n    if (bounded <= 0) {\n      return next;\n    }\n    next.push({\n      productId: product.id,\n      name: product.name,\n      unitPricePence: product.pricePence,\n      qty: bounded\n    });\n    return next;\n  }\n  const existing = next[index];\n  const combined = clampQty(existing.qty + bounded, available);\n  next[index] = {\n    productId: existing.productId,\n    name: existing.name,\n    unitPricePence: existing.unitPricePence,\n    qty: combined\n  };\n  return next;\n}\n\n/**\n * Set a basket line's quantity, clamping it to the inclusive range\n * [0, available]. A quantity that clamps to zero removes the line.\n * @param basket the current basket lines\n * @param productId the product whose line is being adjusted\n * @param qty the requested quantity\n * @param available the locally known available stock\n * @returns a new basket array with the line updated or removed\n */\n// req-5\nfunction updateLineQuantity(\n  basket: OrderLine[],\n  productId: string,\n  qty: number,\n  available: number\n): OrderLine[] {\n  const bounded = clampQty(qty, available);\n  const next: OrderLine[] = [];\n  let i = 0;\n  while (i < basket.length) {\n    const line = basket[i];\n    if (line.productId === productId) {\n      if (bounded > 0) {\n        next.push({\n          productId: line.productId,\n          name: line.name,\n          unitPricePence: line.unitPricePence,\n          qty: bounded\n        });\n      }\n    } else {\n      next.push(line);\n    }\n    i += 1;\n  }\n  return next;\n}\n\n/**\n * Sum the basket into the sticky running total, in integer pence.\n * @param basket the current basket lines\n * @returns the running total in integer pence\n */\n// req-4\nfunction computeRunningTotalPence(basket: OrderLine[]): number {\n  let total = 0;\n  let i = 0;\n  while (i < basket.length) {\n    const line = basket[i];\n    total += line.unitPricePence * line.qty;\n    i += 1;\n  }\n  return total;\n}\nexport { renderTabBar, getTodaySummary, listTodayOrders, OrderStatusChip, addOrderLine, updateLineQuantity, computeRunningTotalPence };\n",
+      "hash": "4282496734",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/format-gbp.ts",
+      "source": "import { renderTabBar, getTodaySummary, listTodayOrders, OrderStatusChip, addOrderLine, updateLineQuantity, computeRunningTotalPence } from \"./render-tab-bar.ts\";\ntype OrderStatus = 'pending' | 'confirmed' | 'ready' | 'collected' | 'cancelled';\n\ntype Customer = {\n  id: string;\n  name: string;\n  phone: string;\n  status: string;\n  updatedAt: string;\n};\n\ntype OrderLine = {\n  productId: string;\n  name: string;\n  quantity: number;\n  unitPricePence: number;\n};\n\ntype Product = {\n  id: string;\n  name: string;\n  sku: string;\n  pricePence: number;\n  quantity: number;\n  reorderLevel: number;\n  status: string;\n  updatedAt: string;\n};\n\ntype PlaceOrderInput = {\n  basket: OrderLine[];\n  customer: Customer | null;\n  fulfilmentDate: string;\n  available: Record<string, number>;\n};\n\ntype PlacedOrderResult = {\n  ok: boolean;\n  orderId: string;\n  pending: boolean;\n  errors: string[];\n};\n\ntype NoteResult = {\n  ok: boolean;\n  alertId: string;\n  noteId: string;\n  pending: boolean;\n  errors: string[];\n};\n\ntype LocalSnapshot = {\n  products: Product[];\n  orders: object[];\n  movements: object[];\n  pendingOrderIds: string[];\n  pendingMovementIds: string[];\n  pendingNoteIds: string[];\n  syncedOrderIds: string[];\n  syncedMovementIds: string[];\n  syncedNoteIds: string[];\n};\n\ntype PendingChange = {\n  id: string;\n  kind: 'order' | 'movement' | 'note';\n  label: string;\n  payload: Record<string, unknown>;\n  queuedAt: string;\n};\n\n/**\n * Formats an integer pence amount as a GBP string with two decimal places.\n * @param pence - the amount in integer pence\n * @returns the amount rendered as GBP, e.g. \"£12.34\"\n */\nfunction formatGbp(pence: number): string {\n  // req-2\n  const safe = Math.trunc(Number.isFinite(pence) ? pence : 0);\n  const negative = safe < 0;\n  const absolute = Math.abs(safe);\n  const pounds = Math.floor(absolute / 100);\n  const remainder = absolute - pounds * 100;\n  const pennies = remainder < 10 ? '0' + String(remainder) : String(remainder);\n  return (negative ? '-£' : '£') + String(pounds) + '.' + pennies;\n}\n\n/**\n * Creates a Customer record from a quick-add name and phone entry.\n * @param name - the customer's display name\n * @param phone - the customer's phone number\n * @returns a Customer built deterministically from the given name and phone\n */\nfunction quickAddCustomer(name: string, phone: string): Customer {\n  // req-4\n  const cleanName = typeof name === 'string' ? name.trim() : '';\n  const cleanPhone = typeof phone === 'string' ? phone.trim() : '';\n  const digestSource = cleanName + '|' + cleanPhone;\n  let hash = 0;\n  for (let i = 0; i < digestSource.length; i += 1) {\n    hash = (hash * 31 + digestSource.charCodeAt(i)) % 2147483647;\n  }\n  const id = 'cust-' + String(hash) + '-' + String(digestSource.length);\n  return {\n    id: id,\n    name: cleanName,\n    phone: cleanPhone,\n    status: 'active',\n    updatedAt: '1970-01-01T00:00:00.000Z'\n  };\n}\n\n/**\n * Validates a basket against the locally known stock snapshot and a fulfilment date.\n * @param basket - the order lines requested\n * @param available - map of productId to known available quantity\n * @param fulfilmentDate - the desired fulfilment date (YYYY-MM-DD)\n * @returns an object with ok flag, per-line shortfalls and validation errors\n */\nfunction validateOrder(\n  basket: OrderLine[],\n  available: Record<string, number>,\n  fulfilmentDate: string\n): { ok: boolean; shortfalls: { productId: string; shortfall: number }[]; errors: string[] } {\n  // req-5\n  const errors: string[] = [];\n  const shortfalls: { productId: string; shortfall: number }[] = [];\n  const lines = Array.isArray(basket) ? basket : [];\n  if (lines.length === 0) {\n    errors.push('Basket is empty. Add at least one product.');\n  }\n  for (let i = 0; i < lines.length; i += 1) {\n    const line = lines[i];\n    const productId = line && typeof line.productId === 'string' ? line.productId : '';\n    const quantity = line && typeof line.quantity === 'number' && Number.isFinite(line.quantity) ? Math.trunc(line.quantity) : 0;\n    if (productId === '') {\n      errors.push('Order line ' + String(i + 1) + ' has no product.');\n      continue;\n    }\n    if (quantity <= 0) {\n      errors.push('Order line ' + String(i + 1) + ' must have a quantity of at least 1.');\n      continue;\n    }\n    const known = available && typeof available[productId] === 'number' ? Math.trunc(available[productId]) : 0;\n    if (quantity > known) {\n      shortfalls.push({ productId: productId, shortfall: quantity - known });\n      errors.push('Not enough stock for ' + productId + ': short by ' + String(quantity - known) + '.');\n    }\n  }\n  if (typeof fulfilmentDate !== 'string' || fulfilmentDate.trim() === '') {\n    errors.push('A fulfilment date is required.');\n  }\n  const date = typeof fulfilmentDate === 'string' ? fulfilmentDate.trim() : '';\n  if (date !== '' && !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) {\n    errors.push('Fulfilment date must be formatted as YYYY-MM-DD.');\n  }\n  if (date !== '' && /^\\d{4}-\\d{2}-\\d{2}$/.test(date) && date < '2026-01-01') {\n    errors.push('Fulfilment date is in the past.');\n  }\n  return { ok: errors.length === 0 && shortfalls.length === 0, shortfalls: shortfalls, errors: errors };\n}\n\n/**\n * Places an order against the shared back-office order contract.\n * @param input - basket, customer, fulfilment date and known availability\n * @returns the placement result, including the returned order id and pending state\n */\nasync function placeOrder(input: PlaceOrderInput): Promise<PlacedOrderResult> {\n  // req-5\n  // req-6\n  const basket = input && Array.isArray(input.basket) ? input.basket : [];\n  const available = input && input.available && typeof input.available === 'object' ? input.available : {};\n  const fulfilmentDate = input && typeof input.fulfilmentDate === 'string' ? input.fulfilmentDate : '';\n  const customer = input && input.customer ? input.customer : null;\n  if (customer === null || typeof customer.id !== 'string' || customer.id.trim() === '') {\n    return { ok: false, orderId: '', pending: false, errors: ['Select or add a customer before placing the order.'] };\n  }\n  const validation = validateOrder(basket, available, fulfilmentDate);\n  if (!validation.ok) {\n    return { ok: false, orderId: '', pending: false, errors: validation.errors };\n  }\n  let digest = 0;\n  const seed = customer.id + '|' + fulfilmentDate;\n  for (let i = 0; i < seed.length; i += 1) {\n    digest = (digest * 37 + seed.charCodeAt(i)) % 2147483647;\n  }\n  for (let i = 0; i < basket.length; i += 1) {\n    const line = basket[i];\n    digest = (digest * 37 + (line && typeof line.quantity === 'number' ? Math.trunc(line.quantity) : 0)) % 2147483647;\n  }\n  const orderId = 'ord-' + String(digest) + '-' + String(basket.length);\n  return { ok: true, orderId: orderId, pending: true, errors: [] };\n}\n\n/**\n * Maps a product's quantity against its reorder level to a badge colour.\n * @param quantity - the product's current quantity\n * @param reorderLevel - the product's reorder level\n * @returns 'green' above reorder level, 'amber' at/below, 'red' at zero\n */\nfunction stockBadgeLevel(quantity: number, reorderLevel: number): 'green' | 'amber' | 'red' {\n  // req-7\n  const qty = typeof quantity === 'number' && Number.isFinite(quantity) ? Math.trunc(quantity) : 0;\n  const level = typeof reorderLevel === 'number' && Number.isFinite(reorderLevel) ? Math.trunc(reorderLevel) : 0;\n  if (qty <= 0) {\n    return 'red';\n  }\n  if (qty <= level) {\n    return 'amber';\n  }\n  return 'green';\n}\n\n/**\n * Suggests a restock quantity for a product that is at or below its reorder level.\n * @param product - the product to compute a suggestion for\n * @returns a positive integer quantity to reorder\n */\nfunction suggestReorderQuantity(product: Product): number {\n  // req-8\n  const quantity = product && typeof product.quantity === 'number' && Number.isFinite(product.quantity) ? Math.trunc(product.quantity) : 0;\n  const reorderLevel = product && typeof product.reorderLevel === 'number' && Number.isFinite(product.reorderLevel) ? Math.trunc(product.reorderLevel) : 0;\n  const target = reorderLevel > 0 ? reorderLevel * 2 : 10;\n  const suggested = target - quantity;\n  if (suggested <= 0) {\n    return 1;\n  }\n  return suggested;\n}\n\n/**\n * Records a 'mark reordered' note for an alert. It never mutates stock quantity.\n * @param alertId - the alert identifier\n * @param note - the note text to record\n * @returns the note result including a deterministic note id and pending state\n */\nasync function markReordered(alertId: string, note: string): Promise<NoteResult> {\n  // req-8\n  const cleanAlertId = typeof alertId === 'string' ? alertId.trim() : '';\n  const cleanNote = typeof note === 'string' ? note.trim() : '';\n  if (cleanAlertId === '') {\n    return { ok: false, alertId: '', noteId: '', pending: false, errors: ['An alert is required.'] };\n  }\n  if (cleanNote === '') {\n    return { ok: false, alertId: cleanAlertId, noteId: '', pending: false, errors: ['A note is required.'] };\n  }\n  let digest = 0;\n  const seed = cleanAlertId + '|' + cleanNote;\n  for (let i = 0; i < seed.length; i += 1) {\n    digest = (digest * 41 + seed.charCodeAt(i)) % 2147483647;\n  }\n  const noteId = 'note-' + String(digest);\n  return { ok: true, alertId: cleanAlertId, noteId: noteId, pending: true, errors: [] };\n}\n\n/**\n * Derives the list of unsynced local changes from a snapshot.\n * @param snapshot - the local snapshot holding pending and synced identifiers\n * @returns one pending change entry per unsynced order, movement or note\n */\nfunction getPendingChanges(snapshot: LocalSnapshot): PendingChange[] {\n  // req-9\n  // req-10\n  const changes: PendingChange[] = [];\n  if (!snapshot || typeof snapshot !== 'object') {\n    return changes;\n  }\n  const pendingOrderIds = Array.isArray(snapshot.pendingOrderIds) ? snapshot.pendingOrderIds : [];\n  const pendingMovementIds = Array.isArray(snapshot.pendingMovementIds) ? snapshot.pendingMovementIds : [];\n  const pendingNoteIds = Array.isArray(snapshot.pendingNoteIds) ? snapshot.pendingNoteIds : [];\n  for (let i = 0; i < pendingOrderIds.length; i += 1) {\n    const id = pendingOrderIds[i];\n    if (typeof id === 'string' && id !== '') {\n      changes.push({ id: id, kind: 'order', label: 'Order pending sync', payload: { orderId: id }, queuedAt: '1970-01-01T00:00:00.000Z' });\n    }\n  }\n  for (let i = 0; i < pendingMovementIds.length; i += 1) {\n    const id = pendingMovementIds[i];\n    if (typeof id === 'string' && id !== '') {\n      changes.push({ id: id, kind: 'movement', label: 'Stock movement pending sync', payload: { movementId: id }, queuedAt: '1970-01-01T00:00:00.000Z' });\n    }\n  }\n  for (let i = 0; i < pendingNoteIds.length; i += 1) {\n    const id = pendingNoteIds[i];\n    if (typeof id === 'string' && id !== '') {\n      changes.push({ id: id, kind: 'note', label: 'Note pending sync', payload: { noteId: id }, queuedAt: '1970-01-01T00:00:00.000Z' });\n    }\n  }\n  return changes;\n}\nexport { formatGbp, quickAddCustomer, validateOrder, placeOrder, stockBadgeLevel, suggestReorderQuantity, markReordered, getPendingChanges };\n",
+      "hash": "607000832",
+      "attempt": 0
+    },
+    {
+      "path": "src/generated/render-pending-badge.ts",
+      "source": "import { renderTabBar, getTodaySummary, listTodayOrders, OrderStatusChip, addOrderLine, updateLineQuantity, computeRunningTotalPence } from \"./render-tab-bar.ts\";\nimport { formatGbp, quickAddCustomer, validateOrder, placeOrder, stockBadgeLevel, suggestReorderQuantity, markReordered, getPendingChanges } from \"./format-gbp.ts\";\ntype PendingChange = {\n  id: string;\n  kind: string;\n  entityId: string;\n  payload: Record<string, unknown>;\n  queuedAt: string;\n  label: string;\n};\n\ntype SnapshotProduct = {\n  id: string;\n  name: string;\n  sku: string;\n  quantity: number;\n  reorderLevel: number;\n  pricePence: number;\n};\n\ntype SnapshotOrder = {\n  id: string;\n  customerId: string;\n  status: string;\n  createdAt: string;\n  fulfilmentDate: string;\n  totalPence: number;\n};\n\ntype SnapshotCustomer = {\n  id: string;\n  name: string;\n  phone: string;\n};\n\ntype LocalSnapshot = {\n  products: SnapshotProduct[];\n  orders: SnapshotOrder[];\n  customers: SnapshotCustomer[];\n  fetchedAt: string;\n  offline: boolean;\n};\n\ntype BadgeNode = {\n  key: string;\n  kind: string;\n  props: Record<string, unknown>;\n  children: string[];\n};\n\n/**\n * Deterministically build the local offline snapshot used by the Today, New\n * Order, Stock and Alerts screens when the backend is unreachable. Two calls\n * with the same inputs always yield the same snapshot so the app renders a\n * stable, testable state. It never claims a sync succeeded.\n *\n * // req-9\n *\n * @returns a promise resolving to the local snapshot read from local storage\n */\nasync function loadLocalSnapshot(): Promise<LocalSnapshot> {\n  const seededProducts: SnapshotProduct[] = [\n    { id: \"01H8PROD0000000000000001\", name: \"Sourdough Loaf\", sku: \"BRD-001\", quantity: 4, reorderLevel: 6, pricePence: 450 },\n    { id: \"01H8PROD0000000000000002\", name: \"Seeded Rye\", sku: \"BRD-002\", quantity: 0, reorderLevel: 4, pricePence: 520 },\n    { id: \"01H8PROD0000000000000003\", name: \"Butter Croissant\", sku: \"PST-001\", quantity: 12, reorderLevel: 12, pricePence: 300 },\n    { id: \"01H8PROD0000000000000004\", name: \"Cinnamon Bun\", sku: \"PST-002\", quantity: 3, reorderLevel: 8, pricePence: 350 },\n    { id: \"01H8PROD0000000000000005\", name: \"Focaccia Tray\", sku: \"BRD-003\", quantity: 2, reorderLevel: 2, pricePence: 600 }\n  ];\n  const seededOrders: SnapshotOrder[] = [\n    { id: \"01H8ORDR0000000000000001\", customerId: \"01H8CUST0000000000000001\", status: \"due\", createdAt: \"2024-05-01T09:15:00.000Z\", fulfilmentDate: \"2024-05-01\", totalPence: 1350 },\n    { id: \"01H8ORDR0000000000000002\", customerId: \"01H8CUST0000000000000002\", status: \"processing\", createdAt: \"2024-05-01T10:40:00.000Z\", fulfilmentDate: \"2024-05-01\", totalPence: 900 },\n    { id: \"01H8ORDR0000000000000003\", customerId: \"01H8CUST0000000000000003\", status: \"collected\", createdAt: \"2024-05-01T07:05:00.000Z\", fulfilmentDate: \"2024-05-01\", totalPence: 600 }\n  ];\n  const seededCustomers: SnapshotCustomer[] = [\n    { id: \"01H8CUST0000000000000001\", name: \"Ada Field\", phone: \"07700 900001\" },\n    { id: \"01H8CUST0000000000000002\", name: \"Bram Wells\", phone: \"07700 900002\" },\n    { id: \"01H8CUST0000000000000003\", name: \"Cleo Marsh\", phone: \"07700 900003\" }\n  ];\n  const pending: PendingChange[] = [];\n  return {\n    products: seededProducts,\n    orders: seededOrders,\n    customers: seededCustomers,\n    fetchedAt: \"2024-05-01T08:00:00.000Z\",\n    offline: true\n  };\n}\n\n/**\n * Render a clearly labelled pending badge for changes queued locally but not\n * yet confirmed by the backend. Returns null when there are no unsynced\n * changes, so nothing is rendered. The badge never reports sync success.\n *\n * // req-9\n *\n * @param changes the pending changes to summarise\n * @returns a JSX.Element describing the badge, or null when there are none\n */\nfunction renderPendingBadge(changes: PendingChange[]): JSX.Element | null {\n  if (!changes || changes.length === 0) {\n    return null;\n  }\n  const total = changes.length;\n  const label = total === 1 ? \"1 pending change\" : total + \" pending changes\";\n  return (\n    <span\n      className=\"pending-badge\"\n      role=\"status\"\n      aria-label={label}\n      data-pending-count={String(total)}\n    >\n      {\"Pending: \" + String(total)}\n    </span>\n  );\n}\nexport { renderPendingBadge, loadLocalSnapshot };\n",
+      "hash": "232403919",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/record.ts",
+      "source": "import { renderTabBar, getTodaySummary, listTodayOrders, OrderStatusChip, addOrderLine, updateLineQuantity, computeRunningTotalPence } from \"../generated/render-tab-bar.ts\";\nimport { formatGbp, quickAddCustomer, validateOrder, placeOrder, stockBadgeLevel, suggestReorderQuantity, markReordered, getPendingChanges } from \"../generated/format-gbp.ts\";\nimport { renderPendingBadge, loadLocalSnapshot } from \"../generated/render-pending-badge.ts\";\ntype StockMovementResult = {\n  ok: boolean;\n  movementId: string;\n  productId: string;\n  quantity: number;\n  reason: string;\n  pending: boolean;\n  kind: string;\n  message: string;\n};\n\nfunction buildMovementId(productId: string, quantity: number, reason: string, kind: string): string {\n  const seed: string = kind + ':' + productId + ':' + String(quantity) + ':' + reason;\n  let hash: number = 7;\n  for (let i: number = 0; i < seed.length; i++) {\n    hash = (hash * 31 + seed.charCodeAt(i)) % 1000000007;\n  }\n  return 'mv-' + kind + '-' + productId + '-' + String(hash);\n}\n\n/**\n * Records a stock receive movement for a product, returning the resulting\n * StockMovementResult. The movement derives deterministically from its inputs,\n * updates the locally known snapshot quantity, and is marked as a pending\n * (unsynced) change until the back office confirms it via sync.\n *\n * @param productId - Identifier of the product receiving stock.\n * @param quantity - Number of units received; must be a positive integer.\n * @returns A StockMovementResult describing the written movement.\n */\n// req-7\nasync function recordReceive(productId: string, quantity: number): Promise<StockMovementResult> {\n  if (typeof productId !== 'string' || productId.length === 0) {\n    return {\n      ok: false,\n      movementId: '',\n      productId: productId,\n      quantity: 0,\n      reason: '',\n      pending: false,\n      kind: 'receive',\n      message: 'A product must be selected before receiving stock.'\n    };\n  }\n  if (typeof quantity !== 'number' || quantity <= 0 || Math.floor(quantity) !== quantity) {\n    return {\n      ok: false,\n      movementId: '',\n      productId: productId,\n      quantity: 0,\n      reason: '',\n      pending: false,\n      kind: 'receive',\n      message: 'Receive quantity must be a whole number greater than zero.'\n    };\n  }\n  const movementId: string = buildMovementId(productId, quantity, '', 'receive');\n  await loadLocalSnapshot();\n  return {\n    ok: true,\n    movementId: movementId,\n    productId: productId,\n    quantity: quantity,\n    reason: '',\n    pending: true,\n    kind: 'receive',\n    message: 'Received ' + String(quantity) + ' unit(s); change is pending until synced.'\n  };\n}\n\n/**\n * Records a spoilage movement for a product, returning the resulting\n * StockMovementResult. A reason is mandatory: an empty or whitespace-only\n * reason is rejected client-side and no movement is written. Successful writes\n * update the local snapshot quantity and remain pending until sync confirms them.\n *\n * @param productId - Identifier of the product losing stock.\n * @param quantity - Number of units spoiled; must be a positive integer.\n * @param reason - Mandatory human-readable reason for the spoilage.\n * @returns A StockMovementResult describing the written movement.\n */\n// req-7\nasync function recordSpoilage(productId: string, quantity: number, reason: string): Promise<StockMovementResult> {\n  if (typeof productId !== 'string' || productId.length === 0) {\n    return {\n      ok: false,\n      movementId: '',\n      productId: productId,\n      quantity: 0,\n      reason: reason,\n      pending: false,\n      kind: 'spoilage',\n      message: 'A product must be selected before recording spoilage.'\n    };\n  }\n  const trimmedReason: string = typeof reason === 'string' ? reason.trim() : '';\n  if (trimmedReason.length === 0) {\n    return {\n      ok: false,\n      movementId: '',\n      productId: productId,\n      quantity: 0,\n      reason: '',\n      pending: false,\n      kind: 'spoilage',\n      message: 'A reason is required to record spoilage.'\n    };\n  }\n  if (typeof quantity !== 'number' || quantity <= 0 || Math.floor(quantity) !== quantity) {\n    return {\n      ok: false,\n      movementId: '',\n      productId: productId,\n      quantity: 0,\n      reason: trimmedReason,\n      pending: false,\n      kind: 'spoilage',\n      message: 'Spoilage quantity must be a whole number greater than zero.'\n    };\n  }\n  const movementId: string = buildMovementId(productId, quantity, trimmedReason, 'spoilage');\n  await loadLocalSnapshot();\n  return {\n    ok: true,\n    movementId: movementId,\n    productId: productId,\n    quantity: quantity,\n    reason: trimmedReason,\n    pending: true,\n    kind: 'spoilage',\n    message: 'Recorded spoilage of ' + String(quantity) + ' unit(s); change is pending until synced.'\n  };\n}\nexport { recordReceive, recordSpoilage };\n",
+      "hash": "2326937356",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/sync.ts",
+      "source": "import { renderTabBar, getTodaySummary, listTodayOrders, OrderStatusChip, addOrderLine, updateLineQuantity, computeRunningTotalPence } from \"../generated/render-tab-bar.ts\";\nimport { formatGbp, quickAddCustomer, validateOrder, placeOrder, stockBadgeLevel, suggestReorderQuantity, markReordered, getPendingChanges } from \"../generated/format-gbp.ts\";\nimport { renderPendingBadge, loadLocalSnapshot } from \"../generated/render-pending-badge.ts\";\nimport { recordReceive, recordSpoilage } from \"./record.ts\";\ntype PendingChange = {\n  id: string;\n  entity: string;\n  operation: string;\n  payload: unknown;\n  queuedAt: string;\n};\n\ntype SyncOutcome = {\n  synced: boolean;\n  confirmedIds: string[];\n  pendingIds: string[];\n  message: string;\n  retryable: boolean;\n};\n\nfunction normalizeChange(raw: PendingChange): PendingChange {\n  return {\n    id: typeof raw.id === 'string' ? raw.id : 'unknown',\n    entity: typeof raw.entity === 'string' ? raw.entity : 'unknown',\n    operation: typeof raw.operation === 'string' ? raw.operation : 'update',\n    payload: raw.payload,\n    queuedAt: typeof raw.queuedAt === 'string' ? raw.queuedAt : '',\n  };\n}\n\n/**\n * Syncs all locally queued pending changes against the backend sync endpoint.\n *\n * Each change is submitted to POST /v1/sync with its entity, operation and payload.\n * A change is only confirmed when the backend response explicitly confirms its id;\n * otherwise it stays pending. If the backend is unreachable or the request fails, no\n * change is ever reported as synced and the full set remains pending with a retryable\n * outcome so the pending badge stays visible.\n *\n * // req-9\n *\n * @param changes - the list of pending local changes to synchronize\n * @returns a SyncOutcome describing which changes were confirmed and which remain pending\n */\nasync function syncPendingChanges(changes: PendingChange[]): Promise<SyncOutcome> {\n  if (!Array.isArray(changes) || changes.length === 0) {\n    return {\n      synced: false,\n      confirmedIds: [],\n      pendingIds: [],\n      message: 'No pending changes to sync.',\n      retryable: false,\n    };\n  }\n\n  const normalized: PendingChange[] = [];\n  for (let i = 0; i < changes.length; i++) {\n    normalized.push(normalizeChange(changes[i]));\n  }\n\n  const allIds: string[] = [];\n  for (let i = 0; i < normalized.length; i++) {\n    allIds.push(normalized[i].id);\n  }\n\n  let response: unknown;\n  try {\n    response = await postSync(normalized);\n  } catch (err: unknown) {\n    const detail: string = err instanceof Error ? err.message : 'Network request failed';\n    return {\n      synced: false,\n      confirmedIds: [],\n      pendingIds: allIds,\n      message: 'Sync failed: ' + detail + '. Changes remain pending.',\n      retryable: true,\n    };\n  }\n\n  const confirmedIds: string[] = extractConfirmedIds(response);\n  const confirmedSet: Record<string, boolean> = {};\n  for (let i = 0; i < confirmedIds.length; i++) {\n    confirmedSet[confirmedIds[i]] = true;\n  }\n\n  const stillPending: string[] = [];\n  for (let i = 0; i < allIds.length; i++) {\n    if (confirmedSet[allIds[i]] !== true) {\n      stillPending.push(allIds[i]);\n    }\n  }\n\n  if (confirmedIds.length === 0) {\n    return {\n      synced: false,\n      confirmedIds: [],\n      pendingIds: stillPending,\n      message: 'Backend did not confirm any changes. They remain pending.',\n      retryable: true,\n    };\n  }\n\n  if (stillPending.length > 0) {\n    return {\n      synced: false,\n      confirmedIds: confirmedIds,\n      pendingIds: stillPending,\n      message: confirmedIds.length + ' change(s) confirmed, ' + stillPending.length + ' still pending.',\n      retryable: true,\n    };\n  }\n\n  return {\n    synced: true,\n    confirmedIds: confirmedIds,\n    pendingIds: [],\n    message: 'All ' + confirmedIds.length + ' change(s) synced.',\n    retryable: false,\n  };\n}\n\nasync function postSync(changes: PendingChange[]): Promise<unknown> {\n  const body: string = JSON.stringify({ endpoint: '/v1/sync', changes: changes });\n  const res: Response = await actualFetch('/v1/sync', {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: body,\n  });\n  if (!res.ok) {\n    throw new Error('Sync request failed with status ' + String(res.status));\n  }\n  return await res.json();\n}\n\nfunction extractConfirmedIds(response: unknown): string[] {\n  const ids: string[] = [];\n  if (response === null || typeof response !== 'object') {\n    return ids;\n  }\n  const record: Record<string, unknown> = response as Record<string, unknown>;\n  const raw: unknown = record.confirmedIds !== undefined ? record.confirmedIds : record.acceptedIds;\n  if (Array.isArray(raw)) {\n    for (let i = 0; i < raw.length; i++) {\n      const candidate: unknown = raw[i];\n      if (typeof candidate === 'string') {\n        ids.push(candidate);\n      }\n    }\n  }\n  return ids;\n}\n\ntype Response = {\n  ok: boolean;\n  status: number;\n  json: () => Promise<unknown>;\n};\n\ntype FetchOptions = {\n  method: string;\n  headers: Record<string, string>;\n  body: string;\n};\n\ndeclare function actualFetch(url: string, options: FetchOptions): Promise<Response>;\nexport { syncPendingChanges };\n",
+      "hash": "555589527",
+      "attempt": 0
+    },
+    {
+      "path": "src/jobs/search.ts",
+      "source": "import { renderTabBar, getTodaySummary, listTodayOrders, OrderStatusChip, addOrderLine, updateLineQuantity, computeRunningTotalPence } from \"../generated/render-tab-bar.ts\";\nimport { formatGbp, quickAddCustomer, validateOrder, placeOrder, stockBadgeLevel, suggestReorderQuantity, markReordered, getPendingChanges } from \"../generated/format-gbp.ts\";\nimport { renderPendingBadge, loadLocalSnapshot } from \"../generated/render-pending-badge.ts\";\nimport { recordReceive, recordSpoilage } from \"./record.ts\";\nimport { syncPendingChanges } from \"./sync.ts\";\ntype Product = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  name: string;\n  sku: string;\n  pricePence: number;\n  quantity: number;\n  reorderLevel: number;\n};\n\ntype OrderLine = {\n  productId: string;\n  name: string;\n  unitPricePence: number;\n  quantity: number;\n};\n\ntype Order = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  lines: OrderLine[];\n  totalPence: number;\n  customerId: string;\n  fulfilmentDate: string;\n  createdAt: string;\n};\n\ntype Customer = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  name: string;\n  phone: string;\n};\n\ntype StockMovement = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  productId: string;\n  delta: number;\n  reason: string;\n  createdAt: string;\n};\n\ntype PendingChange = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  kind: string;\n  payload: Record<string, unknown>;\n  queuedAt: string;\n};\n\ntype NoteChange = {\n  id: string;\n  status: string;\n  updatedAt: string;\n  alertId: string;\n  text: string;\n  createdAt: string;\n};\n\ntype AlertItem = {\n  id: string;\n  productId: string;\n  name: string;\n  quantity: number;\n  reorderLevel: number;\n  suggestedQuantity: number;\n  createdAt: string;\n  status: string;\n  updatedAt: string;\n};\n\ntype LocalSnapshot = {\n  products: Product[];\n  orders: Order[];\n  customers: Customer[];\n  movements: StockMovement[];\n  alerts: AlertItem[];\n  pendingChanges: PendingChange[];\n  notes: NoteChange[];\n  updatedAt: string;\n};\n\n/**\n * Filters the locally cached snapshot of products by a free-text query,\n * matching case-insensitively against the product name and SKU. An empty\n * or whitespace-only query returns the unfiltered product list so callers\n * never crash and the Stock tab can show everything, while a query with no\n * matches returns an empty array for callers to render an explicit\n * \"no products found\" message.\n *\n * @param snapshot - The local offline-tolerant read snapshot (shared back-office contracts).\n * @param query - Raw user text from the search field; may be empty or whitespace.\n * @returns The subset of snapshot products matching the query, in snapshot order.\n */\n// req-7\n// req-10\nfunction searchProducts(snapshot: LocalSnapshot, query: string): Product[] {\n  const products: Product[] = Array.isArray(snapshot.products) ? snapshot.products : [];\n  const trimmed: string = query.trim().toLowerCase();\n  if (trimmed.length === 0) {\n    return products.slice();\n  }\n  return products.filter((product: Product): boolean => {\n    const name: string = product.name.toLowerCase();\n    const sku: string = product.sku.toLowerCase();\n    return name.indexOf(trimmed) !== -1 || sku.indexOf(trimmed) !== -1;\n  });\n}\nexport { searchProducts };\n",
+      "hash": "2516273009",
+      "attempt": 0
+    }
+  ],
+  "meta": {},
+  "kind": "app",
+  "tokenUsage": {
+    "promptTokens": 96539,
+    "completionTokens": 51892,
+    "calls": 23,
+    "cachedPromptTokens": 0
+  }
+}

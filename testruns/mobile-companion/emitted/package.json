@@ -1,0 +1,31 @@
+{
+  "name": "crumb-bloom",
+  "version": "0.0.0",
+  "private": false,
+  "type": "module",
+  "description": "# Crumb & Bloom Companion — Mobile App ## What this is A mobile-optimised companion for the Crumb & Bloom back-office. It is a phone-first version of the counte",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/oracle.spec.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "generatedBy": "RapidTool scaffold emitter — machine-generated from RapidTool packet f13debeb-b530-445b-9f52-85b82ad7839e; regenerate, don't hand-edit.",
+  "rapidtool": {
+    "producer": "template",
+    "packetId": "f13debeb-b530-445b-9f52-85b82ad7839e"
+  },
+  "main": "./src/main.ts",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "files": [
+    "src"
+  ]
+}
