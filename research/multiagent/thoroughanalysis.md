@@ -1517,4 +1517,203 @@ WCAG-documented (`styles.css:1-20`); emitted-app tokens are R3/A3 territory · *
 
 **AW47-c06 · P3 · the 332 boundary report's §5 "Owed / reported" list does not name an owner for every item (`fixes/332_0_parent.md` §5).** Items 5 (R11-f01 dev-server bind) and 7 (stale User-scope key) name the **owner**; item 1 names a **product decision**; but items 3 (`run`/`runUntilHitlAsync` expose no `code`), 4 (lexical async limit / un-repaired trees), 6 (`npm run eval` un-refreshed), and 8 (no consumer of persisted spend in `packet.ts`) name **no owner or decision-maker** — a resuming session cannot tell who acts. Recommended: at the next boundary, add an owner/decision-maker to each, or reclassify 4 as a permanent named limit. (File is `fixes/332_*`, outside this audit's edit scope — recorded here.)
 
+## W355 APPEND — the audit/freeze wave (9 read-only lanes + a 2-agent adversarial verification panel)
+
+**Appended:** 2026-10-15 by the W355 wave parent. **HEAD `30bce78` on `main`, dirty tree** (98 modified
++ 32 baseline untracked uncommitted files from an uncommitted "354 wave") — **every number below
+describes the bytes on disk, not a frozen commit.** Evidence base: nine lane reports
+(`355_1_review_pipeline.md` … `355_9_review_selfimprove_runtime.md`) and two panel reports
+(`355_V1_verify_emission_census.md`, `355_V2_verify_proof_security.md`); the wave log is
+`fixes/355_0_audit_wave.md`. Reporting rule observed: a lane finding is stated as a finding only once
+the parent or the panel reproduced it; **refuted** lane claims are recorded as corrections.
+
+**AW355-f01 · P0 · A measurement-integrity failure: a reader change doubled the substantive-tree rate with zero product change.** The uncommitted `fixes/354 A2-F3` change made `treeSubstanceOf`
+census the whole tree (`src/lib/compile-check.server.ts:772-790`) where HEAD was job-scoped. Measured
+(panel, re-derived): a scaffold-only project (`src/main.tsx` + `src/styles.css`) now reads
+`verdict:"real", real:2` (HEAD: `empty`), and on the pinned 13-tree corpus the job-scoped rate is
+**6/13** while the whole-tree non-empty rate is **13/13** — **46% → 100% with no product change**.
+*Why vs the mission:* every later "the output improved" claim rests on this reader; a reader edit must
+never be able to masquerade as progress. *Fix:* restore a job-scoped reading (or publish both readings
+with distinct names, never one number that can be moved by editing the reader). *Verify:* the 13-tree
+corpus must reproduce the same rate before and after any product change.
+
+**AW355-f02 · P0 · The same change silently disarmed a prevention guard (C-06).** The substance driver
+fires only on `verdict==="empty"` (`replay-harness.mjs`); no corpus tree is `empty` any more, so
+`fixtureIntegrity.missed:["C-06"]`. **C-06's defeat is causal to f01, not a separate defect.**
+*Fix:* the guard must read a field that retains the shell-detection signal (a job-scoped census), or
+its driver must key on the job-scoped verdict. *Verify:* `verify-prevention.mjs --all --selftest` →
+`missed:[]` with C-06 firing.
+
+**AW355-f03 · P0 · `underProduced:"refuse"` is inert — a caller asking for refusal still gets files.** The WT `scaffold.ts` default flipped to `"partial"` (`:8535-8536`; HEAD `:4141` default = refuse)
+while `headless.ts:2838` forwards the option only for `"banner"`, so the default and the explicit-refuse
+path both materialize a below-floor partial. Measured: the repo's own test fails
+(`default refuses before writing` → `true !== false`) and a probe materialized 13 entries.
+*Why vs the mission:* a documented safety policy that silently does the opposite is worse than no policy
+(a user shipping an uncleared partial believes it was refused). *Fix:* make `"refuse"` refuse and hold it
+with the existing test. *Verify:* the refuse path writes zero files, keyed and keyless.
+
+**AW355-f04 · P0 · An oracle-emitter change makes a partial emission fail the emitted tree's own tests (but NOT every emission).** The uncommitted emitter replaced `test.skip` with a reachable
+`assert.fail("<id> is NOT IMPLEMENTED")` for unwired rows (`src/lib/scaffold.ts`, WT `:6219` header +
+`:6374`; HEAD `:2813` emitted `test.skip`). Counts: HEAD `test.skip`=14 / `assert.fail`=5 /
+`skipDominated`=6 → WT `test.skip`=4 / `assert.fail`=7 / `skipDominated`=0. Measured: a partial
+emission's own run → `not ok 10 - orc-phase`, `# pass 9 # fail 1`, exit 1.
+**CORRECTION (AW355-c01): "no emission can ever be green" is REFUTED** — a *complete* keyless run emits
+**15/15 pass**. The defect is conditional on an emission carrying an unwired A7 row.
+*Fix:* an unwired row must be honestly *skipped and reported*, not turned into a failing test that
+condemns the whole tree; pair it with a counted, surfaced shortfall. *Verify:* both a partial and a
+complete emission measured under both semantics.
+
+**AW355-f05 · P0 · The proof layer's fixture basis is untracked, so a clean checkout cannot reproduce it.** `git ls-files testruns` → **0** while `testruns/` holds **325 files** (`git status
+--porcelain testruns` → `?? testruns/`), and `scripts/prevention/cassettes/guard-floor.json` — the
+"REVIEWED, immutable" guard-count floor — is also untracked (`??`) while every sibling cassette is
+tracked. The README claims the fixtures are tracked and green on a clean checkout.
+**CORRECTION (AW355-c02): the claim that `guard-floor.json` contains `{countFloor:1, guardIds:[]}` and
+"collapses onto the mutable registry" is REFUTED** — the bytes are `"countFloor": 34` with all **34**
+`guardIds`, and a missing floor is a hard `guard-floor-missing` failure with no registry fallback. The
+defect is narrower and real: *tracking*, not content.
+*Fix (owner decision — this wave cannot commit):* commit the fixture basis + the floor, or declare the
+harness explicitly non-reproducible from a clean checkout and strike the README claim.
+
+**AW355-f06 · P1 · C-14 is permanently pending (an unsatisfiable control).** Its "keyless floor"
+control is built from `testruns/office-stock-tracker/build.json`, whose logs already carry
+`p6.synthesis.attempt` ×6 + `p6.synthesis.refused` ×2, so the fail-closed `p6-arch` probe returns
+`false` for the control too → `mutationRed` can never be true (`replay-harness.mjs` ~`:594`).
+`scripts/guards/gate-invariants.test.mjs:207` asserts the identical unsatisfiable condition.
+*Fix:* build the control from a fixture that genuinely is the keyless floor. *Verify:* C-14 leaves
+`pending`.
+
+**AW355-f07 · P0 · The campaign's proposed ratchet metrics are partly GAMEABLE — measured.** (a) the
+substantive-tree rate (f01: a reader edit); (b) the acceptance `ok` rate — keyed runs default to a
+**1-case** sample (`run-eval.mjs:3285`), the grader freeze is **in-run only** so a grader-JSON edit flips
+a case green, and the record's `stale:true` flag is **dropped by the parser** (`rapidtool-cli.mjs:3363`)
+so a stale reading is consumed as current; (c) the guard `missed`/`pending` count — disarmable by
+editing untracked fixtures (f05). **CORRECTION (AW355-c03): "`--limit=1` picks the cheapest case" is
+REFUTED** — entry selection is `readdirSync().sort().slice(0,cap)`, alphabetical, with no cost ordering.
+Tree-own-`tsc` and `productQuality.quality` were judged not cheaply gameable.
+*Why vs the mission:* the campaign's entire notion of "improving" is these numbers.
+*Fix:* the ratchet must pin each metric with an independent producer and a canary that fails if the
+reader changes (see `scripts/quality-ratchet.mjs`, Wave 1).
+
+**AW355-f08 · P1 · With auth enabled, 16 of 17 server-function endpoints are unguarded.** Verified
+census: **17 real `createServerFn` invocations across 10 files**, with exactly **one**
+`.middleware([authMiddleware])` (`src/lib/auth/account.ts:29`); the parent's raw grep said 19/12 and the
+panel corrected it (`client.server.ts:278` is a string literal, `auth/middleware.ts:14` a doc comment).
+**Honest scope:** *not* exploitable by default (`VITE_AUTH_ENABLED=false` → deliberate single-user
+`dev-user`); **exploitable when auth is enabled**, where an unauthenticated client reaches `exec.ts`
+code execution and LLM key spend. *Fix:* guard every client-callable endpoint, or make the auth-on mode
+refuse to start with unguarded endpoints (fail closed). *Verify:* a signed-out request is rejected on
+each endpoint with auth on.
+
+**AW355-f09 · P1 · `doctor --project <file>` is refused as an unknown flag** although the arm consumes
+it (`rapidtool-cli.mjs:275-285` vs `:1419`, `:5731`), breaking the pre-existing E-25 test.
+*Fix:* accept the documented flag. *Verify:* the test passes.
+
+**AW355-f10 · P1 · The provider returns `ok:true` for a truncated reply.** `finishClass`/`lengthNote`
+exist only inside the empty-content guard (`deepseek.ts:705,712-718,742`); the success return
+(`:749-751`) never inspects `finish_reason`, and `LlmResult`'s ok-arm (`llm.ts:62-70`) has no truncation
+field. **CORRECTION (AW355-c04): severity REFUTED for P6** — `parseSynthesisEnvelope` re-detects
+truncated JSON via `jsonScan` and refuses/re-asks (`codegen.server.ts:7180-7208`), so the synthesis path
+does not silently accept it. *Fix:* carry truncation on the ok-arm so every consumer can decide.
+*Verify:* a `length` reply is reported as truncated.
+
+**AW355-f11 · P1 · Orchestration is a phase counter, not a delegation graph; no seat schedules a seat.**
+"Who next" is only `currentPhase + 1` and `roles[idx + 1]`; `crew.server.ts:539` is explicitly a non-LLM
+router. *Fix:* Wave 4's `bus`/`dispatch` lanes. *Verify:* an attributable message that a consumer acts on.
+
+**AW355-f12 · P1 · No per-project agent message bus exists (parent-verified independently).** Zero
+matches for `messageBus|MessageBus|mailbox|pubsub|messageQueue|outbox` across non-test `src/**`. The
+telemetry currency physically cannot carry one (`rt-events.ts`: ≤8 flat keys ≤160 chars, redacted, never
+parsed). *Fix:* Wave 4's `bus` lane (a new project-scoped, append-only channel with `RT_E_*` outcomes and
+provenance). *Verify:* a consumer that changes behavior from a received message.
+
+**AW355-f13 · P1 · Function calling is live in the API and unused in the tree (parent-verified
+independently).** `tools`/`tool_choice` → 0 matches in both provider bodies
+(`providers/deepseek.ts:576-604`, `openai-compatible.ts`), though `research/deepseek-api.md` §4e
+live-verified it. *Fix:* Wave 4's `tools` lane. *Verify:* a schema-validated tool call loop, ledgered.
+
+**AW355-f14 · P1 · Context assembly is wildly uneven across seats.** P6 synthesis: 60,000 chars /
+32,000 tokens (`codegen.server.ts:292,184`). The judge that decides phase progress: 6,000 chars in /
+**320 tokens** out (`wild-mode.server.ts:42`). The run planner: **three lines** (`headless.ts:6589-6593`).
+Oracle generation: **no `maxTokens`** at all (`verify.server.ts:1857`).
+*Why vs the mission:* an under-contexted judge is a structural source of bad gate decisions.
+*Fix:* Wave 4's `context` lane. *Verify:* each seat's pack reproducible from the project alone.
+
+**AW355-f15 · P1 · Self-modification is unreachable.** All six `selfmod.server.ts` entry points have
+zero production callers and the 39-verb CLI has no `selfmod` arm; the guardrails are real and fail-closed,
+and a hostile brief cannot reach a selfmod/git/patch write. *Fix:* Wave 4/6 — mount it behind its own
+guardrails. *Verify:* a bounded, diff-reviewed, reversible self-edit path with the existing bounds
+enforced.
+
+**AW355-f16 · P1 · The learning loop is open at the join.** The *injection* half is genuinely closed
+(lesson → `selectLessons` → P6 prompts). Open: curation (consolidation/demotion/pressure) is test-only;
+the defect→repair class loop is test-only **and its header claims prompt injection that `file:line`
+refutes**; nothing reads `eval-out/results.json|history.json` back into any prompt; and
+`iterateToSatisfaction` — the bounded improvement driver — has **no production caller** (parent-verified:
+it appears only at `iterate.ts:315` + `iterate.test.ts`). Run-level learning is **failure-only**
+(`runSummaryLesson` → `null` on a clean run), while success *is* learned at the verify level.
+*Fix:* Wave 5's `lessons`/`memory`/`bench` lanes. *Verify:* a documented case where a lesson from run N
+measurably changed run N+1 above the sample's variance.
+
+**AW355-f17 · P2 · Scoring is partly hollow-earnable.** `maker-score`'s behavioral branch is dead in
+production (the only non-test `scoreMaker` call, `run-eval.mjs:2344`, passes no `behavioral`), leaving
+identifier-substring scores. **CORRECTION (AW355-c05): "M1/M2 are both substring scores" is partly
+REFUTED** — M2 is a green tree-run verdict (`:525-548`). Also: `judgePhase` has no caller;
+`compaction`/`plugin`/`arch-tools`/`vector` are dead; 38 declared event names are never emitted; the
+engine does not guard its own telemetry sink (purity is producer-provided, not engine-enforced).
+*Fix:* Wave 5's `algo`/`evals` lanes.
+
+**AW355-f18 · P2 · Kind coverage is thinner than the mission implies.** Every kind has a real
+per-kind emit path, but tool/service/library each have **one** corpus case and all three failed their own
+`tsc` at the last measurement. **Claimed-but-unproven: tool, service, library.**
+*Fix:* Wave 3 — a per-kind corpus with a real runnable artifact per kind.
+
+**AW355-f19 · P1 · Documentation truth: 19 of 34 checkable claims are stale or false**, each sitting in
+its own newest count block (`AGENTS.md:243-246`: 2,014/256/244/107/761; `README.md:454-456`/`:634`/`:730`;
+`docs-FOLDER-MAP.md:18-20`: 1,933/…/49). Only `START-HERE.md` was refreshed by the 354 wave.
+`AGENTS.md:347-348` is false and unstruck ("`resumeAccepted` not yet consumed … `grep … = 0`") —
+**parent-verified: 7 hits** in `codegen.server.ts`. And **13 live `RT_E_*` codes are raised but
+undocumented** (4 in `selfmod.ts`, 4 in `runlock-preflight.mjs`, 2 in `readme-parity.mjs`, 1 in
+`factory-watch.mjs`) against `AGENTS.md:105-106`'s "every surfaced failure carries a code … from
+`ERROR_CODE_DOC`". *Fix:* Wave 1/2 `docs-ledger`. *Verify:* the claim-count reader at 0 mismatches.
+
+**AW355-f20 · P2 · The red baseline, classified (20 items).** **Source-wrong 14 · test-wrong 6 ·
+environment 0.** Test-wrong (drift, dirty tree only): `headless.test.ts:5999` (`steps?: number` is
+optional by design), `scaffold.test.ts:2712/2719` (no union narrowing in `okFiles()`),
+`wild-step.test.ts:1399/1415` (the `wildFixture` helper narrowed to 3 of 6 `PhaseStatus` values), plus
+test 367 (its `keylessNoTree` fixture keeps 8 `p6.synthesis.*` rows, newest `refused`, so it is not the
+keyless floor it claims). Source-wrong: 163/164 (stale `src/lib/auth/*` allowlist), 204/216/217/246 +
+345/407/415 (f01/f04), 233 (hard-coded `capture:"…:455"` vs the real `:519`), 208 (a new
+`terminalStatusOf` renaming `summary.status`), 585 (a new `TS2339` in the typecheck ratchet), 586 (red
+only because leg 1 carries the 5 type errors).
+
+**AW355-f21 · P0 (method) · The audit must audit itself.** Corrections c01–c05 above are five lane
+overclaims caught by a 2-agent adversarial panel **before any fix was dispatched**; one lane also used a
+non-discriminating probe (`orc-phase` reads 0 in both HEAD and the working tree, so it proved nothing),
+and the parent repeated a stale claim from `wildmode-diagnosis.md:163-165` (the redactor bug is FIXED on
+the bytes: `node-runner.server.ts:449-452` requires `apiKey.trim().length > 0`). Mandate going forward:
+**every absence claim carries its zero-result query; every severity claim carries a reproduction; and a
+refuted claim is recorded as a correction, never silently dropped.**
+
+**AW355-f22 · P1 (register hygiene) · This register's own protocol header is stale.** It still reads
+"NO KEYED CALLS (the DeepSeek account is unfunded — all calls 402)" while the repo's own dated
+corrections record the account as **funded and the key as working** (the earlier 401/402s were a stale
+ambient key, not funding). A stale rule in the file that governs the audit is itself a finding.
+Owner action: amend the header's rule 5 to the corrected standing rule (bounded keyed calls only, each
+reported with measured usage; never fake model text), not to delete it.
+
+### Genuinely sound (do not break these) — recorded per the wave's honesty rule
+
+- **Key resolution precedence holds 12/12** across the four documented cases × three surfaces (`.env`
+  wins over a differing ambient; present-but-blank = intentional keyless; identical = no conflict;
+  absent → `.env`).
+- **Seat provenance and cost honesty are real and test-pinned:** no machine path mints
+  `decidedBy:"human"`; `fleetMetrics.estimatedCostUsd` stays `null` and trips an alarm if fabricated.
+- **Telemetry purity holds in practice** (bounded 200-row / 64 KB ring, redacted rows, never-throwing
+  producers); the gap is only that the engine does not enforce it at its own sink.
+- **The self-modification guardrails are real and fail-closed.**
+- **643 tests across 23 of the audited modules' suites → 634 pass / 0 fail / 9 skipped.**
+- **The keyless proof layer is a genuine design**: 34 guards, a `countFloor` anti-deletion rule, and a
+  two-signal (fixture-integrity × fix-presence) contract. Its defects are execution defects (f02, f05,
+  f06), not a wrong idea.
+
 <!-- END-OF-FILE-MARKER-W25 · every lane appends ABOVE this line · never edit or delete this line -->
